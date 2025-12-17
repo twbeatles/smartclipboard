@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
     QLabel, QHeaderView, QAbstractItemView, QMessageBox, QSplitter,
     QSystemTrayIcon, QMenu, QStackedWidget, QSizePolicy, QStyle,
     QMenuBar, QFileDialog, QComboBox, QDialog, QFormLayout, QSpinBox,
-    QCheckBox, QTabWidget, QGroupBox, QSlider, QFrame
+    QCheckBox, QTabWidget, QGroupBox, QSlider, QFrame, QInputDialog
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer, 
@@ -150,6 +150,23 @@ class ClipboardDB:
                     value TEXT
                 )
             """)
+            # 복사 규칙 테이블
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS copy_rules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    pattern TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    replacement TEXT DEFAULT '',
+                    enabled INTEGER DEFAULT 1,
+                    priority INTEGER DEFAULT 0
+                )
+            """)
+            # tags 컬럼 추가 (기존 테이블 마이그레이션)
+            try:
+                cursor.execute("ALTER TABLE history ADD COLUMN tags TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # 이미 존재하는 경우
             self.conn.commit()
             logger.info("DB 테이블 초기화 완료")
         except sqlite3.Error as e:
@@ -191,7 +208,9 @@ class ClipboardDB:
                     sql += " AND content LIKE ?"
                     params.append(f"%{search_query}%")
                 
-                if type_filter != "전체":
+                if type_filter == "📌 고정":
+                    sql += " AND pinned = 1"
+                elif type_filter != "전체":
                     tag_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
                     target_tag = tag_map.get(type_filter, "TEXT")
                     sql += " AND type = ?"
@@ -331,7 +350,8 @@ class ClipboardDB:
                 cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
                 result = cursor.fetchone()
                 return result[0] if result else default
-            except sqlite3.Error:
+            except sqlite3.Error as e:
+                logger.debug(f"Setting get error: {e}")
                 return default
 
     def set_setting(self, key, value):
@@ -359,6 +379,109 @@ class ClipboardDB:
         except sqlite3.Error as e:
             logger.error(f"DB Cleanup Error: {e}")
 
+    # --- 태그 관련 메서드 ---
+    def get_item_tags(self, item_id):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT tags FROM history WHERE id = ?", (item_id,))
+                result = cursor.fetchone()
+                return result[0] if result and result[0] else ""
+            except sqlite3.Error:
+                return ""
+    
+    def set_item_tags(self, item_id, tags):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET tags = ? WHERE id = ?", (tags, item_id))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Tag Update Error: {e}")
+    
+    def get_all_tags(self):
+        """모든 고유 태그 목록 반환"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT DISTINCT tags FROM history WHERE tags != '' AND tags IS NOT NULL")
+                all_tags = set()
+                for (tags_str,) in cursor.fetchall():
+                    for tag in tags_str.split(','):
+                        tag = tag.strip()
+                        if tag:
+                            all_tags.add(tag)
+                return sorted(all_tags)
+            except sqlite3.Error:
+                return []
+
+    def get_items_by_tag(self, tag):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id, content, type, timestamp, pinned, use_count FROM history WHERE tags LIKE ? ORDER BY pinned DESC, id DESC", (f"%{tag}%",))
+                return cursor.fetchall()
+            except sqlite3.Error:
+                return []
+
+    # --- 통계 관련 메서드 ---
+    def get_today_count(self):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                today = datetime.date.today().strftime("%Y-%m-%d")
+                cursor.execute("SELECT COUNT(*) FROM history WHERE timestamp LIKE ?", (f"{today}%",))
+                result = cursor.fetchone()
+                return result[0] if result else 0
+            except sqlite3.Error:
+                return 0
+    
+    def get_top_items(self, limit=5):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT content, use_count FROM history WHERE type != 'IMAGE' AND use_count > 0 ORDER BY use_count DESC LIMIT ?", (limit,))
+                return cursor.fetchall()
+            except sqlite3.Error:
+                return []
+
+    # --- 복사 규칙 메서드 ---
+    def get_copy_rules(self):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id, name, pattern, action, replacement, enabled, priority FROM copy_rules ORDER BY priority DESC")
+                return cursor.fetchall()
+            except sqlite3.Error:
+                return []
+    
+    def add_copy_rule(self, name, pattern, action, replacement=""):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("INSERT INTO copy_rules (name, pattern, action, replacement) VALUES (?, ?, ?, ?)", (name, pattern, action, replacement))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Rule Add Error: {e}")
+    
+    def toggle_copy_rule(self, rule_id, enabled):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE copy_rules SET enabled = ? WHERE id = ?", (enabled, rule_id))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Rule Toggle Error: {e}")
+    
+    def delete_copy_rule(self, rule_id):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM copy_rules WHERE id = ?", (rule_id,))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Rule Delete Error: {e}")
+
     def close(self):
         if self.conn:
             self.conn.close()
@@ -383,6 +506,10 @@ class HotkeyListener(QThread):
 
     def stop(self):
         self._running = False
+        try:
+            keyboard.remove_hotkey(HOTKEY)
+        except Exception as e:
+            logger.debug(f"Hotkey remove: {e}")
 
 
 # --- 설정 다이얼로그 ---
@@ -526,6 +653,363 @@ class SnippetDialog(QDialog):
             QMessageBox.critical(self, "오류", "스니펫 저장에 실패했습니다.")
 
 
+# --- 스니펫 관리자 다이얼로그 ---
+class SnippetManagerDialog(QDialog):
+    def __init__(self, parent, db):
+        super().__init__(parent)
+        self.db = db
+        self.parent_window = parent
+        self.setWindowTitle("📝 스니펫 관리")
+        self.setMinimumSize(550, 450)
+        self.init_ui()
+        self.load_snippets()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        
+        # 상단 버튼
+        btn_layout = QHBoxLayout()
+        btn_add = QPushButton("➕ 새 스니펫")
+        btn_add.clicked.connect(self.add_snippet)
+        btn_layout.addWidget(btn_add)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        
+        # 스니펫 테이블
+        self.table = QTableWidget()
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["이름", "카테고리", "내용 미리보기"])
+        
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 120)
+        self.table.setColumnWidth(1, 80)
+        
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.cellDoubleClicked.connect(self.use_snippet)
+        layout.addWidget(self.table)
+        
+        # 하단 버튼
+        bottom_layout = QHBoxLayout()
+        btn_use = QPushButton("📋 사용")
+        btn_use.clicked.connect(self.use_snippet)
+        btn_delete = QPushButton("🗑️ 삭제")
+        btn_delete.clicked.connect(self.delete_snippet)
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(self.close)
+        
+        bottom_layout.addWidget(btn_use)
+        bottom_layout.addWidget(btn_delete)
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(btn_close)
+        layout.addLayout(bottom_layout)
+    
+    def load_snippets(self):
+        snippets = self.db.get_snippets()
+        self.table.setRowCount(0)
+        
+        for row_idx, (sid, name, content, shortcut, category) in enumerate(snippets):
+            self.table.insertRow(row_idx)
+            
+            name_item = QTableWidgetItem(name)
+            name_item.setData(Qt.ItemDataRole.UserRole, sid)
+            self.table.setItem(row_idx, 0, name_item)
+            
+            cat_item = QTableWidgetItem(category)
+            cat_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row_idx, 1, cat_item)
+            
+            preview = content.replace('\n', ' ')[:50] + ("..." if len(content) > 50 else "")
+            self.table.setItem(row_idx, 2, QTableWidgetItem(preview))
+    
+    def add_snippet(self):
+        dialog = SnippetDialog(self, self.db)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.load_snippets()
+    
+    def get_selected_id(self):
+        rows = self.table.selectionModel().selectedRows()
+        if rows:
+            return self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+        return None
+    
+    def use_snippet(self):
+        sid = self.get_selected_id()
+        if not sid:
+            return
+        snippets = self.db.get_snippets()
+        for s in snippets:
+            if s[0] == sid:
+                content = s[2]
+                # 템플릿 변수 치환
+                content = self.process_template(content)
+                clipboard = QApplication.clipboard()
+                clipboard.setText(content)
+                self.parent_window.statusBar().showMessage("✅ 스니펫이 클립보드에 복사되었습니다.", 2000)
+                self.close()
+                break
+    
+    def process_template(self, text):
+        """템플릿 변수 치환"""
+        import random
+        import string
+        
+        now = datetime.datetime.now()
+        
+        # 기본 변수
+        text = text.replace("{{date}}", now.strftime("%Y-%m-%d"))
+        text = text.replace("{{time}}", now.strftime("%H:%M:%S"))
+        text = text.replace("{{datetime}}", now.strftime("%Y-%m-%d %H:%M:%S"))
+        
+        # 클립보드 변수
+        if "{{clipboard}}" in text:
+            current_clip = QApplication.clipboard().text() or ""
+            text = text.replace("{{clipboard}}", current_clip)
+        
+        # 랜덤 변수 {{random:N}}
+        import re
+        random_pattern = r'\{\{random:(\d+)\}\}'
+        matches = re.findall(random_pattern, text)
+        for match in matches:
+            length = int(match)
+            random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+            text = re.sub(r'\{\{random:' + match + r'\}\}', random_str, text, count=1)
+        
+        return text
+    
+    def delete_snippet(self):
+        sid = self.get_selected_id()
+        if sid:
+            reply = QMessageBox.question(
+                self, "삭제 확인", 
+                "이 스니펫을 삭제하시겠습니까?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.db.delete_snippet(sid)
+                self.load_snippets()
+
+
+# --- 태그 편집 다이얼로그 ---
+class TagEditDialog(QDialog):
+    def __init__(self, parent, db, item_id, current_tags=""):
+        super().__init__(parent)
+        self.db = db
+        self.item_id = item_id
+        self.setWindowTitle("🏷️ 태그 편집")
+        self.setMinimumWidth(350)
+        self.init_ui(current_tags)
+    
+    def init_ui(self, current_tags):
+        layout = QVBoxLayout(self)
+        
+        info_label = QLabel("쉼표로 구분하여 태그를 입력하세요:")
+        layout.addWidget(info_label)
+        
+        self.tag_input = QLineEdit()
+        self.tag_input.setText(current_tags)
+        self.tag_input.setPlaceholderText("예: 업무, 중요, 코드")
+        layout.addWidget(self.tag_input)
+        
+        # 자주 사용하는 태그 버튼
+        common_tags = ["업무", "개인", "중요", "임시", "코드", "링크"]
+        tag_btn_layout = QHBoxLayout()
+        for tag in common_tags:
+            btn = QPushButton(tag)
+            btn.setMaximumWidth(60)
+            btn.clicked.connect(lambda checked, t=tag: self.add_tag(t))
+            tag_btn_layout.addWidget(btn)
+        layout.addLayout(tag_btn_layout)
+        
+        btn_layout = QHBoxLayout()
+        btn_save = QPushButton("저장")
+        btn_save.clicked.connect(self.accept)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.clicked.connect(self.reject)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_save)
+        btn_layout.addWidget(btn_cancel)
+        layout.addLayout(btn_layout)
+    
+    def add_tag(self, tag):
+        current = self.tag_input.text().strip()
+        tags = [t.strip() for t in current.split(',') if t.strip()]
+        if tag not in tags:
+            tags.append(tag)
+        self.tag_input.setText(', '.join(tags))
+    
+    def get_tags(self):
+        return self.tag_input.text().strip()
+
+
+# --- 히스토리 통계 다이얼로그 ---
+class StatisticsDialog(QDialog):
+    def __init__(self, parent, db):
+        super().__init__(parent)
+        self.db = db
+        self.setWindowTitle("📊 히스토리 통계")
+        self.setMinimumSize(450, 400)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        stats = self.db.get_statistics()
+        
+        # 요약 카드
+        summary_frame = QFrame()
+        summary_frame.setStyleSheet("background-color: #16213e; border-radius: 8px; padding: 10px;")
+        summary_layout = QHBoxLayout(summary_frame)
+        
+        total_label = QLabel(f"📋 총 항목\n{stats['total']}")
+        total_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        total_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        
+        pinned_label = QLabel(f"📌 고정\n{stats['pinned']}")
+        pinned_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pinned_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        
+        today_count = self.db.get_today_count()
+        today_label = QLabel(f"📅 오늘\n{today_count}")
+        today_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        today_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        
+        summary_layout.addWidget(total_label)
+        summary_layout.addWidget(pinned_label)
+        summary_layout.addWidget(today_label)
+        layout.addWidget(summary_frame)
+        
+        # 유형별 통계
+        type_group = QGroupBox("📊 유형별 분포")
+        type_layout = QVBoxLayout(type_group)
+        type_icons = {"TEXT": "📝 텍스트", "LINK": "🔗 링크", "IMAGE": "🖼️ 이미지", "CODE": "💻 코드", "COLOR": "🎨 색상"}
+        for type_key, count in stats.get('by_type', {}).items():
+            label = QLabel(f"{type_icons.get(type_key, type_key)}: {count}개")
+            type_layout.addWidget(label)
+        if not stats.get('by_type'):
+            type_layout.addWidget(QLabel("데이터 없음"))
+        layout.addWidget(type_group)
+        
+        # Top 5 자주 복사
+        top_group = QGroupBox("🔥 자주 복사한 항목 Top 5")
+        top_layout = QVBoxLayout(top_group)
+        top_items = self.db.get_top_items(5)
+        for idx, (content, use_count) in enumerate(top_items, 1):
+            preview = content[:40] + "..." if len(content) > 40 else content
+            preview = preview.replace('\n', ' ')
+            label = QLabel(f"{idx}. {preview} ({use_count}회)")
+            top_layout.addWidget(label)
+        if not top_items:
+            top_layout.addWidget(QLabel("사용 기록 없음"))
+        layout.addWidget(top_group)
+        
+        # 닫기 버튼
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(self.close)
+        layout.addWidget(btn_close)
+
+
+# --- 복사 규칙 다이얼로그 ---
+class CopyRulesDialog(QDialog):
+    def __init__(self, parent, db):
+        super().__init__(parent)
+        self.db = db
+        self.setWindowTitle("⚙️ 복사 규칙 관리")
+        self.setMinimumSize(550, 400)
+        self.init_ui()
+        self.load_rules()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # 상단 버튼
+        btn_layout = QHBoxLayout()
+        btn_add = QPushButton("➕ 규칙 추가")
+        btn_add.clicked.connect(self.add_rule)
+        btn_layout.addWidget(btn_add)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        
+        # 규칙 테이블
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["활성", "이름", "패턴", "동작"])
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(1, 100)
+        self.table.setColumnWidth(3, 80)
+        self.table.verticalHeader().setVisible(False)
+        layout.addWidget(self.table)
+        
+        # 하단 버튼
+        bottom_layout = QHBoxLayout()
+        btn_delete = QPushButton("🗑️ 삭제")
+        btn_delete.clicked.connect(self.delete_rule)
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(self.close)
+        bottom_layout.addWidget(btn_delete)
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(btn_close)
+        layout.addLayout(bottom_layout)
+    
+    def load_rules(self):
+        rules = self.db.get_copy_rules()
+        self.table.setRowCount(0)
+        for row_idx, (rid, name, pattern, action, replacement, enabled, priority) in enumerate(rules):
+            self.table.insertRow(row_idx)
+            
+            # 활성화 체크박스
+            cb = QCheckBox()
+            cb.setChecked(enabled == 1)
+            cb.stateChanged.connect(lambda state, r=rid: self.toggle_rule(r, state))
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self.table.setCellWidget(row_idx, 0, cb_widget)
+            
+            name_item = QTableWidgetItem(name)
+            name_item.setData(Qt.ItemDataRole.UserRole, rid)
+            self.table.setItem(row_idx, 1, name_item)
+            self.table.setItem(row_idx, 2, QTableWidgetItem(pattern))
+            self.table.setItem(row_idx, 3, QTableWidgetItem(action))
+    
+    def add_rule(self):
+        name, ok = QInputDialog.getText(self, "규칙 추가", "규칙 이름:")
+        if not ok or not name.strip():
+            return
+        pattern, ok = QInputDialog.getText(self, "규칙 추가", "패턴 (정규식):")
+        if not ok or not pattern.strip():
+            return
+        actions = ["trim", "lowercase", "uppercase", "remove_newlines"]
+        action, ok = QInputDialog.getItem(self, "규칙 추가", "동작:", actions, 0, False)
+        if ok:
+            self.db.add_copy_rule(name.strip(), pattern.strip(), action)
+            self.load_rules()
+    
+    def toggle_rule(self, rule_id, state):
+        self.db.toggle_copy_rule(rule_id, 1 if state else 0)
+    
+    def delete_rule(self):
+        rows = self.table.selectionModel().selectedRows()
+        if rows:
+            rid = self.table.item(rows[0].row(), 1).data(Qt.ItemDataRole.UserRole)
+            self.db.delete_copy_rule(rid)
+            self.load_rules()
+
+
 # --- 메인 윈도우 ---
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -586,6 +1070,7 @@ class MainWindow(QMainWindow):
     def quit_app(self):
         try:
             self.hotkey_thread.stop()
+            self.hotkey_thread.wait(1000)  # 최대 1초 대기
             keyboard.unhook_all()
         except Exception as e:
             logger.warning(f"Cleanup warning: {e}")
@@ -704,6 +1189,9 @@ class MainWindow(QMainWindow):
         QTableWidget::item:selected {{
             background-color: {theme["primary"]};
             color: white;
+        }}
+        QTableWidget::item:hover {{
+            background-color: {theme["surface_variant"]};
         }}
         QHeaderView::section {{ 
             background-color: {theme["surface_variant"]}; 
@@ -852,9 +1340,21 @@ class MainWindow(QMainWindow):
         action_clear = QAction("🗑️ 기록 전체 삭제", self)
         action_clear.triggered.connect(self.clear_all_history)
         edit_menu.addAction(action_clear)
+        
+        edit_menu.addSeparator()
+        
+        action_snippets = QAction("📝 스니펫 관리...", self)
+        action_snippets.triggered.connect(self.show_snippet_manager)
+        edit_menu.addAction(action_snippets)
 
         # 보기 메뉴
         view_menu = menubar.addMenu("보기")
+        
+        action_stats = QAction("📊 히스토리 통계...", self)
+        action_stats.triggered.connect(self.show_statistics)
+        view_menu.addAction(action_stats)
+        
+        view_menu.addSeparator()
         
         self.action_ontop = QAction("📌 항상 위 고정", self, checkable=True)
         self.action_ontop.setChecked(True)
@@ -881,6 +1381,10 @@ class MainWindow(QMainWindow):
         
         settings_menu.addSeparator()
         
+        action_rules = QAction("⚙️ 복사 규칙 관리...", self)
+        action_rules.triggered.connect(self.show_copy_rules)
+        settings_menu.addAction(action_rules)
+        
         action_settings = QAction("⚙️ 설정...", self)
         action_settings.triggered.connect(self.show_settings)
         settings_menu.addAction(action_settings)
@@ -889,6 +1393,9 @@ class MainWindow(QMainWindow):
         self.current_theme = theme_key
         self.db.set_setting("theme", theme_key)
         self.apply_theme()
+        if hasattr(self, 'tray_menu'):
+            self.update_tray_theme()
+        self.load_data()  # 테마 변경 시 테이블 색상 반영
         self.statusBar().showMessage(f"✅ 테마 변경: {THEMES[theme_key]['name']}", 2000)
 
     def show_settings(self):
@@ -898,6 +1405,60 @@ class MainWindow(QMainWindow):
             if new_theme != self.current_theme:
                 self.change_theme(new_theme)
             self.statusBar().showMessage("✅ 설정이 저장되었습니다.", 2000)
+
+    def show_snippet_manager(self):
+        """스니펫 관리 창 표시"""
+        dialog = SnippetManagerDialog(self, self.db)
+        dialog.exec()
+
+    def show_statistics(self):
+        """히스토리 통계 창 표시"""
+        dialog = StatisticsDialog(self, self.db)
+        dialog.exec()
+
+    def show_copy_rules(self):
+        """복사 규칙 관리 창 표시"""
+        dialog = CopyRulesDialog(self, self.db)
+        dialog.exec()
+
+    def edit_tag(self):
+        """선택 항목 태그 편집"""
+        pid = self.get_selected_id()
+        if not pid:
+            return
+        current_tags = self.db.get_item_tags(pid)
+        dialog = TagEditDialog(self, self.db, pid, current_tags)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_tags = dialog.get_tags()
+            self.db.set_item_tags(pid, new_tags)
+            self.statusBar().showMessage("✅ 태그가 저장되었습니다.", 2000)
+
+    def merge_selected(self):
+        """선택된 여러 항목 병합"""
+        rows = self.table.selectionModel().selectedRows()
+        if len(rows) < 2:
+            QMessageBox.information(self, "알림", "병합하려면 2개 이상의 항목을 선택하세요.")
+            return
+        
+        # 구분자 선택
+        separators = {"줄바꿈": "\n", "콤마": ", ", "공백": " ", "탭": "\t"}
+        sep_name, ok = QInputDialog.getItem(self, "병합", "구분자 선택:", list(separators.keys()), 0, False)
+        if not ok:
+            return
+        
+        separator = separators[sep_name]
+        contents = []
+        for row_idx in sorted([r.row() for r in rows]):
+            pid = self.table.item(row_idx, 0).data(Qt.ItemDataRole.UserRole)
+            data = self.db.get_content(pid)
+            if data and data[2] != "IMAGE":
+                contents.append(data[0])
+        
+        if contents:
+            merged = separator.join(contents)
+            self.is_internal_copy = True
+            self.clipboard.setText(merged)
+            self.statusBar().showMessage(f"✅ {len(contents)}개 항목 병합 완료", 2000)
 
     def init_ui(self):
         central_widget = QWidget()
@@ -911,8 +1472,8 @@ class MainWindow(QMainWindow):
         top_layout.setSpacing(10)
         
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["전체", "텍스트", "이미지", "링크", "코드", "색상"])
-        self.filter_combo.setFixedWidth(110)
+        self.filter_combo.addItems(["전체", "📌 고정", "텍스트", "이미지", "링크", "코드", "색상"])
+        self.filter_combo.setFixedWidth(120)
         self.filter_combo.currentTextChanged.connect(self.load_data)
         
         self.search_input = QLineEdit()
@@ -948,7 +1509,7 @@ class MainWindow(QMainWindow):
         self.table.verticalHeader().setDefaultSectionSize(36)
         
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # 다중 선택 지원
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
         self.table.itemSelectionChanged.connect(self.on_selection_changed)
@@ -997,6 +1558,16 @@ class MainWindow(QMainWindow):
         self.btn_strip.setObjectName("ToolBtn")
         self.btn_strip.setToolTip("공백 제거")
         self.btn_strip.clicked.connect(lambda: self.transform_text("strip"))
+        
+        self.btn_normalize = QPushButton("📋")
+        self.btn_normalize.setObjectName("ToolBtn")
+        self.btn_normalize.setToolTip("줄바꿈 정리")
+        self.btn_normalize.clicked.connect(lambda: self.transform_text("normalize"))
+        
+        self.btn_json = QPushButton("{ }")
+        self.btn_json.setObjectName("ToolBtn")
+        self.btn_json.setToolTip("JSON 포맷팅")
+        self.btn_json.clicked.connect(lambda: self.transform_text("json"))
 
         self.tools_layout.addWidget(self.btn_save_img)
         self.tools_layout.addWidget(self.btn_google)
@@ -1005,6 +1576,8 @@ class MainWindow(QMainWindow):
         self.tools_layout.addWidget(self.btn_upper)
         self.tools_layout.addWidget(self.btn_lower)
         self.tools_layout.addWidget(self.btn_strip)
+        self.tools_layout.addWidget(self.btn_normalize)
+        self.tools_layout.addWidget(self.btn_json)
         detail_layout.addLayout(self.tools_layout)
 
         # 상세 보기 스택
@@ -1061,25 +1634,35 @@ class MainWindow(QMainWindow):
         self.tray_icon.setIcon(self.app_icon)
         self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION}")
         
-        tray_menu = QMenu()
-        tray_menu.setStyleSheet("""
-            QMenu { background-color: #1a1a2e; color: #eaeaea; border: 1px solid #2a2a4a; padding: 5px; }
-            QMenu::item { padding: 8px 20px; }
-            QMenu::item:selected { background-color: #e94560; }
-        """)
+        self.tray_menu = QMenu()
+        self.update_tray_theme()
         
         show_action = QAction("📋 열기", self)
         show_action.triggered.connect(self.show_window_from_tray)
         quit_action = QAction("❌ 종료", self)
         quit_action.triggered.connect(self.quit_app)
         
-        tray_menu.addAction(show_action)
-        tray_menu.addSeparator()
-        tray_menu.addAction(quit_action)
+        self.tray_menu.addAction(show_action)
+        self.tray_menu.addSeparator()
+        self.tray_menu.addAction(quit_action)
         
-        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.setContextMenu(self.tray_menu)
         self.tray_icon.activated.connect(self.on_tray_activated)
         self.tray_icon.show()
+
+    def update_tray_theme(self):
+        """트레이 메뉴에 현재 테마 적용"""
+        theme = THEMES.get(self.current_theme, THEMES["dark"])
+        self.tray_menu.setStyleSheet(f"""
+            QMenu {{ 
+                background-color: {theme["surface"]}; 
+                color: {theme["text"]}; 
+                border: 1px solid {theme["border"]}; 
+                padding: 5px; 
+            }}
+            QMenu::item {{ padding: 8px 20px; }}
+            QMenu::item:selected {{ background-color: {theme["primary"]}; }}
+        """)
 
     def update_status_bar(self):
         stats = self.db.get_statistics()
@@ -1303,6 +1886,17 @@ class MainWindow(QMainWindow):
         
         theme = THEMES.get(self.current_theme, THEMES["dark"])
         
+        # 빈 결과 상태 표시
+        if not items:
+            self.table.setRowCount(1)
+            empty_item = QTableWidgetItem("검색 결과가 없습니다" if search_query else "히스토리가 비어있습니다")
+            empty_item.setForeground(QColor(theme["text_secondary"]))
+            empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(0, 0, empty_item)
+            self.table.setSpan(0, 0, 1, 5)
+            return
+        
         for row_idx, (pid, content, ptype, timestamp, pinned, use_count) in enumerate(items):
             self.table.insertRow(row_idx)
             
@@ -1336,7 +1930,8 @@ class MainWindow(QMainWindow):
             try:
                 dt = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
                 time_str = dt.strftime("%H:%M") if dt.date() == datetime.date.today() else dt.strftime("%m/%d")
-            except:
+            except (ValueError, TypeError) as e:
+                logger.debug(f"Timestamp parse error: {e}")
                 time_str = timestamp
             
             time_item = QTableWidgetItem(time_str)
@@ -1403,16 +1998,21 @@ class MainWindow(QMainWindow):
         """색상이 밝은지 판단"""
         try:
             hex_color = hex_color.lstrip('#')
+            if len(hex_color) == 3:
+                hex_color = ''.join([c*2 for c in hex_color])
             r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
             luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
             return luminance > 0.5
-        except:
+        except (ValueError, IndexError) as e:
+            logger.debug(f"Color parse error: {e}")
             return False
 
     def tools_layout_visible(self, visible):
         self.btn_upper.setVisible(visible)
         self.btn_lower.setVisible(visible)
         self.btn_strip.setVisible(visible)
+        self.btn_normalize.setVisible(visible)
+        self.btn_json.setVisible(visible)
         self.btn_google.setVisible(visible)
         if HAS_QRCODE: self.btn_qr.setVisible(visible)
 
@@ -1420,9 +2020,40 @@ class MainWindow(QMainWindow):
         text = self.detail_text.toPlainText()
         if not text: return
         new_text = text
-        if mode == "upper": new_text = text.upper()
-        elif mode == "lower": new_text = text.lower()
-        elif mode == "strip": new_text = " ".join(text.split())
+        mode_text = mode
+        
+        if mode == "upper": 
+            new_text = text.upper()
+            mode_text = "대문자"
+        elif mode == "lower": 
+            new_text = text.lower()
+            mode_text = "소문자"
+        elif mode == "strip": 
+            new_text = " ".join(text.split())
+            mode_text = "공백 제거"
+        elif mode == "normalize":
+            # 줄바꿈 정규화: CRLF→LF, 연속 빈줄 제거, 앞뒤 공백 제거
+            new_text = text.replace('\r\n', '\n').replace('\r', '\n')
+            lines = new_text.split('\n')
+            cleaned = []
+            prev_blank = False
+            for line in lines:
+                is_blank = line.strip() == ''
+                if is_blank and prev_blank:
+                    continue
+                cleaned.append(line.rstrip())
+                prev_blank = is_blank
+            new_text = '\n'.join(cleaned).strip()
+            mode_text = "줄바꿈 정리"
+        elif mode == "json":
+            try:
+                parsed = json.loads(text)
+                new_text = json.dumps(parsed, indent=2, ensure_ascii=False)
+                mode_text = "JSON 포맷팅"
+            except json.JSONDecodeError:
+                self.statusBar().showMessage("❌ 유효한 JSON이 아닙니다", 2000)
+                return
+        
         self.is_internal_copy = True
         self.clipboard.setText(new_text)
         self.detail_text.setPlainText(new_text)
@@ -1444,6 +2075,19 @@ class MainWindow(QMainWindow):
             else:
                 self.clipboard.setText(content)
             self.db.increment_use_count(pid)
+            
+            # 복사 시각 피드백
+            rows = self.table.selectionModel().selectedRows()
+            if rows:
+                row = rows[0].row()
+                theme = THEMES.get(self.current_theme, THEMES["dark"])
+                for col in range(self.table.columnCount()):
+                    item = self.table.item(row, col)
+                    if item:
+                        original_bg = item.background()
+                        item.setBackground(QColor(theme["success"]))
+                        QTimer.singleShot(300, lambda i=item, bg=original_bg: i.setBackground(bg))
+            
             self.statusBar().showMessage("✅ 복사됨", 2000)
 
     def paste_selected(self):
@@ -1513,7 +2157,17 @@ class MainWindow(QMainWindow):
         pin_action = menu.addAction("📌 고정/해제")
         pin_action.triggered.connect(self.toggle_pin)
         
+        tag_action = menu.addAction("🏷️ 태그 편집")
+        tag_action.triggered.connect(self.edit_tag)
+        
         menu.addSeparator()
+        
+        # 다중 선택 시 병합 옵션
+        selected_count = len(self.table.selectionModel().selectedRows())
+        if selected_count >= 2:
+            merge_action = menu.addAction(f"🔗 {selected_count}개 병합")
+            merge_action.triggered.connect(self.merge_selected)
+            menu.addSeparator()
         
         delete_action = menu.addAction("🗑️ 삭제")
         delete_action.triggered.connect(self.delete_item)
