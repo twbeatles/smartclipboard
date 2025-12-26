@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer, 
-    QSettings, QPropertyAnimation, QEasingCurve, QPoint
+    QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent
 )
 from PyQt6.QtGui import (
     QColor, QFont, QIcon, QAction, QPixmap, QImage, QClipboard, 
@@ -1110,40 +1110,44 @@ class CopyRulesDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.db = ClipboardDB()
-        self.clipboard = QApplication.clipboard()
-        self.clipboard.dataChanged.connect(self.on_clipboard_change)
-        self.is_internal_copy = False
-        
-        self.settings = QSettings(ORG_NAME, APP_NAME)
-        self.current_theme = self.db.get_setting("theme", "dark")
-        
-        self.setWindowTitle(f"스마트 클립보드 프로 v{VERSION}")
-        self.restore_window_state()
-        
-        self.app_icon = self.create_app_icon()
-        self.setWindowIcon(self.app_icon)
-        
-        self.always_on_top = True
-        self.current_tag_filter = None  # 태그 필터
-        self.sort_column = 3  # 기본 정렬: 시간 컨럼
-        self.sort_order = Qt.SortOrder.DescendingOrder  # 기본: 내림차순
-        
-        self.apply_theme()
-        self.init_menu()
-        self.init_ui()
-        self.init_tray()
-        self.init_shortcuts()
-        
-        self.hotkey_thread = HotkeyListener()
-        self.hotkey_thread.show_signal.connect(self.show_window_from_tray)
-        self.hotkey_thread.start()
-        
-        self.update_always_on_top()
-        self.load_data()
-        self.update_status_bar()
-        
-        logger.info("SmartClipboard Pro 시작됨")
+        try:
+            self.db = ClipboardDB()
+            self.clipboard = QApplication.clipboard()
+            self.clipboard.dataChanged.connect(self.on_clipboard_change)
+            self.is_internal_copy = False
+            
+            self.settings = QSettings(ORG_NAME, APP_NAME)
+            self.current_theme = self.db.get_setting("theme", "dark")
+            
+            self.setWindowTitle(f"스마트 클립보드 프로 v{VERSION}")
+            self.restore_window_state()
+            
+            self.app_icon = self.create_app_icon()
+            self.setWindowIcon(self.app_icon)
+            
+            self.always_on_top = True
+            self.current_tag_filter = None  # 태그 필터
+            self.sort_column = 3  # 기본 정렬: 시간 컨럼
+            self.sort_order = Qt.SortOrder.DescendingOrder  # 기본: 내림차순
+            
+            self.apply_theme()
+            self.init_menu()
+            self.init_ui()
+            self.init_tray()
+            self.init_shortcuts()
+            
+            self.hotkey_thread = HotkeyListener()
+            self.hotkey_thread.show_signal.connect(self.show_window_from_tray)
+            self.hotkey_thread.start()
+            
+            self.update_always_on_top()
+            self.load_data()
+            self.update_status_bar()
+            
+            logger.info("SmartClipboard Pro started")
+        except Exception as e:
+            logger.error(f"MainWindow Init Error: {e}", exc_info=True)
+            raise e
 
     def restore_window_state(self):
         geometry = self.settings.value("geometry")
@@ -1436,7 +1440,7 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, source, event):
         """드래그 앤 드롭 이벤트 처리 (고정 항목 순서 변경)"""
-        if source == self.table.viewport() and event.type() == Qt.EventType.Drop:
+        if source == self.table.viewport() and event.type() == QEvent.Type.Drop:
             # 드롭 위치 확인
             target_row = self.table.rowAt(event.position().y())
             if target_row == -1:
@@ -2595,19 +2599,38 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
-    # HiDPI 지원
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
-    
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-    
-    font = QFont("Malgun Gothic", 10)
-    font.setStyleHint(QFont.StyleHint.SansSerif)
-    app.setFont(font)
+    try:
+        # HiDPI 지원
+        os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+        os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+        
+        app = QApplication(sys.argv)
+        app.setQuitOnLastWindowClosed(False)
+        
+        font = QFont("Malgun Gothic", 10)
+        font.setStyleHint(QFont.StyleHint.SansSerif)
+        app.setFont(font)
 
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+        window = MainWindow()
+        window.show()
+        sys.exit(app.exec())
+    except Exception as e:
+        import traceback
+        error_msg = traceback.format_exc()
+        with open("debug_startup_error.log", "w", encoding="utf-8") as f:
+            f.write(error_msg)
+            f.write(f"\nError: {e}")
+        # MessageBox로도 표시 시도 (Qt가 로드되었다면)
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            if not QApplication.instance():
+                app = QApplication(sys.argv)
+            QMessageBox.critical(None, "Startup Error", f"An error occurred:\n{e}\n\nSee debug_startup_error.log for details.")
+        except:
+            print(f"Critical Error:\n{error_msg}")
+        
+        # 콘솔 창이 바로 꺼지지 않도록 대기
+        input("Press Enter to close...")
+        sys.exit(1)
 
 
