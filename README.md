@@ -1,10 +1,11 @@
-# 📋 SmartClipboard Pro v6.1
+# 📋 SmartClipboard Pro v6.2
 
 **고급 클립보드 매니저** - PyQt6 기반 Windows 클립보드 히스토리 관리 도구
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue?logo=python)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.0+-green?logo=qt)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)
+![Version](https://img.shields.io/badge/Version-6.2-orange)
 
 ---
 
@@ -17,12 +18,13 @@
 - **검색 & 필터** - 빠른 검색 및 유형별 필터링
 - **사용 횟수 추적** - 자주 사용하는 항목 확인
 
-### 🏷️ 태그 시스템 (NEW)
+### 🏷️ 태그 시스템
 - **커스텀 태그** - 항목에 태그 추가/편집
 - **빠른 태그** - 업무, 개인, 중요 등 원클릭 태그
+- **태그 필터** - 🏷️ 버튼으로 태그별 필터링
 - **우클릭 → 🏷️ 태그 편집**
 
-### 🔗 다중 선택 & 병합 (NEW)
+### 🔗 다중 선택 & 병합
 - **Ctrl/Shift+클릭**으로 여러 항목 선택
 - **병합 기능** - 구분자(줄바꿈/콤마/공백/탭) 선택
 - **우클릭 → 🔗 N개 병합**
@@ -32,15 +34,15 @@
 - **템플릿 변수** - `{{date}}`, `{{time}}`, `{{random:N}}` 지원
 - **편집 → 📝 스니펫 관리...**
 
-### 📊 히스토리 대시보드 (NEW)
+### 📊 히스토리 대시보드
 - **통계 보기** - 총 항목, 고정, 오늘 복사 개수
 - **유형별 분포** - 텍스트/링크/이미지 비율
 - **Top 5** - 자주 복사한 항목
 - **보기 → 📊 히스토리 통계...**
 
-### ⚙️ 복사 규칙 자동화 (NEW)
+### ⚙️ 복사 규칙 자동화
 - **자동 변환** - 패턴 매칭 후 자동 변환
-- **동작** - trim, lowercase, uppercase, remove_newlines
+- **동작** - trim, lowercase, uppercase, remove_newlines, custom_replace
 - **설정 → ⚙️ 복사 규칙 관리...**
 
 ### 🎨 테마 시스템
@@ -51,10 +53,10 @@
 ### 🔧 편의 기능
 - **QR 코드 생성** - 텍스트를 QR 코드로 변환
 - **구글 검색** - 선택 텍스트 바로 검색
-- **서식 정리** - 줄바꿈 정규화, JSON 포맷팅 (NEW)
+- **서식 정리** - 줄바꿈 정규화, JSON 포맷팅
 - **텍스트 변환** - 대/소문자, 공백 제거
 - **이미지 저장** - 클립보드 이미지 PNG 저장
-- **히스토리 내보내기** - TXT 파일로 백업
+- **토스트 알림** - 플로팅 알림 표시
 
 ---
 
@@ -69,7 +71,8 @@
 | `Ctrl+P` | 고정/해제 토글 |
 | `Ctrl+F` | 검색창 포커스 |
 | `Ctrl/Shift+클릭` | 다중 선택 |
-| `Escape` | 창 숨기기 |
+| `Escape` | 검색 클리어 / 창 숨기기 |
+| `↑↓` | 테이블 네비게이션 |
 | `Ctrl+Q` | 프로그램 종료 |
 
 ---
@@ -102,7 +105,7 @@ pyinstaller smartclipboard.spec
 
 ```
 smartclipboard/
-├── 클립모드 매니저.py      # 메인 프로그램
+├── 클립모드 매니저.py      # 메인 프로그램 (~2,350줄)
 ├── smartclipboard.spec     # PyInstaller 빌드 설정
 ├── clipboard_history_v6.db # SQLite 데이터베이스 (자동 생성)
 ├── clipboard_manager.log   # 로그 파일 (자동 생성)
@@ -111,9 +114,15 @@ smartclipboard/
 
 ---
 
-## 🔄 v6.1 변경사항
+## 🔄 v6.2 변경사항
 
 ### 새 기능
+- 🏷️ **태그 필터 버튼** - 상단에 태그 필터 버튼 추가
+- ⚙️ **복사 규칙 실제 적용** - 설정한 규칙이 클립보드 복사 시 자동 적용
+- 🔔 **ToastNotification** - 플로팅 토스트 알림 클래스
+- ⌨️ **키보드 네비게이션** - Esc(검색 클리어/창 숨기기), ↑↓(테이블 이동)
+
+### v6.1 기능
 - 🏷️ 태그 시스템 - 항목에 커스텀 태그 추가
 - 🔗 다중 선택 & 병합 - 여러 항목 결합
 - ✨ 템플릿 변수 - `{{date}}`, `{{time}}`, `{{random:N}}` 등
@@ -122,9 +131,9 @@ smartclipboard/
 - 📋 서식 정리 - 줄바꿈 정규화, JSON 포맷팅
 
 ### 개선사항
+- 검색창 플레이스홀더 개선
+- 정규식 오류 처리 강화
 - DB 스키마 확장 (tags, copy_rules)
-- 컨텍스트 메뉴 확장
-- 다중 선택 지원 (ExtendedSelection)
 
 ---
 
