@@ -58,7 +58,7 @@ MAX_HISTORY = 100
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "6.0"
+VERSION = "6.2"
 
 # --- 테마 정의 ---
 THEMES = {
@@ -510,6 +510,77 @@ class HotkeyListener(QThread):
             keyboard.remove_hotkey(HOTKEY)
         except Exception as e:
             logger.debug(f"Hotkey remove: {e}")
+
+
+# --- 토스트 알림 ---
+class ToastNotification(QFrame):
+    """플로팅 토스트 알림 위젯"""
+    def __init__(self, parent, message, duration=2000, toast_type="info"):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.duration = duration
+        
+        # 타입별 색상
+        colors = {
+            "info": "#3b82f6",
+            "success": "#22c55e", 
+            "warning": "#f59e0b",
+            "error": "#ef4444"
+        }
+        icons = {"info": "ℹ️", "success": "✅", "warning": "⚠️", "error": "❌"}
+        
+        color = colors.get(toast_type, colors["info"])
+        icon = icons.get(toast_type, icons["info"])
+        
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {color};
+                border-radius: 8px;
+                padding: 12px 16px;
+            }}
+            QLabel {{
+                color: white;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+        """)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet("font-size: 16px;")
+        layout.addWidget(icon_label)
+        
+        msg_label = QLabel(message)
+        layout.addWidget(msg_label)
+        
+        self.adjustSize()
+        
+        # 위치 설정 (부모 우하단)
+        if parent:
+            parent_rect = parent.geometry()
+            x = parent_rect.right() - self.width() - 20
+            y = parent_rect.bottom() - self.height() - 40
+            self.move(x, y)
+        
+        # 페이드 애니메이션
+        self.opacity_effect = None
+        self.fade_animation = None
+        
+        # 자동 닫기
+        QTimer.singleShot(duration, self.fade_out)
+    
+    def fade_out(self):
+        self.close()
+        self.deleteLater()
+    
+    @staticmethod
+    def show_toast(parent, message, duration=2000, toast_type="info"):
+        toast = ToastNotification(parent, message, duration, toast_type)
+        toast.show()
+        return toast
 
 
 # --- 설정 다이얼로그 ---
@@ -1029,6 +1100,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(self.app_icon)
         
         self.always_on_top = True
+        self.current_tag_filter = None  # 태그 필터
         
         self.apply_theme()
         self.init_menu()
@@ -1052,6 +1124,24 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         else:
             self.resize(650, 850)
+
+    def keyPressEvent(self, event):
+        """키보드 네비게이션"""
+        key = event.key()
+        
+        # Esc: 검색 클리어 또는 창 숨기기
+        if key == Qt.Key.Key_Escape:
+            if self.search_input.text():
+                self.search_input.clear()
+            else:
+                self.hide()
+            return
+        
+        # 방향키로 테이블 네비게이션
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and not self.search_input.hasFocus():
+            self.table.setFocus()
+        
+        super().keyPressEvent(event)
 
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())
@@ -1460,6 +1550,41 @@ class MainWindow(QMainWindow):
             self.clipboard.setText(merged)
             self.statusBar().showMessage(f"✅ {len(contents)}개 항목 병합 완료", 2000)
 
+    def show_tag_filter_menu(self):
+        """태그 필터 메뉴 표시"""
+        menu = QMenu(self)
+        theme = THEMES.get(self.current_theme, THEMES["dark"])
+        menu.setStyleSheet(f"""
+            QMenu {{ background-color: {theme["surface"]}; color: {theme["text"]}; border: 1px solid {theme["border"]}; padding: 5px; }}
+            QMenu::item {{ padding: 8px 20px; }}
+            QMenu::item:selected {{ background-color: {theme["primary"]}; }}
+        """)
+        
+        # 태그 없음 (초기화)
+        clear_action = menu.addAction("🔄 모든 항목 표시")
+        clear_action.triggered.connect(lambda: self.filter_by_tag(None))
+        
+        menu.addSeparator()
+        
+        # 태그 목록
+        tags = self.db.get_all_tags()
+        if tags:
+            for tag in tags:
+                action = menu.addAction(f"🏷️ {tag}")
+                action.triggered.connect(lambda checked, t=tag: self.filter_by_tag(t))
+        else:
+            no_tag_action = menu.addAction("(태그 없음)")
+            no_tag_action.setEnabled(False)
+        
+        menu.exec(self.btn_tag_filter.mapToGlobal(self.btn_tag_filter.rect().bottomLeft()))
+    
+    def filter_by_tag(self, tag):
+        """태그로 필터링"""
+        self.current_tag_filter = tag
+        if tag:
+            self.statusBar().showMessage(f"🏷️ '{tag}' 태그 필터 적용", 2000)
+        self.load_data()
+
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -1473,16 +1598,23 @@ class MainWindow(QMainWindow):
         
         self.filter_combo = QComboBox()
         self.filter_combo.addItems(["전체", "📌 고정", "텍스트", "이미지", "링크", "코드", "색상"])
-        self.filter_combo.setFixedWidth(120)
+        self.filter_combo.setFixedWidth(130)
         self.filter_combo.currentTextChanged.connect(self.load_data)
         
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 검색...")
+        self.search_input.setPlaceholderText("🔍 검색어 입력 (Ctrl+F)")
         self.search_input.textChanged.connect(self.load_data)
         self.search_input.setClearButtonEnabled(True)
         
+        # 태그 필터 버튼
+        self.btn_tag_filter = QPushButton("🏷️")
+        self.btn_tag_filter.setToolTip("태그 필터")
+        self.btn_tag_filter.setFixedWidth(40)
+        self.btn_tag_filter.clicked.connect(self.show_tag_filter_menu)
+        
         top_layout.addWidget(self.filter_combo)
         top_layout.addWidget(self.search_input)
+        top_layout.addWidget(self.btn_tag_filter)
         main_layout.addLayout(top_layout)
 
         # 메인 스플리터
@@ -1853,12 +1985,40 @@ class MainWindow(QMainWindow):
             if mime_data.hasText():
                 text = mime_data.text().strip()
                 if not text: return
+                
+                # 복사 규칙 적용
+                text = self.apply_copy_rules(text)
+                
                 tag = self.analyze_text(text)
                 if self.db.add_item(text, None, tag):
                     self.load_data()
                     self.update_status_bar()
         except Exception as e:
             logger.debug(f"Clipboard access: {e}")
+
+    def apply_copy_rules(self, text):
+        """활성화된 복사 규칙 적용"""
+        rules = self.db.get_copy_rules()
+        for rule in rules:
+            rid, name, pattern, action, replacement, enabled, priority = rule
+            if not enabled:
+                continue
+            try:
+                if re.search(pattern, text):
+                    if action == "trim":
+                        text = text.strip()
+                    elif action == "lowercase":
+                        text = text.lower()
+                    elif action == "uppercase":
+                        text = text.upper()
+                    elif action == "remove_newlines":
+                        text = text.replace('\n', ' ').replace('\r', '')
+                    elif action == "custom_replace" and replacement:
+                        text = re.sub(pattern, replacement, text)
+                    logger.debug(f"Rule '{name}' applied")
+            except re.error as e:
+                logger.warning(f"Invalid regex in rule '{name}': {e}")
+        return text
 
     def analyze_text(self, text):
         # URL 패턴
@@ -1881,7 +2041,15 @@ class MainWindow(QMainWindow):
         search_query = self.search_input.text()
         filter_type = self.filter_combo.currentText()
         
-        items = self.db.get_items(search_query, filter_type)
+        # 태그 필터 적용
+        if self.current_tag_filter:
+            items = self.db.get_items_by_tag(self.current_tag_filter)
+            # 추가 필터 적용
+            if search_query:
+                items = [i for i in items if search_query.lower() in (i[1] or '').lower()]
+        else:
+            items = self.db.get_items(search_query, filter_type)
+        
         self.table.setRowCount(0)
         
         theme = THEMES.get(self.current_theme, THEMES["dark"])
