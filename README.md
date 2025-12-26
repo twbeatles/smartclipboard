@@ -1,11 +1,11 @@
-# 📋 SmartClipboard Pro v6.2
+# 📋 SmartClipboard Pro v6.3
 
 **고급 클립보드 매니저** - PyQt6 기반 Windows 클립보드 히스토리 관리 도구
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue?logo=python)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.0+-green?logo=qt)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)
-![Version](https://img.shields.io/badge/Version-6.2-orange)
+![Version](https://img.shields.io/badge/Version-6.3-orange)
 
 ---
 
@@ -111,6 +111,24 @@ smartclipboard/
 ├── clipboard_manager.log   # 로그 파일 (자동 생성)
 └── README.md
 ```
+
+---
+
+## 🔄 v6.3 변경사항
+
+### 새 기능
+- 🔄 **컨럼 헤더 정렬** - 시간/유형/내용/사용 컨럼 헤더 클릭으로 오름/내림차순 정렬
+- ⏰ **시간 표시 개선** - "어제 13시", "12/25 13시" 등 직관적인 형식
+- 📌 **Toast 스택킹** - 여러 알림이 겹치지 않고 수직 정렬
+- ❓ **도움말 메뉴** - 키보드 단축키 안내 및 정보 다이얼로그
+- 🖥️ **HiDPI 지원** - 고해상도 디스플레이 호환성
+- 🌐 **Open With 메뉴** - 링크 우클릭 시 브라우저 열기/검색/복사 옵션 제공
+- 🖱️ **드래그 앤 드롭** - 고정(📌) 항목 간 드래그로 순서 변경 가능
+
+### 개선사항
+- 시간 컨럼 늦이 증가 (70 → 90px)
+- 정렬 상태 시각적 표시 (▲/▼)
+- 고정된 항목은 항상 상단 유지
 
 ---
 

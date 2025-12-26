@@ -1,5 +1,5 @@
 """
-SmartClipboard Pro v6.0
+SmartClipboard Pro v6.3
 고급 클립보드 매니저 - 리팩토링 버전
 """
 import sys
@@ -58,7 +58,7 @@ MAX_HISTORY = 100
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "6.2"
+VERSION = "6.3"
 
 # --- 테마 정의 ---
 THEMES = {
@@ -167,6 +167,11 @@ class ClipboardDB:
                 cursor.execute("ALTER TABLE history ADD COLUMN tags TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass  # 이미 존재하는 경우
+            # pin_order 컬럼 추가 (고정 항목 순서용)
+            try:
+                cursor.execute("ALTER TABLE history ADD COLUMN pin_order INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # 이미 존재하는 경우
             self.conn.commit()
             logger.info("DB 테이블 초기화 완료")
         except sqlite3.Error as e:
@@ -201,7 +206,7 @@ class ClipboardDB:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                sql = "SELECT id, content, type, timestamp, pinned, use_count FROM history WHERE 1=1"
+                sql = "SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE 1=1"
                 params = []
 
                 if search_query:
@@ -216,7 +221,7 @@ class ClipboardDB:
                     sql += " AND type = ?"
                     params.append(target_tag)
 
-                sql += " ORDER BY pinned DESC, id DESC"
+                sql += " ORDER BY pinned DESC, pin_order ASC, id DESC"
                 cursor.execute(sql, params)
                 return cursor.fetchall()
             except sqlite3.Error as e:
@@ -419,7 +424,7 @@ class ClipboardDB:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT id, content, type, timestamp, pinned, use_count FROM history WHERE tags LIKE ? ORDER BY pinned DESC, id DESC", (f"%{tag}%",))
+                cursor.execute("SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE tags LIKE ? ORDER BY pinned DESC, pin_order ASC, id DESC", (f"%{tag}%",))
                 return cursor.fetchall()
             except sqlite3.Error:
                 return []
@@ -481,6 +486,16 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Rule Delete Error: {e}")
+    
+    def update_pin_order(self, item_id, new_order):
+        """고정 항목 순서 업데이트"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET pin_order = ? WHERE id = ?", (new_order, item_id))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Pin Order Update Error: {e}")
 
     def close(self):
         if self.conn:
@@ -514,7 +529,9 @@ class HotkeyListener(QThread):
 
 # --- 토스트 알림 ---
 class ToastNotification(QFrame):
-    """플로팅 토스트 알림 위젯"""
+    """플로팅 토스트 알림 위젯 (스택 지원)"""
+    _active_toasts = []  # 활성 토스트 목록
+    
     def __init__(self, parent, message, duration=2000, toast_type="info"):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
@@ -558,12 +575,17 @@ class ToastNotification(QFrame):
         
         self.adjustSize()
         
-        # 위치 설정 (부모 우하단)
+        # 위치 설정 (부모 우하단, 스택 오프셋 적용)
         if parent:
             parent_rect = parent.geometry()
             x = parent_rect.right() - self.width() - 20
-            y = parent_rect.bottom() - self.height() - 40
+            # 스택 오프셋 계산
+            stack_offset = len(ToastNotification._active_toasts) * (self.height() + 10)
+            y = parent_rect.bottom() - self.height() - 40 - stack_offset
             self.move(x, y)
+        
+        # 활성 토스트 목록에 추가
+        ToastNotification._active_toasts.append(self)
         
         # 페이드 애니메이션
         self.opacity_effect = None
@@ -573,6 +595,9 @@ class ToastNotification(QFrame):
         QTimer.singleShot(duration, self.fade_out)
     
     def fade_out(self):
+        # 활성 목록에서 제거
+        if self in ToastNotification._active_toasts:
+            ToastNotification._active_toasts.remove(self)
         self.close()
         self.deleteLater()
     
@@ -1101,6 +1126,8 @@ class MainWindow(QMainWindow):
         
         self.always_on_top = True
         self.current_tag_filter = None  # 태그 필터
+        self.sort_column = 3  # 기본 정렬: 시간 컨럼
+        self.sort_order = Qt.SortOrder.DescendingOrder  # 기본: 내림차순
         
         self.apply_theme()
         self.init_menu()
@@ -1407,6 +1434,88 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Return"), self, self.paste_selected)
         QShortcut(QKeySequence("Ctrl+C"), self, self.copy_item)
 
+    def eventFilter(self, source, event):
+        """드래그 앤 드롭 이벤트 처리 (고정 항목 순서 변경)"""
+        if source == self.table.viewport() and event.type() == Qt.EventType.Drop:
+            # 드롭 위치 확인
+            target_row = self.table.rowAt(event.position().y())
+            if target_row == -1:
+                return False
+                
+            # 선택된 행 (드래그 중인 행)
+            selected_rows = self.table.selectionModel().selectedRows()
+            if not selected_rows:
+                return False
+            source_row = selected_rows[0].row()
+            
+            if source_row == target_row:
+                return False
+            
+            # 고정 항목끼리만 이동 가능
+            source_item = self.table.item(source_row, 0)
+            target_item = self.table.item(target_row, 0)
+            
+            # 📌 표시가 있는지 확인
+            is_source_pinned = source_item.text() == "📌"
+            is_target_pinned = target_item.text() == "📌"
+            
+            if is_source_pinned and is_target_pinned:
+                # DB 업데이트 로직
+                source_pid = source_item.data(Qt.ItemDataRole.UserRole)
+                target_pid = target_item.data(Qt.ItemDataRole.UserRole)
+                
+                # 순서 swap 또는 재정렬
+                # 간단하게: source를 target 위치로 이동하고, 나머지를 밀어내는 방식
+                # 여기서는 간단히 두 항목의 pin_order를 교체하는 것이 아니라,
+                # 전체 핀 목록을 가져와서 재정렬하는 것이 안전함.
+                
+                # 현재 고정된 항목들의 ID 목록 가져오기 (화면 순서대로)
+                pinned_ids = []
+                for row in range(self.table.rowCount()):
+                    item = self.table.item(row, 0)
+                    if item.text() == "📌":
+                        pinned_ids.append(item.data(Qt.ItemDataRole.UserRole))
+                
+                if source_pid in pinned_ids:
+                    pinned_ids.remove(source_pid)
+                    # 타겟 위치 계산 (위로 드래그 vs 아래로 드래그)
+                    # row 인덱스 기준이므로 pinned_ids 내에서의 인덱스를 찾아야 함
+                    
+                    # 타겟 row가 pinned_ids에서 몇 번째인지 찾기
+                    target_idx = -1
+                    current_row = 0
+                    for pid in pinned_ids: # source가 빠진 상태
+                        # 원래 테이블에서의 row를 찾아야 정확하지만, 
+                        # 여기서는 화면상의 타겟 row가 몇번째 핀인지 추정
+                        pass
+                        
+                    # 간단한 방법: 화면상 타겟 row가 전체 핀 중 몇 번째인지 확인
+                    pin_count = 0
+                    insert_idx = 0
+                    for r in range(self.table.rowCount()):
+                        if r == target_row:
+                            insert_idx = pin_count
+                            break
+                        if r == source_row: 
+                            continue # 자기 자신은 건너뜀
+                        if self.table.item(r, 0).text() == "📌":
+                            pin_count += 1
+                            
+                    if source_row > target_row: # 아래에서 위로
+                        pinned_ids.insert(insert_idx, source_pid)
+                    else: # 위에서 아래로
+                        pinned_ids.insert(insert_idx + 1, source_pid)
+
+                    # DB 업데이트
+                    for idx, pid in enumerate(pinned_ids):
+                        self.db.update_pin_order(pid, idx)
+                    
+                    # 딜레이 후 리로드 (드롭 애니메이션 간섭 방지)
+                    QTimer.singleShot(50, self.load_data)
+                    return True # 이벤트 소비 (기본 동작 막기)
+            
+        return super().eventFilter(source, event)
+
     def init_menu(self):
         menubar = self.menuBar()
         
@@ -1478,6 +1587,19 @@ class MainWindow(QMainWindow):
         action_settings = QAction("⚙️ 설정...", self)
         action_settings.triggered.connect(self.show_settings)
         settings_menu.addAction(action_settings)
+        
+        # 도움말 메뉴
+        help_menu = menubar.addMenu("도움말")
+        
+        action_shortcuts = QAction("⌨️ 키보드 단축키", self)
+        action_shortcuts.triggered.connect(self.show_shortcuts_dialog)
+        help_menu.addAction(action_shortcuts)
+        
+        help_menu.addSeparator()
+        
+        action_about = QAction("ℹ️ 정보", self)
+        action_about.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(action_about)
 
     def change_theme(self, theme_key):
         self.current_theme = theme_key
@@ -1510,6 +1632,46 @@ class MainWindow(QMainWindow):
         """복사 규칙 관리 창 표시"""
         dialog = CopyRulesDialog(self, self.db)
         dialog.exec()
+    
+    def show_shortcuts_dialog(self):
+        """키보드 단축키 안내 다이얼로그"""
+        shortcuts_text = """
+<h2>⌨️ 키보드 단축키</h2>
+<table cellspacing="8">
+<tr><td><b>Ctrl+Shift+V</b></td><td>창 표시/숨기기 (글로벌)</td></tr>
+<tr><td><b>Ctrl+C</b></td><td>선택 항목 복사</td></tr>
+<tr><td><b>Enter</b></td><td>복사 후 붙여넣기</td></tr>
+<tr><td><b>Delete</b></td><td>선택 항목 삭제</td></tr>
+<tr><td><b>Ctrl+P</b></td><td>고정/해제 토글</td></tr>
+<tr><td><b>Ctrl+F</b></td><td>검색창 포커스</td></tr>
+<tr><td><b>Ctrl/Shift+클릭</b></td><td>다중 선택</td></tr>
+<tr><td><b>Escape</b></td><td>검색 클리어 / 창 숨기기</td></tr>
+<tr><td><b>↑↓</b></td><td>테이블 네비게이션</td></tr>
+<tr><td><b>Ctrl+Q</b></td><td>프로그램 종료</td></tr>
+</table>
+<br>
+<p><b>💡 Tip:</b> 헤더를 클릭하면 정렬할 수 있습니다!</p>
+"""
+        QMessageBox.information(self, "키보드 단축키", shortcuts_text)
+    
+    def show_about_dialog(self):
+        """프로그램 정보 다이얼로그"""
+        about_text = f"""
+<h2>📋 스마트 클립보드 프로 v{VERSION}</h2>
+<p>고급 클립보드 매니저 - PyQt6 기반</p>
+<br>
+<p><b>주요 기능:</b></p>
+<ul>
+<li>클립보드 히스토리 자동 저장</li>
+<li>텍스트, 이미지, 링크, 코드 분류</li>
+<li>태그 시스템 및 스니펫 관리</li>
+<li>복사 규칙 자동화</li>
+<li>다크/라이트/오션 테마</li>
+</ul>
+<br>
+<p>© 2024 MySmartTools</p>
+"""
+        QMessageBox.about(self, f"스마트 클립보드 프로 v{VERSION}", about_text)
 
     def edit_tag(self):
         """선택 항목 태그 편집"""
@@ -1585,6 +1747,32 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"🏷️ '{tag}' 태그 필터 적용", 2000)
         self.load_data()
 
+    def on_header_clicked(self, section):
+        """헤더 클릭 시 정렬 토글"""
+        # 📌(0) 컬럼은 정렬 비활성화
+        if section == 0:
+            return
+        
+        # 같은 컬럼 클릭: 정렬 순서 토글
+        if self.sort_column == section:
+            if self.sort_order == Qt.SortOrder.AscendingOrder:
+                self.sort_order = Qt.SortOrder.DescendingOrder
+            else:
+                self.sort_order = Qt.SortOrder.AscendingOrder
+        else:
+            self.sort_column = section
+            self.sort_order = Qt.SortOrder.AscendingOrder
+        
+        # 헤더 라벨 업데이트 (정렬 표시자)
+        header_labels = ["📌", "유형", "내용", "시간", "사용"]
+        for i in range(len(header_labels)):
+            if i == section:
+                indicator = "▲" if self.sort_order == Qt.SortOrder.AscendingOrder else "▼"
+                header_labels[i] = f"{header_labels[i]} {indicator}"
+        self.table.setHorizontalHeaderLabels(header_labels)
+        
+        self.load_data()
+
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -1634,7 +1822,7 @@ class MainWindow(QMainWindow):
         
         self.table.setColumnWidth(0, 35)
         self.table.setColumnWidth(1, 55)
-        self.table.setColumnWidth(3, 70)
+        self.table.setColumnWidth(3, 90)  # 시간 컨럼 넓이 증가 (12/25 13시 표시)
         self.table.setColumnWidth(4, 45)
         
         self.table.verticalHeader().setVisible(False)
@@ -1649,6 +1837,17 @@ class MainWindow(QMainWindow):
         
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
+        
+        # 헤더 클릭 정렬
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self.on_header_clicked)
+        
+        # 드래그 앤 드롭 (고정 항목 재정렬용)
+        self.table.setDragEnabled(True)
+        self.table.setAcceptDrops(True)
+        self.table.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.table.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.table.viewport().installEventFilter(self)
 
         splitter.addWidget(self.table)
 
@@ -2050,6 +2249,24 @@ class MainWindow(QMainWindow):
         else:
             items = self.db.get_items(search_query, filter_type)
         
+        # 정렬 적용 (고정 항목은 항상 상단)
+        if items and self.sort_column > 0:
+            def get_sort_key(item):
+                pid, content, ptype, timestamp, pinned, use_count, pin_order = item
+                col = self.sort_column
+                if col == 1:  # 유형
+                    return (not pinned, ptype or "")
+                elif col == 2:  # 내용
+                    return (not pinned, (content or "").lower())
+                elif col == 3:  # 시간
+                    return (not pinned, timestamp or "")
+                elif col == 4:  # 사용
+                    return (not pinned, use_count or 0)
+                return (not pinned, 0)
+            
+            reverse = self.sort_order == Qt.SortOrder.DescendingOrder
+            items = sorted(items, key=get_sort_key, reverse=reverse)
+        
         self.table.setRowCount(0)
         
         theme = THEMES.get(self.current_theme, THEMES["dark"])
@@ -2065,7 +2282,11 @@ class MainWindow(QMainWindow):
             self.table.setSpan(0, 0, 1, 5)
             return
         
-        for row_idx, (pid, content, ptype, timestamp, pinned, use_count) in enumerate(items):
+        # 날짜 비교용
+        today = datetime.date.today()
+        yesterday = today - datetime.timedelta(days=1)
+        
+        for row_idx, (pid, content, ptype, timestamp, pinned, use_count, pin_order) in enumerate(items):
             self.table.insertRow(row_idx)
             
             # 고정 아이콘
@@ -2079,6 +2300,7 @@ class MainWindow(QMainWindow):
             type_item = QTableWidgetItem(type_icons.get(ptype, "📝"))
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             type_item.setToolTip(ptype)
+            type_item.setData(Qt.ItemDataRole.UserRole + 1, ptype)  # 정렬용 원본 데이터
             self.table.setItem(row_idx, 1, type_item)
             
             # 내용
@@ -2092,12 +2314,18 @@ class MainWindow(QMainWindow):
                 content_item.setForeground(QColor(theme["success"]))
             elif ptype == "COLOR":
                 content_item.setForeground(QColor(content) if content.startswith("#") else QColor(theme["warning"]))
+            content_item.setData(Qt.ItemDataRole.UserRole + 1, content)  # 정렬용 원본 데이터
             self.table.setItem(row_idx, 2, content_item)
             
-            # 시간
+            # 시간 (개선된 형식)
             try:
                 dt = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
-                time_str = dt.strftime("%H:%M") if dt.date() == datetime.date.today() else dt.strftime("%m/%d")
+                if dt.date() == today:
+                    time_str = dt.strftime("%H:%M")  # 오늘: "14:30"
+                elif dt.date() == yesterday:
+                    time_str = f"어제 {dt.hour}시"  # 어제: "어제 13시"
+                else:
+                    time_str = dt.strftime("%m/%d %H시").lstrip("0")  # 그 외: "12/25 13시"
             except (ValueError, TypeError) as e:
                 logger.debug(f"Timestamp parse error: {e}")
                 time_str = timestamp
@@ -2105,12 +2333,14 @@ class MainWindow(QMainWindow):
             time_item = QTableWidgetItem(time_str)
             time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             time_item.setForeground(QColor(theme["text_secondary"]))
+            time_item.setData(Qt.ItemDataRole.UserRole + 1, timestamp)  # 정렬용 원본 타임스탬프
             self.table.setItem(row_idx, 3, time_item)
             
             # 사용 횟수
             use_item = QTableWidgetItem(str(use_count) if use_count else "-")
             use_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             use_item.setForeground(QColor(theme["text_secondary"]))
+            use_item.setData(Qt.ItemDataRole.UserRole + 1, use_count or 0)  # 정렬용 원본 데이터
             self.table.setItem(row_idx, 4, use_item)
 
     def on_selection_changed(self):
@@ -2322,6 +2552,27 @@ class MainWindow(QMainWindow):
         
         menu.addSeparator()
         
+        # 링크 항목인 경우 Open With 서브메뉴 추가
+        pid = self.get_selected_id()
+        if pid:
+            data = self.db.get_content(pid)
+            if data and data[2] == "LINK":
+                url = data[0]
+                open_menu = menu.addMenu("🌐 링크 열기")
+                
+                open_default = open_menu.addAction("🔗 기본 브라우저로 열기")
+                open_default.triggered.connect(lambda: webbrowser.open(url))
+                
+                open_menu.addSeparator()
+                
+                copy_url = open_menu.addAction("📋 URL 복사")
+                copy_url.triggered.connect(lambda: self.clipboard.setText(url))
+                
+                search_action = open_menu.addAction("🔍 Google에서 검색")
+                search_action.triggered.connect(lambda: webbrowser.open(f"https://www.google.com/search?q={url}"))
+                
+                menu.addSeparator()
+        
         pin_action = menu.addAction("📌 고정/해제")
         pin_action.triggered.connect(self.toggle_pin)
         
@@ -2344,6 +2595,10 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
+    # HiDPI 지원
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+    
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     
