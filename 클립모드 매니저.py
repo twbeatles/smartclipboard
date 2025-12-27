@@ -58,7 +58,7 @@ MAX_HISTORY = 100
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "6.3"
+VERSION = "7.0"
 
 # --- 테마 정의 ---
 THEMES = {
@@ -392,7 +392,8 @@ class ClipboardDB:
                 cursor.execute("SELECT tags FROM history WHERE id = ?", (item_id,))
                 result = cursor.fetchone()
                 return result[0] if result and result[0] else ""
-            except sqlite3.Error:
+            except sqlite3.Error as e:
+                logger.debug(f"Get item tags error: {e}")
                 return ""
     
     def set_item_tags(self, item_id, tags):
@@ -417,7 +418,8 @@ class ClipboardDB:
                         if tag:
                             all_tags.add(tag)
                 return sorted(all_tags)
-            except sqlite3.Error:
+            except sqlite3.Error as e:
+                logger.debug(f"Get all tags error: {e}")
                 return []
 
     def get_items_by_tag(self, tag):
@@ -438,7 +440,8 @@ class ClipboardDB:
                 cursor.execute("SELECT COUNT(*) FROM history WHERE timestamp LIKE ?", (f"{today}%",))
                 result = cursor.fetchone()
                 return result[0] if result else 0
-            except sqlite3.Error:
+            except sqlite3.Error as e:
+                logger.debug(f"Get today count error: {e}")
                 return 0
     
     def get_top_items(self, limit=5):
@@ -447,7 +450,8 @@ class ClipboardDB:
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT content, use_count FROM history WHERE type != 'IMAGE' AND use_count > 0 ORDER BY use_count DESC LIMIT ?", (limit,))
                 return cursor.fetchall()
-            except sqlite3.Error:
+            except sqlite3.Error as e:
+                logger.debug(f"Get top items error: {e}")
                 return []
 
     # --- 복사 규칙 메서드 ---
@@ -457,7 +461,8 @@ class ClipboardDB:
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT id, name, pattern, action, replacement, enabled, priority FROM copy_rules ORDER BY priority DESC")
                 return cursor.fetchall()
-            except sqlite3.Error:
+            except sqlite3.Error as e:
+                logger.debug(f"Get copy rules error: {e}")
                 return []
     
     def add_copy_rule(self, name, pattern, action, replacement=""):
@@ -1429,11 +1434,10 @@ class MainWindow(QMainWindow):
         """
         self.setStyleSheet(style)
 
-    def init_shortcuts(self):
-        """키보드 단축키 설정"""
         QShortcut(QKeySequence("Escape"), self, self.hide)
         QShortcut(QKeySequence("Ctrl+F"), self, lambda: self.search_input.setFocus())
         QShortcut(QKeySequence("Delete"), self, self.delete_item)
+        QShortcut(QKeySequence("Shift+Delete"), self, self.delete_selected_items)  # 다중 삭제
         QShortcut(QKeySequence("Ctrl+P"), self, self.toggle_pin)
         QShortcut(QKeySequence("Return"), self, self.paste_selected)
         QShortcut(QKeySequence("Ctrl+C"), self, self.copy_item)
@@ -1673,7 +1677,7 @@ class MainWindow(QMainWindow):
 <li>다크/라이트/오션 테마</li>
 </ul>
 <br>
-<p>© 2024 MySmartTools</p>
+<p>© 2024-2025 MySmartTools</p>
 """
         QMessageBox.about(self, f"스마트 클립보드 프로 v{VERSION}", about_text)
 
@@ -1985,6 +1989,24 @@ class MainWindow(QMainWindow):
         self.tray_icon.activated.connect(self.on_tray_activated)
         self.tray_icon.show()
 
+    def init_shortcuts(self):
+        """앱 내 키보드 단축키 설정"""
+        # Ctrl+F: 검색창 포커스
+        shortcut_search = QShortcut(QKeySequence("Ctrl+F"), self)
+        shortcut_search.activated.connect(lambda: self.search_input.setFocus())
+        
+        # Ctrl+P: 고정 토글
+        shortcut_pin = QShortcut(QKeySequence("Ctrl+P"), self)
+        shortcut_pin.activated.connect(self.toggle_pin)
+        
+        # Delete: 삭제
+        shortcut_delete = QShortcut(QKeySequence("Delete"), self)
+        shortcut_delete.activated.connect(self.delete_item)
+        
+        # Shift+Delete: 다중 삭제
+        shortcut_multi_delete = QShortcut(QKeySequence("Shift+Delete"), self)
+        shortcut_multi_delete.activated.connect(self.delete_selected_items)
+
     def update_tray_theme(self):
         """트레이 메뉴에 현재 테마 적용"""
         theme = THEMES.get(self.current_theme, THEMES["dark"])
@@ -2278,12 +2300,17 @@ class MainWindow(QMainWindow):
         # 빈 결과 상태 표시
         if not items:
             self.table.setRowCount(1)
-            empty_item = QTableWidgetItem("검색 결과가 없습니다" if search_query else "히스토리가 비어있습니다")
+            if search_query:
+                empty_msg = f"🔍 '{search_query}'에 대한 검색 결과가 없습니다"
+            else:
+                empty_msg = "📋 클립보드 히스토리가 비어있습니다\n복사하면 자동으로 저장됩니다"
+            empty_item = QTableWidgetItem(empty_msg)
             empty_item.setForeground(QColor(theme["text_secondary"]))
             empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self.table.setItem(0, 0, empty_item)
             self.table.setSpan(0, 0, 1, 5)
+            self.table.setRowHeight(0, 80)  # 빈 상태 행 높이 증가
             return
         
         # 날짜 비교용
@@ -2329,7 +2356,7 @@ class MainWindow(QMainWindow):
                 elif dt.date() == yesterday:
                     time_str = f"어제 {dt.hour}시"  # 어제: "어제 13시"
                 else:
-                    time_str = dt.strftime("%m/%d %H시").lstrip("0")  # 그 외: "12/25 13시"
+                    time_str = f"{dt.month}/{dt.day} {dt.hour}시"  # 그 외: "12/25 13시"
             except (ValueError, TypeError) as e:
                 logger.debug(f"Timestamp parse error: {e}")
                 time_str = timestamp
@@ -2502,12 +2529,47 @@ class MainWindow(QMainWindow):
         self.paste_selected()
 
     def delete_item(self):
-        pid = self.get_selected_id()
-        if pid:
-            self.db.delete_item(pid)
-            self.load_data()
-            self.update_ui_state(False)
-            self.update_status_bar()
+        """선택된 항목 삭제 (단일 또는 다중)"""
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return
+        
+        if len(rows) > 1:
+            self.delete_selected_items()
+        else:
+            pid = self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+            if pid:
+                self.db.delete_item(pid)
+                self.load_data()
+                self.update_ui_state(False)
+                self.update_status_bar()
+    
+    def delete_selected_items(self):
+        """다중 선택 항목 삭제 (확인 다이얼로그 포함)"""
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return
+        
+        count = len(rows)
+        if count > 1:
+            reply = QMessageBox.question(
+                self, "다중 삭제 확인",
+                f"{count}개의 항목을 삭제하시겠습니까?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        
+        # 삭제 실행
+        for row in rows:
+            pid = self.table.item(row.row(), 0).data(Qt.ItemDataRole.UserRole)
+            if pid:
+                self.db.delete_item(pid)
+        
+        self.load_data()
+        self.update_ui_state(False)
+        self.update_status_bar()
+        self.statusBar().showMessage(f"✅ {count}개 항목이 삭제되었습니다.", 2000)
     
     def toggle_pin(self):
         pid = self.get_selected_id()
