@@ -7,7 +7,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['PIL', 'qrcode', 'sqlite3', 'keyboard'],
+    hiddenimports=['PIL', 'qrcode', 'sqlite3', 'keyboard', 'sys', 'os', 'shutil', 'logging', 'json'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -39,4 +39,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=None, 
 )
