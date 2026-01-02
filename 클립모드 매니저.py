@@ -55,17 +55,17 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QTableWidget, QTableWidgetItem, QPushButton, QTextEdit,
     QLabel, QHeaderView, QAbstractItemView, QMessageBox, QSplitter,
-    QSystemTrayIcon, QMenu, QStackedWidget, QSizePolicy, QStyle,
-    QMenuBar, QFileDialog, QComboBox, QDialog, QFormLayout, QSpinBox,
-    QCheckBox, QTabWidget, QGroupBox, QSlider, QFrame, QInputDialog
+    QSystemTrayIcon, QMenu, QSizePolicy, QStyle, QStackedWidget,
+    QFileDialog, QComboBox, QDialog, QFormLayout, QSpinBox,
+    QCheckBox, QTabWidget, QGroupBox, QFrame, QInputDialog
 )
 from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer, 
+    Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray,
     QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent
 )
 from PyQt6.QtGui import (
-    QColor, QFont, QIcon, QAction, QPixmap, QImage, QClipboard, 
-    QPainter, QBrush, QPen, QKeySequence, QShortcut, QLinearGradient
+    QColor, QFont, QIcon, QAction, QPixmap, QImage,
+    QPainter, QKeySequence, QShortcut, QLinearGradient, QBrush, QPen
 )
 
 # --- 로깅 설정 ---
@@ -1918,7 +1918,19 @@ class FloatingMiniWindow(QWidget):
         """최근 10개 항목 로드"""
         from PyQt6.QtWidgets import QListWidgetItem
         self.list_widget.clear()
-        items = self.db.get_items("", "전체")[:10]
+        
+        try:
+            items = self.db.get_items("", "전체")[:10]
+        except Exception as e:
+            logger.error(f"Mini window load error: {e}")
+            items = []
+        
+        if not items:
+            # 빈 목록 안내
+            empty_item = QListWidgetItem("📭 클립보드 히스토리가 비어 있습니다")
+            empty_item.setData(Qt.ItemDataRole.UserRole, None)
+            self.list_widget.addItem(empty_item)
+            return
         
         type_icons = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨", "FILE": "📁"}
         
@@ -1935,7 +1947,10 @@ class FloatingMiniWindow(QWidget):
     def on_item_double_clicked(self, item):
         """항목 더블클릭 - 복사 후 숨기기"""
         pid = item.data(Qt.ItemDataRole.UserRole)
-        if pid:
+        if not pid:
+            return  # 빈 목록 안내 항목 클릭 시 무시
+        
+        try:
             data = self.db.get_content(pid)
             if data:
                 content, blob, ptype = data
@@ -1950,6 +1965,8 @@ class FloatingMiniWindow(QWidget):
                 self.hide()
                 # 붙여넣기
                 QTimer.singleShot(200, lambda: keyboard.send('ctrl+v'))
+        except Exception as e:
+            logger.error(f"Mini window copy error: {e}")
     
     def open_main_window(self):
         """메인 창 열기"""
@@ -2464,6 +2481,11 @@ class CopyRulesDialog(QDialog):
 
 # --- 메인 윈도우 ---
 class MainWindow(QMainWindow):
+    # 스레드 안전한 UI 조작을 위한 시그널
+    toggle_mini_signal = pyqtSignal()
+    paste_last_signal = pyqtSignal()
+    show_main_signal = pyqtSignal()
+    
     def __init__(self):
         super().__init__()
         try:
@@ -2498,11 +2520,16 @@ class MainWindow(QMainWindow):
             self.init_tray()
             self.init_shortcuts()
             
+            # v8.0: 핫키 시그널 연결 (스레드 안전)
+            self.toggle_mini_signal.connect(self._toggle_mini_window_slot)
+            self.paste_last_signal.connect(self._paste_last_item_slot)
+            self.show_main_signal.connect(self.show_window_from_tray)
+
             # v8.0: 플로팅 미니 창
             self.mini_window = FloatingMiniWindow(self.db, self)
             
-            # 핫키 설정 로드 및 등록
-            self.register_hotkeys()
+            # 핫키 설정 로드 및 등록 (안정성을 위해 지연 초기화)
+            QTimer.singleShot(1000, self.register_hotkeys)
             
             self.update_always_on_top()
             self.load_data()
@@ -2523,50 +2550,80 @@ class MainWindow(QMainWindow):
         try:
             hotkeys = json.loads(self.db.get_setting("hotkeys", json.dumps(DEFAULT_HOTKEYS)))
             
-            self.hotkey_thread = HotkeyListener()
-            self.hotkey_thread.show_signal.connect(self.show_window_from_tray)
-            self.hotkey_thread.start()
+            # 기존 훅 모두 제거 (재등록 시 중복 방지)
+            try:
+                keyboard.unhook_all()
+            except:
+                pass
+
+            # 메인 창 열기 핫키 - 시그널 emit으로 메인 스레드에서 실행
+            main_key = hotkeys.get("show_main", "ctrl+shift+v")
+            # show_window_from_tray는 슬롯이므로 바로 연결하지 않고 lambda로 감싸거나 시그널 생성 필요하지만
+            # 가장 안전하게는 새 시그널을 만드는 것이 좋으나, 여기서는 lambda 사용
+            # 주의: keyboard 콜백은 별도 스레드이므로 UI조작 함수 직접 호출 위험.
+            # show_window_from_tray 내부에서 UI조작이 많으므로 시그널 방식 권장.
+            # MainWindow에 show_main_signal을 추가하는 것이 가장 안전함.
+            keyboard.add_hotkey(main_key, lambda: self.show_main_signal.emit())
             
-            # 미니 창 핫키
+            # 시그널 연결 (스레드 안전한 UI 조작)
+            # toggle_mini_signal, paste_last_signal은 __init__에서 이미 연결됨.
+            
+            # 미니 창 핫키 - 시그널 emit
             mini_key = hotkeys.get("show_mini", "alt+v")
-            keyboard.add_hotkey(mini_key, self.toggle_mini_window)
+            keyboard.add_hotkey(mini_key, lambda: self.toggle_mini_signal.emit())
             
-            # 마지막 항목 즉시 붙여넣기 핫키
+            # 마지막 항목 즉시 붙여넣기 핫키 - 시그널 emit
             paste_key = hotkeys.get("paste_last", "ctrl+shift+z")
-            keyboard.add_hotkey(paste_key, self.paste_last_item)
+            keyboard.add_hotkey(paste_key, lambda: self.paste_last_signal.emit())
+            
+            logger.info("Hotkeys registered successfully")
             
         except Exception as e:
             logger.warning(f"Hotkey registration error: {e}")
     
     def toggle_mini_window(self):
-        """미니 창 토글"""
-        if self.mini_window.isVisible():
-            self.mini_window.hide()
-        else:
-            # 커서 위치 근처에 표시
-            from PyQt6.QtGui import QCursor
-            cursor_pos = QCursor.pos()
-            self.mini_window.move(cursor_pos.x() - 150, cursor_pos.y() - 200)
-            self.mini_window.show()
-            self.mini_window.activateWindow()
+        """미니 창 토글 (외부에서 호출 시 시그널 사용)"""
+        self.toggle_mini_signal.emit()
+    
+    def _toggle_mini_window_slot(self):
+        """미니 창 토글 (메인 스레드에서 실행되는 슬롯)"""
+        try:
+            if self.mini_window.isVisible():
+                self.mini_window.hide()
+            else:
+                # 커서 위치 근처에 표시
+                from PyQt6.QtGui import QCursor
+                cursor_pos = QCursor.pos()
+                self.mini_window.move(cursor_pos.x() - 150, cursor_pos.y() - 200)
+                self.mini_window.show()
+                self.mini_window.activateWindow()
+        except Exception as e:
+            logger.error(f"Toggle mini window error: {e}")
     
     def paste_last_item(self):
-        """마지막 항목 즉시 붙여넣기"""
-        items = self.db.get_items("", "전체")
-        if items:
-            pid, content, ptype, *_ = items[0]
-            data = self.db.get_content(pid)
-            if data:
-                content, blob, ptype = data
-                self.is_internal_copy = True
-                if ptype == "IMAGE" and blob:
-                    pixmap = QPixmap()
-                    pixmap.loadFromData(blob)
-                    self.clipboard.setPixmap(pixmap)
-                else:
-                    self.clipboard.setText(content)
-                self.db.increment_use_count(pid)
-                QTimer.singleShot(100, lambda: keyboard.send('ctrl+v'))
+        """마지막 항목 즉시 붙여넣기 (외부에서 호출 시 시그널 사용)"""
+        self.paste_last_signal.emit()
+    
+    def _paste_last_item_slot(self):
+        """마지막 항목 즉시 붙여넣기 (메인 스레드에서 실행되는 슬롯)"""
+        try:
+            items = self.db.get_items("", "전체")
+            if items:
+                pid, content, ptype, *_ = items[0]
+                data = self.db.get_content(pid)
+                if data:
+                    content, blob, ptype = data
+                    self.is_internal_copy = True
+                    if ptype == "IMAGE" and blob:
+                        pixmap = QPixmap()
+                        pixmap.loadFromData(blob)
+                        self.clipboard.setPixmap(pixmap)
+                    else:
+                        self.clipboard.setText(content)
+                    self.db.increment_use_count(pid)
+                    QTimer.singleShot(100, lambda: keyboard.send('ctrl+v'))
+        except Exception as e:
+            logger.error(f"Paste last item error: {e}")
     
     def check_vault_timeout(self):
         """보관함 자동 잠금 체크"""
@@ -2613,13 +2670,25 @@ class MainWindow(QMainWindow):
             event.accept()
 
     def quit_app(self):
+        """앱 종료 및 리소스 정리"""
         try:
-            self.hotkey_thread.stop()
-            self.hotkey_thread.wait(1000)  # 최대 1초 대기
+            # 1. 핫키 훅 먼저 해제 (외부 이벤트 차단)
             keyboard.unhook_all()
+            
+            # 2. 보관함 타이머 중지
+            if hasattr(self, 'vault_timer') and self.vault_timer.isActive():
+                self.vault_timer.stop()
+                
         except Exception as e:
             logger.warning(f"Cleanup warning: {e}")
-        self.db.close()
+            
+        # 3. DB 연결 종료
+        try:
+            self.db.close()
+        except:
+            pass
+            
+        # 4. Qt 앱 종료
         QApplication.quit()
 
     def toggle_privacy_mode(self):
@@ -4304,6 +4373,11 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     # 전역 예외 처리기
     def global_exception_handler(exctype, value, traceback):
+        # KeyboardInterrupt와 SystemExit은 정상 종료 신호이므로 에러 표시 안함
+        if issubclass(exctype, (KeyboardInterrupt, SystemExit)):
+            sys.__excepthook__(exctype, value, traceback)
+            return
+        
         logger.error("Uncaught exception", exc_info=(exctype, value, traceback))
         error_msg = f"{exctype.__name__}: {value}"
         
