@@ -1,6 +1,13 @@
 """
-SmartClipboard Pro v6.3
-고급 클립보드 매니저 - 리팩토링 버전
+SmartClipboard Pro v8.0
+고급 클립보드 매니저 - 확장 기능 버전
+
+주요 기능:
+- 클립보드 히스토리 자동 저장
+- 암호화 보안 보관함
+- 클립보드 액션 자동화
+- 플로팅 미니 창
+- 다양한 테마 지원
 """
 import sys
 import os
@@ -14,6 +21,27 @@ import keyboard
 import winreg
 import logging
 import json
+import shutil
+import base64
+import uuid
+import csv
+
+# 암호화 라이브러리 체크
+try:
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    HAS_CRYPTO = True
+except ImportError:
+    HAS_CRYPTO = False
+
+# 웹 스크래핑 라이브러리 체크 (URL 제목 가져오기용)
+try:
+    import requests
+    from bs4 import BeautifulSoup
+    HAS_WEB = True
+except ImportError:
+    HAS_WEB = False
 
 # QR코드 라이브러리 체크
 try:
@@ -58,12 +86,20 @@ MAX_HISTORY = 100
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "7.0"
+VERSION = "8.0"
+
+# 기본 핫키 설정
+DEFAULT_HOTKEYS = {
+    "show_main": "ctrl+shift+v",
+    "show_mini": "alt+v",
+    "paste_last": "ctrl+shift+z",
+}
 
 # --- 테마 정의 ---
+# v8.0: hover_bg, hover_text 추가로 호버 시 가독성 보장
 THEMES = {
     "dark": {
-        "name": "다크 모드",
+        "name": "🌙 다크 모드",
         "background": "#1a1a2e",
         "surface": "#16213e",
         "surface_variant": "#0f3460",
@@ -76,9 +112,16 @@ THEMES = {
         "success": "#4ade80",
         "warning": "#fbbf24",
         "error": "#ef4444",
+        "gradient_start": "#e94560",
+        "gradient_end": "#ff6b6b",
+        "glow": "rgba(233, 69, 96, 0.3)",
+        # 호버 전용 색상
+        "hover_bg": "#2a3a5e",
+        "hover_text": "#ffffff",
+        "selected_text": "#ffffff",
     },
     "light": {
-        "name": "라이트 모드",
+        "name": "☀️ 라이트 모드",
         "background": "#f8fafc",
         "surface": "#ffffff",
         "surface_variant": "#f1f5f9",
@@ -91,21 +134,79 @@ THEMES = {
         "success": "#22c55e",
         "warning": "#f59e0b",
         "error": "#ef4444",
+        "gradient_start": "#6366f1",
+        "gradient_end": "#818cf8",
+        "glow": "rgba(99, 102, 241, 0.2)",
+        # 호버 전용 색상 - 라이트 모드에서 가독성 보장
+        "hover_bg": "#e0e7ff",
+        "hover_text": "#1e293b",
+        "selected_text": "#ffffff",
     },
     "ocean": {
-        "name": "오션 모드",
-        "background": "#0a192f",
-        "surface": "#112240",
-        "surface_variant": "#1d3557",
-        "primary": "#64ffda",
-        "primary_variant": "#7efff5",
-        "secondary": "#ffd166",
-        "text": "#ccd6f6",
-        "text_secondary": "#8892b0",
-        "border": "#233554",
+        "name": "🌊 오션 모드",
+        "background": "#0d1f3c",
+        "surface": "#152642",
+        "surface_variant": "#1e3a5f",
+        "primary": "#00e5c7",
+        "primary_variant": "#00ffd9",
+        "secondary": "#ffb347",
+        "text": "#e8f0ff",
+        "text_secondary": "#a8c0d8",
+        "border": "#2a4a6d",
         "success": "#4ade80",
         "warning": "#fbbf24",
         "error": "#ff6b6b",
+        "gradient_start": "#00e5c7",
+        "gradient_end": "#00ffd9",
+        "glow": "rgba(0, 229, 199, 0.25)",
+        # 호버 전용 색상 - 오션 모드 명도 개선
+        "hover_bg": "#2a4a6d",
+        "hover_text": "#ffffff",
+        "selected_text": "#0d1f3c",
+    },
+    "purple": {
+        "name": "💜 퍼플 모드",
+        "background": "#13111c",
+        "surface": "#1c1a29",
+        "surface_variant": "#2a2640",
+        "primary": "#a855f7",
+        "primary_variant": "#c084fc",
+        "secondary": "#f472b6",
+        "text": "#e8e8e8",
+        "text_secondary": "#9ca3af",
+        "border": "#3f3a5a",
+        "success": "#4ade80",
+        "warning": "#fbbf24",
+        "error": "#f87171",
+        "gradient_start": "#a855f7",
+        "gradient_end": "#f472b6",
+        "glow": "rgba(168, 85, 247, 0.3)",
+        # 호버 전용 색상
+        "hover_bg": "#3d3660",
+        "hover_text": "#ffffff",
+        "selected_text": "#ffffff",
+    },
+    "midnight": {
+        "name": "🌌 미드나잇",
+        "background": "#0f0f1a",
+        "surface": "#1a1a2e",
+        "surface_variant": "#252545",
+        "primary": "#00d9ff",
+        "primary_variant": "#00f5ff",
+        "secondary": "#ff6b9d",
+        "text": "#ffffff",
+        "text_secondary": "#b0b0c0",
+        "border": "#303050",
+        "success": "#00ff88",
+        "warning": "#ffcc00",
+        "error": "#ff4466",
+        "gradient_start": "#00d9ff",
+        "gradient_end": "#00f5ff",
+        "glow": "rgba(0, 217, 255, 0.25)",
+        # 호버 전용 색상
+        "hover_bg": "#353565",
+        "hover_text": "#ffffff",
+        "selected_text": "#0f0f1a",
     }
 }
 
@@ -162,6 +263,30 @@ class ClipboardDB:
                     priority INTEGER DEFAULT 0
                 )
             """)
+            
+            # v8.0 새 테이블: 암호화 보관함
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS secure_vault (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    encrypted_content BLOB,
+                    label TEXT,
+                    created_at TEXT
+                )
+            """)
+            
+            # v8.0 새 테이블: 클립보드 액션 자동화
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS clipboard_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    pattern TEXT NOT NULL,
+                    action_type TEXT NOT NULL,
+                    action_params TEXT DEFAULT '{}',
+                    enabled INTEGER DEFAULT 1,
+                    priority INTEGER DEFAULT 0
+                )
+            """)
+            
             # tags 컬럼 추가 (기존 테이블 마이그레이션)
             try:
                 cursor.execute("ALTER TABLE history ADD COLUMN tags TEXT DEFAULT ''")
@@ -172,8 +297,18 @@ class ClipboardDB:
                 cursor.execute("ALTER TABLE history ADD COLUMN pin_order INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass  # 이미 존재하는 경우
+            # v8.0: file_path 컬럼 추가 (파일 히스토리용)
+            try:
+                cursor.execute("ALTER TABLE history ADD COLUMN file_path TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            # v8.0: url_title 컬럼 추가 (링크 제목 캐시)
+            try:
+                cursor.execute("ALTER TABLE history ADD COLUMN url_title TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
             self.conn.commit()
-            logger.info("DB 테이블 초기화 완료")
+            logger.info("DB 테이블 초기화 완료 (v8.0)")
         except sqlite3.Error as e:
             logger.error(f"DB Init Error: {e}")
 
@@ -241,6 +376,7 @@ class ClipboardDB:
                     return new_status
             except sqlite3.Error as e:
                 logger.error(f"DB Pin Error: {e}")
+                self.conn.rollback()
             return 0
 
     def increment_use_count(self, item_id):
@@ -251,6 +387,7 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"DB Use Count Error: {e}")
+                self.conn.rollback()
 
     def delete_item(self, item_id):
         with self.lock:
@@ -261,6 +398,7 @@ class ClipboardDB:
                 logger.info(f"항목 삭제: {item_id}")
             except sqlite3.Error as e:
                 logger.error(f"DB Delete Error: {e}")
+                self.conn.rollback()
 
     def clear_all(self):
         with self.lock:
@@ -271,6 +409,7 @@ class ClipboardDB:
                 logger.info("고정되지 않은 모든 항목 삭제")
             except sqlite3.Error as e:
                 logger.error(f"DB Clear Error: {e}")
+                self.conn.rollback()
 
     def get_content(self, item_id):
         with self.lock:
@@ -404,6 +543,7 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Tag Update Error: {e}")
+                self.conn.rollback()
     
     def get_all_tags(self):
         """모든 고유 태그 목록 반환"""
@@ -502,13 +642,410 @@ class ClipboardDB:
             except sqlite3.Error as e:
                 logger.error(f"Pin Order Update Error: {e}")
 
+    # --- v8.0: 보안 보관함 메서드 ---
+    def add_vault_item(self, encrypted_content, label):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute("INSERT INTO secure_vault (encrypted_content, label, created_at) VALUES (?, ?, ?)",
+                               (encrypted_content, label, created_at))
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Vault Add Error: {e}")
+                return False
+    
+    def get_vault_items(self):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id, encrypted_content, label, created_at FROM secure_vault ORDER BY id DESC")
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Vault Get Error: {e}")
+                return []
+    
+    def delete_vault_item(self, item_id):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM secure_vault WHERE id = ?", (item_id,))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Vault Delete Error: {e}")
+    
+    # --- v8.0: 클립보드 액션 메서드 ---
+    def get_clipboard_actions(self):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id, name, pattern, action_type, action_params, enabled, priority FROM clipboard_actions ORDER BY priority DESC")
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Get Actions Error: {e}")
+                return []
+    
+    def add_clipboard_action(self, name, pattern, action_type, action_params="{}"):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("INSERT INTO clipboard_actions (name, pattern, action_type, action_params) VALUES (?, ?, ?, ?)",
+                               (name, pattern, action_type, action_params))
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Action Add Error: {e}")
+                return False
+    
+    def toggle_clipboard_action(self, action_id, enabled):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE clipboard_actions SET enabled = ? WHERE id = ?", (enabled, action_id))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Action Toggle Error: {e}")
+    
+    def delete_clipboard_action(self, action_id):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM clipboard_actions WHERE id = ?", (action_id,))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Action Delete Error: {e}")
+    
+    # --- v8.0: URL 제목 캐시 ---
+    def update_url_title(self, item_id, title):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET url_title = ? WHERE id = ?", (title, item_id))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"URL Title Update Error: {e}")
+
     def close(self):
         if self.conn:
             self.conn.close()
             logger.info("DB 연결 종료")
 
 
-# --- 핫키 리스너 ---
+# --- v8.0: 암호화 보관함 관리자 ---
+class SecureVaultManager:
+    """AES-256 암호화를 사용한 보안 보관함 관리자"""
+    
+    def __init__(self, db):
+        self.db = db
+        self.fernet = None
+        self.is_unlocked = False
+        self.last_activity = time.time()
+        self.lock_timeout = 300  # 5분 자동 잠금
+    
+    def derive_key(self, password, salt):
+        """비밀번호에서 암호화 키 생성"""
+        if not HAS_CRYPTO:
+            return None
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=480000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+        return key
+    
+    def set_master_password(self, password):
+        """마스터 비밀번호 설정 (최초 설정)"""
+        if not HAS_CRYPTO:
+            return False
+        salt = os.urandom(16)
+        key = self.derive_key(password, salt)
+        self.fernet = Fernet(key)
+        # salt와 검증용 데이터 저장
+        verification = self.fernet.encrypt(b"VAULT_VERIFIED")
+        self.db.set_setting("vault_salt", base64.b64encode(salt).decode())
+        self.db.set_setting("vault_verification", verification.decode())
+        self.is_unlocked = True
+        self.last_activity = time.time()
+        return True
+    
+    def unlock(self, password):
+        """보관함 잠금 해제"""
+        if not HAS_CRYPTO:
+            return False
+        salt_b64 = self.db.get_setting("vault_salt")
+        verification = self.db.get_setting("vault_verification")
+        
+        if not salt_b64 or not verification:
+            return False
+        
+        try:
+            salt = base64.b64decode(salt_b64)
+            key = self.derive_key(password, salt)
+            self.fernet = Fernet(key)
+            # 검증
+            decrypted = self.fernet.decrypt(verification.encode())
+            if decrypted == b"VAULT_VERIFIED":
+                self.is_unlocked = True
+                self.last_activity = time.time()
+                return True
+        except Exception as e:
+            logger.debug(f"Vault unlock failed: {e}")
+        return False
+    
+    def lock(self):
+        """보관함 잠금"""
+        self.fernet = None
+        self.is_unlocked = False
+    
+    def check_timeout(self):
+        """자동 잠금 체크"""
+        if self.is_unlocked and (time.time() - self.last_activity > self.lock_timeout):
+            self.lock()
+            return True
+        return False
+    
+    def encrypt(self, text):
+        """텍스트 암호화"""
+        if not self.is_unlocked or not self.fernet:
+            return None
+        self.last_activity = time.time()
+        return self.fernet.encrypt(text.encode())
+    
+    def decrypt(self, encrypted_data):
+        """데이터 복호화"""
+        if not self.is_unlocked or not self.fernet:
+            return None
+        self.last_activity = time.time()
+        try:
+            return self.fernet.decrypt(encrypted_data).decode()
+        except Exception as e:
+            logger.debug(f"Decrypt error: {e}")
+            return None
+    
+    def has_master_password(self):
+        """마스터 비밀번호가 설정되어 있는지 확인"""
+        return self.db.get_setting("vault_salt") is not None
+
+
+# --- v8.0: 클립보드 액션 자동화 관리자 ---
+class ClipboardActionManager:
+    """복사된 내용에 따라 자동 액션을 수행하는 관리자"""
+    
+    def __init__(self, db):
+        self.db = db
+        self.actions_cache = []
+        self.reload_actions()
+    
+    def reload_actions(self):
+        """액션 규칙 캐시 갱신"""
+        self.actions_cache = self.db.get_clipboard_actions()
+    
+    def process(self, text, item_id=None):
+        """텍스트에 매칭되는 액션 실행"""
+        results = []
+        for action in self.actions_cache:
+            aid, name, pattern, action_type, params_json, enabled, priority = action
+            if not enabled:
+                continue
+            try:
+                if re.search(pattern, text):
+                    params = json.loads(params_json) if params_json else {}
+                    result = self.execute_action(action_type, text, params, item_id)
+                    if result:
+                        results.append((name, result))
+            except re.error as e:
+                logger.warning(f"Invalid regex in action '{name}': {e}")
+        return results
+    
+    def execute_action(self, action_type, text, params, item_id):
+        """액션 실행"""
+        if action_type == "fetch_title":
+            return self.fetch_url_title(text, item_id)
+        elif action_type == "format_phone":
+            return self.format_phone(text)
+        elif action_type == "format_email":
+            return self.format_email(text)
+        elif action_type == "notify":
+            return {"type": "notify", "message": params.get("message", "패턴 매칭됨")}
+        elif action_type == "transform":
+            return self.transform_text(text, params.get("mode", "trim"))
+        return None
+    
+    def fetch_url_title(self, url, item_id):
+        """URL에서 제목 가져오기"""
+        if not HAS_WEB:
+            return None
+        try:
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            response = requests.get(url, headers=headers, timeout=5)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            title = soup.title.string if soup.title else None
+            if title and item_id:
+                self.db.update_url_title(item_id, title.strip())
+            return {"type": "title", "title": title.strip() if title else None}
+        except Exception as e:
+            logger.debug(f"Fetch title error: {e}")
+            return None
+    
+    def format_phone(self, text):
+        """전화번호 포맷팅"""
+        # 숫자만 추출
+        digits = re.sub(r'\D', '', text)
+        if len(digits) == 11 and digits.startswith('010'):
+            formatted = f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+            return {"type": "format", "original": text, "formatted": formatted}
+        elif len(digits) == 10:
+            formatted = f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+            return {"type": "format", "original": text, "formatted": formatted}
+        return None
+    
+    def format_email(self, text):
+        """이메일 정규화"""
+        email = text.strip().lower()
+        return {"type": "format", "original": text, "formatted": email}
+    
+    def transform_text(self, text, mode):
+        """텍스트 변환"""
+        if mode == "trim":
+            return {"type": "transform", "result": text.strip()}
+        elif mode == "upper":
+            return {"type": "transform", "result": text.upper()}
+        elif mode == "lower":
+            return {"type": "transform", "result": text.lower()}
+        return None
+
+
+# --- v8.0: 내보내기/가져오기 관리자 ---
+class ExportImportManager:
+    """다양한 포맷으로 데이터 내보내기/가져오기"""
+    
+    def __init__(self, db):
+        self.db = db
+    
+    def export_json(self, path, filter_type="all", date_from=None):
+        """JSON으로 내보내기"""
+        try:
+            items = self.db.get_items("", "전체")
+            export_data = {
+                "app": "SmartClipboard Pro",
+                "version": VERSION,
+                "exported_at": datetime.datetime.now().isoformat(),
+                "items": []
+            }
+            for item in items:
+                pid, content, ptype, timestamp, pinned, use_count, pin_order = item
+                if filter_type != "all" and filter_type != ptype:
+                    continue
+                if ptype == "IMAGE":
+                    continue  # 이미지는 JSON에서 제외
+                export_data["items"].append({
+                    "content": content,
+                    "type": ptype,
+                    "timestamp": timestamp,
+                    "pinned": bool(pinned),
+                    "use_count": use_count
+                })
+            
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
+            return len(export_data["items"])
+        except Exception as e:
+            logger.error(f"JSON Export Error: {e}")
+            return -1
+    
+    def export_csv(self, path, filter_type="all"):
+        """CSV로 내보내기"""
+        try:
+            items = self.db.get_items("", "전체")
+            with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["내용", "유형", "시간", "고정", "사용횟수"])
+                count = 0
+                for item in items:
+                    pid, content, ptype, timestamp, pinned, use_count, pin_order = item
+                    if filter_type != "all" and filter_type != ptype:
+                        continue
+                    if ptype == "IMAGE":
+                        continue
+                    writer.writerow([content, ptype, timestamp, "예" if pinned else "아니오", use_count])
+                    count += 1
+            return count
+        except Exception as e:
+            logger.error(f"CSV Export Error: {e}")
+            return -1
+    
+    def export_markdown(self, path, filter_type="all"):
+        """Markdown으로 내보내기"""
+        try:
+            items = self.db.get_items("", "전체")
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(f"# SmartClipboard Pro 히스토리\n\n")
+                f.write(f"내보낸 날짜: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write("---\n\n")
+                
+                count = 0
+                for item in items:
+                    pid, content, ptype, timestamp, pinned, use_count, pin_order = item
+                    if filter_type != "all" and filter_type != ptype:
+                        continue
+                    if ptype == "IMAGE":
+                        continue
+                    
+                    pin_mark = "📌 " if pinned else ""
+                    type_icon = {"TEXT": "📝", "LINK": "🔗", "CODE": "💻", "COLOR": "🎨", "FILE": "📁"}.get(ptype, "📝")
+                    
+                    f.write(f"### {pin_mark}{type_icon} {timestamp}\n\n")
+                    if ptype == "CODE":
+                        f.write(f"```\n{content}\n```\n\n")
+                    elif ptype == "LINK":
+                        f.write(f"[{content}]({content})\n\n")
+                    else:
+                        f.write(f"{content}\n\n")
+                    f.write("---\n\n")
+                    count += 1
+            return count
+        except Exception as e:
+            logger.error(f"Markdown Export Error: {e}")
+            return -1
+    
+    def import_json(self, path):
+        """JSON에서 가져오기"""
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            imported = 0
+            for item in data.get("items", []):
+                content = item.get("content", "")
+                ptype = item.get("type", "TEXT")
+                if content:
+                    self.db.add_item(content, None, ptype)
+                    imported += 1
+            return imported
+        except Exception as e:
+            logger.error(f"JSON Import Error: {e}")
+            return -1
+    
+    def import_csv(self, path):
+        """CSV에서 가져오기"""
+        try:
+            imported = 0
+            with open(path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                next(reader)  # 헤더 건너뛰기
+                for row in reader:
+                    if len(row) >= 2:
+                        content, ptype = row[0], row[1]
+                        if content:
+                            self.db.add_item(content, None, ptype)
+                            imported += 1
+            return imported
+        except Exception as e:
+            logger.error(f"CSV Import Error: {e}")
+            return -1
 class HotkeyListener(QThread):
     show_signal = pyqtSignal()
 
@@ -534,7 +1071,7 @@ class HotkeyListener(QThread):
 
 # --- 토스트 알림 ---
 class ToastNotification(QFrame):
-    """플로팅 토스트 알림 위젯 (스택 지원)"""
+    """플로팅 토스트 알림 위젯 (슬라이드 애니메이션 + 스택 지원)"""
     _active_toasts = []  # 활성 토스트 목록
     
     def __init__(self, parent, message, duration=2000, toast_type="info"):
@@ -542,6 +1079,7 @@ class ToastNotification(QFrame):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.duration = duration
+        self.parent_window = parent
         
         # 타입별 색상
         colors = {
@@ -558,49 +1096,87 @@ class ToastNotification(QFrame):
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {color};
-                border-radius: 8px;
-                padding: 12px 16px;
+                border-radius: 10px;
             }}
             QLabel {{
                 color: white;
                 font-size: 13px;
                 font-weight: bold;
+                background: transparent;
             }}
         """)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(8)
         
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet("font-size: 16px;")
+        icon_label.setStyleSheet("font-size: 16px; background: transparent;")
         layout.addWidget(icon_label)
         
         msg_label = QLabel(message)
+        msg_label.setStyleSheet("background: transparent;")
         layout.addWidget(msg_label)
         
         self.adjustSize()
         
-        # 위치 설정 (부모 우하단, 스택 오프셋 적용)
+        # 그림자 효과 추가
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(0, 0, 0, 80))
+        self.setGraphicsEffect(shadow)
+        
+        # 시작 위치 계산 (화면 오른쪽 바깥에서 시작)
         if parent:
             parent_rect = parent.geometry()
-            x = parent_rect.right() - self.width() - 20
-            # 스택 오프셋 계산
-            stack_offset = len(ToastNotification._active_toasts) * (self.height() + 10)
-            y = parent_rect.bottom() - self.height() - 40 - stack_offset
-            self.move(x, y)
+            self.target_x = parent_rect.right() - self.width() - 20
+            stack_offset = len(ToastNotification._active_toasts) * (self.height() + 12)
+            self.target_y = parent_rect.bottom() - self.height() - 50 - stack_offset
+            # 시작점: 오른쪽 바깥
+            self.move(parent_rect.right() + 10, self.target_y)
         
         # 활성 토스트 목록에 추가
         ToastNotification._active_toasts.append(self)
         
-        # 페이드 애니메이션
-        self.opacity_effect = None
-        self.fade_animation = None
+        # 슬라이드 인 애니메이션
+        self.slide_in_animation = QPropertyAnimation(self, b"pos")
+        self.slide_in_animation.setDuration(300)
+        self.slide_in_animation.setStartValue(self.pos())
+        self.slide_in_animation.setEndValue(QPoint(self.target_x, self.target_y))
+        self.slide_in_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         
-        # 자동 닫기
+        # 투명도 효과 설정
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.opacity_effect.setOpacity(1.0)
+        # Note: GraphicsEffect는 하나만 적용 가능하므로 그림자를 우선 적용
+        
+        # 자동 닫기 타이머
         QTimer.singleShot(duration, self.fade_out)
     
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 표시될 때 슬라이드 인 시작
+        self.slide_in_animation.start()
+    
     def fade_out(self):
-        # 활성 목록에서 제거
+        """페이드 아웃 후 닫기"""
+        # 슬라이드 아웃 애니메이션
+        self.slide_out_animation = QPropertyAnimation(self, b"pos")
+        self.slide_out_animation.setDuration(200)
+        self.slide_out_animation.setStartValue(self.pos())
+        if self.parent_window:
+            parent_rect = self.parent_window.geometry()
+            self.slide_out_animation.setEndValue(QPoint(parent_rect.right() + 10, self.pos().y()))
+        self.slide_out_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        self.slide_out_animation.finished.connect(self._cleanup)
+        self.slide_out_animation.start()
+    
+    def _cleanup(self):
+        """토스트 정리"""
         if self in ToastNotification._active_toasts:
             ToastNotification._active_toasts.remove(self)
         self.close()
@@ -621,7 +1197,68 @@ class SettingsDialog(QDialog):
         self.current_theme = current_theme
         self.setWindowTitle("⚙️ 설정")
         self.setMinimumSize(450, 400)
+        self.apply_dialog_theme()
         self.init_ui()
+    
+    def apply_dialog_theme(self):
+        """다이얼로그에 테마 적용"""
+        theme = THEMES.get(self.current_theme, THEMES["dark"])
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {theme["background"]};
+                color: {theme["text"]};
+            }}
+            QGroupBox {{
+                font-weight: bold;
+                border: 1px solid {theme["border"]};
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 5px;
+                color: {theme["primary"]};
+            }}
+            QComboBox, QSpinBox, QLineEdit {{
+                background-color: {theme["surface_variant"]};
+                border: 1px solid {theme["border"]};
+                border-radius: 6px;
+                padding: 6px;
+                color: {theme["text"]};
+            }}
+            QLabel {{
+                color: {theme["text"]};
+            }}
+            QPushButton {{
+                background-color: {theme["surface_variant"]};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                color: {theme["text"]};
+            }}
+            QPushButton:hover {{
+                background-color: {theme["primary"]};
+                color: white;
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {theme["border"]};
+                border-radius: 6px;
+                background-color: {theme["surface"]};
+            }}
+            QTabBar::tab {{
+                background-color: {theme["surface_variant"]};
+                color: {theme["text_secondary"]};
+                padding: 8px 16px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {theme["primary"]};
+                color: white;
+            }}
+        """)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -687,12 +1324,726 @@ class SettingsDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def save_settings(self):
-        self.db.set_setting("theme", self.theme_combo.currentData())
+        # 테마 설정 저장
+        selected_theme = self.theme_combo.currentData()
+        current_theme = self.current_theme
+        
+        self.db.set_setting("theme", selected_theme)
         self.db.set_setting("max_history", self.max_history_spin.value())
+        
+        if selected_theme != current_theme:
+            QMessageBox.information(self, "테마 변경", "설정한 테마가 적용되었습니다.")
+            if self.parent():
+                self.parent().change_theme(selected_theme)
+        
         self.accept()
 
     def get_selected_theme(self):
         return self.theme_combo.currentData()
+
+
+# --- v8.0: 보안 보관함 다이얼로그 ---
+class SecureVaultDialog(QDialog):
+    """암호화된 보안 보관함 UI"""
+    
+    def __init__(self, parent, db, vault_manager):
+        super().__init__(parent)
+        self.db = db
+        self.vault = vault_manager
+        self.parent_window = parent
+        self.setWindowTitle("🔒 보안 보관함")
+        self.setMinimumSize(500, 450)
+        self.init_ui()
+        
+        if self.vault.is_unlocked:
+            self.load_items()
+        else:
+            self.show_lock_ui()
+    
+    def init_ui(self):
+        self.layout = QVBoxLayout(self)
+        self.layout.setSpacing(12)
+        
+        # 상태 표시
+        self.status_label = QLabel("🔒 보관함이 잠겨 있습니다")
+        self.status_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self.layout.addWidget(self.status_label)
+        
+        # 비밀번호 입력
+        self.password_widget = QWidget()
+        pw_layout = QVBoxLayout(self.password_widget)
+        
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("마스터 비밀번호 입력...")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.returnPressed.connect(self.unlock_vault)
+        pw_layout.addWidget(self.password_input)
+        
+        btn_unlock = QPushButton("🔓 잠금 해제")
+        btn_unlock.clicked.connect(self.unlock_vault)
+        pw_layout.addWidget(btn_unlock)
+        
+        self.layout.addWidget(self.password_widget)
+        
+        # 항목 목록 (처음에는 숨김)
+        self.items_widget = QWidget()
+        items_layout = QVBoxLayout(self.items_widget)
+        items_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 툴바
+        toolbar = QHBoxLayout()
+        btn_add = QPushButton("➕ 새 항목")
+        btn_add.clicked.connect(self.add_item)
+        btn_lock = QPushButton("🔒 잠금")
+        btn_lock.clicked.connect(self.lock_vault)
+        toolbar.addWidget(btn_add)
+        toolbar.addStretch()
+        toolbar.addWidget(btn_lock)
+        items_layout.addLayout(toolbar)
+        
+        # 테이블
+        self.table = QTableWidget()
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["레이블", "생성일", "동작"])
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(1, 120)
+        self.table.setColumnWidth(2, 100)
+        self.table.verticalHeader().setVisible(False)
+        items_layout.addWidget(self.table)
+        
+        self.items_widget.setVisible(False)
+        self.layout.addWidget(self.items_widget)
+        
+        # 닫기 버튼
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(self.close)
+        self.layout.addWidget(btn_close)
+    
+    def show_lock_ui(self):
+        """잠금 상태 UI 표시"""
+        self.status_label.setText("🔒 보관함이 잠겨 있습니다")
+        self.password_widget.setVisible(True)
+        self.items_widget.setVisible(False)
+        
+        if not self.vault.has_master_password():
+            self.status_label.setText("🔐 마스터 비밀번호를 설정해주세요 (최초 설정)")
+    
+    def unlock_vault(self):
+        """보관함 잠금 해제"""
+        password = self.password_input.text()
+        if not password:
+            QMessageBox.warning(self, "경고", "비밀번호를 입력하세요.")
+            return
+        
+        if not self.vault.has_master_password():
+            # 최초 설정
+            if len(password) < 4:
+                QMessageBox.warning(self, "경고", "비밀번호는 최소 4자 이상이어야 합니다.")
+                return
+            if self.vault.set_master_password(password):
+                QMessageBox.information(self, "설정 완료", "마스터 비밀번호가 설정되었습니다.")
+                self.load_items()
+            else:
+                QMessageBox.critical(self, "오류", "암호화 라이브러리가 없습니다.\npip install cryptography")
+        else:
+            if self.vault.unlock(password):
+                self.load_items()
+            else:
+                QMessageBox.warning(self, "실패", "비밀번호가 일치하지 않습니다.")
+        
+        self.password_input.clear()
+    
+    def lock_vault(self):
+        """보관함 잠금"""
+        self.vault.lock()
+        self.show_lock_ui()
+    
+    def load_items(self):
+        """항목 로드"""
+        self.status_label.setText("🔓 보관함이 열려 있습니다")
+        self.password_widget.setVisible(False)
+        self.items_widget.setVisible(True)
+        
+        items = self.db.get_vault_items()
+        self.table.setRowCount(0)
+        
+        for row_idx, (vid, encrypted, label, created_at) in enumerate(items):
+            self.table.insertRow(row_idx)
+            
+            label_item = QTableWidgetItem(label or "[레이블 없음]")
+            label_item.setData(Qt.ItemDataRole.UserRole, vid)
+            self.table.setItem(row_idx, 0, label_item)
+            
+            self.table.setItem(row_idx, 1, QTableWidgetItem(created_at[:10] if created_at else ""))
+            
+            # 동작 버튼
+            btn_widget = QWidget()
+            btn_layout = QHBoxLayout(btn_widget)
+            btn_layout.setContentsMargins(2, 2, 2, 2)
+            
+            btn_copy = QPushButton("📋")
+            btn_copy.setToolTip("복호화하여 복사")
+            btn_copy.clicked.connect(lambda checked, v=vid, e=encrypted: self.copy_item(v, e))
+            btn_delete = QPushButton("🗑")
+            btn_delete.setToolTip("삭제")
+            btn_delete.clicked.connect(lambda checked, v=vid: self.delete_item(v))
+            
+            btn_layout.addWidget(btn_copy)
+            btn_layout.addWidget(btn_delete)
+            self.table.setCellWidget(row_idx, 2, btn_widget)
+    
+    def add_item(self):
+        """새 항목 추가"""
+        label, ok1 = QInputDialog.getText(self, "새 항목", "레이블 (선택사항):")
+        if not ok1:
+            return
+        content, ok2 = QInputDialog.getMultiLineText(self, "새 항목", "저장할 내용:")
+        if ok2 and content:
+            encrypted = self.vault.encrypt(content)
+            if encrypted:
+                self.db.add_vault_item(encrypted, label)
+                self.load_items()
+            else:
+                QMessageBox.warning(self, "오류", "암호화에 실패했습니다.")
+    
+    def copy_item(self, vid, encrypted_data):
+        """항목 복호화 후 복사"""
+        decrypted = self.vault.decrypt(encrypted_data)
+        if decrypted:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(decrypted)
+            if self.parent_window:
+                self.parent_window.statusBar().showMessage("✅ 복호화된 내용이 클립보드에 복사되었습니다.", 3000)
+        else:
+            QMessageBox.warning(self, "오류", "복호화에 실패했습니다. 보관함을 다시 열어주세요.")
+    
+    def delete_item(self, vid):
+        """항목 삭제"""
+        reply = QMessageBox.question(self, "삭제 확인", "이 항목을 삭제하시겠습니까?",
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self.db.delete_vault_item(vid)
+            self.load_items()
+
+
+# --- v8.0: 클립보드 액션 다이얼로그 ---
+class ClipboardActionsDialog(QDialog):
+    """클립보드 액션 자동화 규칙 관리"""
+    
+    def __init__(self, parent, db, action_manager):
+        super().__init__(parent)
+        self.db = db
+        self.action_manager = action_manager
+        self.setWindowTitle("⚡ 클립보드 액션 자동화")
+        self.setMinimumSize(600, 450)
+        self.init_ui()
+        self.load_actions()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        
+        # 설명
+        info = QLabel("복사된 내용이 패턴과 일치하면 자동으로 액션을 실행합니다.")
+        info.setStyleSheet("color: gray;")
+        layout.addWidget(info)
+        
+        # 상단 버튼
+        btn_layout = QHBoxLayout()
+        btn_add = QPushButton("➕ 액션 추가")
+        btn_add.clicked.connect(self.add_action)
+        btn_layout.addWidget(btn_add)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        
+        # 테이블
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["활성", "이름", "패턴", "액션", "삭제"])
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(1, 120)
+        self.table.setColumnWidth(3, 100)
+        self.table.setColumnWidth(4, 60)
+        self.table.verticalHeader().setVisible(False)
+        layout.addWidget(self.table)
+        
+        # 기본 액션 추가 버튼
+        default_layout = QHBoxLayout()
+        btn_defaults = QPushButton("📋 기본 액션 추가")
+        btn_defaults.clicked.connect(self.add_default_actions)
+        default_layout.addWidget(btn_defaults)
+        default_layout.addStretch()
+        layout.addLayout(default_layout)
+        
+        # 닫기 버튼
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close)
+    
+    def load_actions(self):
+        """액션 목록 로드"""
+        actions = self.db.get_clipboard_actions()
+        self.table.setRowCount(0)
+        
+        action_type_names = {
+            "fetch_title": "🔗 제목 가져오기",
+            "format_phone": "📞 전화번호 포맷",
+            "format_email": "📧 이메일 정규화",
+            "notify": "🔔 알림",
+            "transform": "✍️ 텍스트 변환"
+        }
+        
+        for row_idx, (aid, name, pattern, action_type, params, enabled, priority) in enumerate(actions):
+            self.table.insertRow(row_idx)
+            
+            # 활성화 체크박스
+            cb = QCheckBox()
+            cb.setChecked(enabled == 1)
+            cb.stateChanged.connect(lambda state, a=aid: self.toggle_action(a, state))
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self.table.setCellWidget(row_idx, 0, cb_widget)
+            
+            name_item = QTableWidgetItem(name)
+            name_item.setData(Qt.ItemDataRole.UserRole, aid)
+            self.table.setItem(row_idx, 1, name_item)
+            
+            self.table.setItem(row_idx, 2, QTableWidgetItem(pattern))
+            self.table.setItem(row_idx, 3, QTableWidgetItem(action_type_names.get(action_type, action_type)))
+            
+            # 삭제 버튼
+            btn_del = QPushButton("🗑")
+            btn_del.clicked.connect(lambda checked, a=aid: self.delete_action(a))
+            self.table.setCellWidget(row_idx, 4, btn_del)
+    
+    def add_action(self):
+        """새 액션 추가"""
+        name, ok = QInputDialog.getText(self, "액션 추가", "액션 이름:")
+        if not ok or not name.strip():
+            return
+        
+        pattern, ok = QInputDialog.getText(self, "액션 추가", "패턴 (정규식):", text="https?://")
+        if not ok or not pattern.strip():
+            return
+        
+        action_types = ["fetch_title", "format_phone", "format_email", "notify", "transform"]
+        action_labels = ["🔗 URL 제목 가져오기", "📞 전화번호 포맷팅", "📧 이메일 정규화", "🔔 알림 표시", "✍️ 텍스트 변환"]
+        action, ok = QInputDialog.getItem(self, "액션 추가", "액션 유형:", action_labels, 0, False)
+        
+        if ok:
+            idx = action_labels.index(action)
+            self.db.add_clipboard_action(name.strip(), pattern.strip(), action_types[idx])
+            self.action_manager.reload_actions()
+            self.load_actions()
+    
+    def toggle_action(self, action_id, state):
+        """액션 활성화/비활성화"""
+        self.db.toggle_clipboard_action(action_id, 1 if state else 0)
+        self.action_manager.reload_actions()
+    
+    def delete_action(self, action_id):
+        """액션 삭제"""
+        self.db.delete_clipboard_action(action_id)
+        self.action_manager.reload_actions()
+        self.load_actions()
+    
+    def add_default_actions(self):
+        """기본 액션 추가"""
+        defaults = [
+            ("URL 제목 가져오기", r"https?://", "fetch_title"),
+            ("전화번호 자동 포맷", r"^0\d{9,10}$", "format_phone"),
+        ]
+        for name, pattern, action_type in defaults:
+            self.db.add_clipboard_action(name, pattern, action_type)
+        self.action_manager.reload_actions()
+        self.load_actions()
+        QMessageBox.information(self, "완료", "기본 액션이 추가되었습니다.")
+
+
+# --- v8.0: 내보내기 다이얼로그 ---
+class ExportDialog(QDialog):
+    """고급 내보내기 다이얼로그"""
+    
+    def __init__(self, parent, export_manager):
+        super().__init__(parent)
+        self.export_manager = export_manager
+        self.setWindowTitle("📤 고급 내보내기")
+        self.setMinimumSize(400, 300)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        
+        # 포맷 선택
+        format_group = QGroupBox("📁 내보내기 포맷")
+        format_layout = QVBoxLayout(format_group)
+        self.format_json = QCheckBox("JSON (.json) - 전체 데이터")
+        self.format_csv = QCheckBox("CSV (.csv) - 엑셀 호환")
+        self.format_md = QCheckBox("Markdown (.md) - 문서용")
+        self.format_json.setChecked(True)
+        format_layout.addWidget(self.format_json)
+        format_layout.addWidget(self.format_csv)
+        format_layout.addWidget(self.format_md)
+        layout.addWidget(format_group)
+        
+        # 필터
+        filter_group = QGroupBox("🔍 필터")
+        filter_layout = QFormLayout(filter_group)
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["전체", "텍스트만", "링크만", "코드만"])
+        filter_layout.addRow("유형:", self.type_combo)
+        layout.addWidget(filter_group)
+        
+        # 버튼
+        btn_layout = QHBoxLayout()
+        btn_export = QPushButton("📤 내보내기")
+        btn_export.clicked.connect(self.do_export)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.clicked.connect(self.reject)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_export)
+        btn_layout.addWidget(btn_cancel)
+        layout.addLayout(btn_layout)
+    
+    def do_export(self):
+        """내보내기 실행"""
+        type_map = {"전체": "all", "텍스트만": "TEXT", "링크만": "LINK", "코드만": "CODE"}
+        filter_type = type_map.get(self.type_combo.currentText(), "all")
+        
+        exported_count = 0
+        
+        if self.format_json.isChecked():
+            path, _ = QFileDialog.getSaveFileName(self, "JSON 저장", f"clipboard_export_{datetime.date.today()}.json", "JSON Files (*.json)")
+            if path:
+                count = self.export_manager.export_json(path, filter_type)
+                if count >= 0:
+                    exported_count += count
+        
+        if self.format_csv.isChecked():
+            path, _ = QFileDialog.getSaveFileName(self, "CSV 저장", f"clipboard_export_{datetime.date.today()}.csv", "CSV Files (*.csv)")
+            if path:
+                count = self.export_manager.export_csv(path, filter_type)
+                if count >= 0:
+                    exported_count += count
+        
+        if self.format_md.isChecked():
+            path, _ = QFileDialog.getSaveFileName(self, "Markdown 저장", f"clipboard_export_{datetime.date.today()}.md", "Markdown Files (*.md)")
+            if path:
+                count = self.export_manager.export_markdown(path, filter_type)
+                if count >= 0:
+                    exported_count += count
+        
+        if exported_count > 0:
+            QMessageBox.information(self, "완료", f"✅ 내보내기가 완료되었습니다.")
+            self.accept()
+
+
+# --- v8.0: 가져오기 다이얼로그 ---
+class ImportDialog(QDialog):
+    """가져오기 다이얼로그"""
+    
+    def __init__(self, parent, export_manager):
+        super().__init__(parent)
+        self.export_manager = export_manager
+        self.setWindowTitle("📥 가져오기")
+        self.setMinimumSize(400, 200)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        
+        info = QLabel("JSON 또는 CSV 파일에서 클립보드 히스토리를 가져옵니다.")
+        layout.addWidget(info)
+        
+        # 파일 선택
+        file_layout = QHBoxLayout()
+        self.file_path = QLineEdit()
+        self.file_path.setPlaceholderText("파일을 선택하세요...")
+        self.file_path.setReadOnly(True)
+        btn_browse = QPushButton("📂 찾아보기")
+        btn_browse.clicked.connect(self.browse_file)
+        file_layout.addWidget(self.file_path)
+        file_layout.addWidget(btn_browse)
+        layout.addLayout(file_layout)
+        
+        # 버튼
+        btn_layout = QHBoxLayout()
+        btn_import = QPushButton("📥 가져오기")
+        btn_import.clicked.connect(self.do_import)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.clicked.connect(self.reject)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_import)
+        btn_layout.addWidget(btn_cancel)
+        layout.addLayout(btn_layout)
+    
+    def browse_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "파일 선택", "", "지원 파일 (*.json *.csv);;JSON (*.json);;CSV (*.csv)")
+        if path:
+            self.file_path.setText(path)
+    
+    def do_import(self):
+        path = self.file_path.text()
+        if not path:
+            QMessageBox.warning(self, "경고", "파일을 선택하세요.")
+            return
+        
+        if path.lower().endswith('.json'):
+            count = self.export_manager.import_json(path)
+        elif path.lower().endswith('.csv'):
+            count = self.export_manager.import_csv(path)
+        else:
+            QMessageBox.warning(self, "경고", "지원하지 않는 파일 형식입니다.")
+            return
+        
+        if count >= 0:
+            QMessageBox.information(self, "완료", f"✅ {count}개 항목을 가져왔습니다.")
+            self.accept()
+        else:
+            QMessageBox.critical(self, "오류", "가져오기에 실패했습니다.")
+
+
+# --- v8.0: 플로팅 미니 창 ---
+class FloatingMiniWindow(QWidget):
+    """빠른 접근을 위한 플로팅 미니 창"""
+    
+    item_selected = pyqtSignal(int)  # 항목 선택 시그널
+    
+    def __init__(self, db, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.parent_window = parent
+        self.setWindowTitle("📋 빠른 클립보드")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMinimumSize(280, 350)
+        self.resize(300, 400)
+        
+        self.drag_pos = None
+        self.init_ui()
+    
+    def init_ui(self):
+        # 메인 컨테이너
+        container = QFrame(self)
+        container.setObjectName("MiniContainer")
+        container.setStyleSheet("""
+            QFrame#MiniContainer {
+                background-color: rgba(26, 26, 46, 0.95);
+                border-radius: 12px;
+                border: 1px solid #2a2a4a;
+            }
+            QLabel { color: #eaeaea; }
+            QListWidget {
+                background-color: transparent;
+                border: none;
+                color: #eaeaea;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-radius: 6px;
+                margin: 2px;
+            }
+            QListWidget::item:hover {
+                background-color: rgba(233, 69, 96, 0.3);
+            }
+            QListWidget::item:selected {
+                background-color: #e94560;
+            }
+            QPushButton {
+                background-color: #16213e;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #eaeaea;
+            }
+            QPushButton:hover {
+                background-color: #e94560;
+            }
+        """)
+        
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        
+        # 헤더
+        header = QHBoxLayout()
+        title = QLabel("📋 빠른 클립보드")
+        title.setStyleSheet("font-weight: bold; font-size: 13px;")
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(24, 24)
+        btn_close.clicked.connect(self.hide)
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(btn_close)
+        layout.addLayout(header)
+        
+        # 리스트
+        from PyQt6.QtWidgets import QListWidget, QListWidgetItem
+        self.list_widget = QListWidget()
+        self.list_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
+        layout.addWidget(self.list_widget)
+        
+        # 버튼
+        btn_layout = QHBoxLayout()
+        btn_refresh = QPushButton("🔄")
+        btn_refresh.setToolTip("새로고침")
+        btn_refresh.clicked.connect(self.load_items)
+        btn_main = QPushButton("📋 메인 창")
+        btn_main.clicked.connect(self.open_main_window)
+        btn_layout.addWidget(btn_refresh)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_main)
+        layout.addLayout(btn_layout)
+        
+        # 메인 레이아웃
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(container)
+    
+    def load_items(self):
+        """최근 10개 항목 로드"""
+        from PyQt6.QtWidgets import QListWidgetItem
+        self.list_widget.clear()
+        items = self.db.get_items("", "전체")[:10]
+        
+        type_icons = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨", "FILE": "📁"}
+        
+        for pid, content, ptype, timestamp, pinned, use_count, pin_order in items:
+            icon = type_icons.get(ptype, "📝")
+            pin_mark = "📌 " if pinned else ""
+            display = content.replace('\n', ' ')[:35] + ("..." if len(content) > 35 else "")
+            
+            item = QListWidgetItem(f"{pin_mark}{icon} {display}")
+            item.setData(Qt.ItemDataRole.UserRole, pid)
+            item.setToolTip(content[:200])
+            self.list_widget.addItem(item)
+    
+    def on_item_double_clicked(self, item):
+        """항목 더블클릭 - 복사 후 숨기기"""
+        pid = item.data(Qt.ItemDataRole.UserRole)
+        if pid:
+            data = self.db.get_content(pid)
+            if data:
+                content, blob, ptype = data
+                clipboard = QApplication.clipboard()
+                if ptype == "IMAGE" and blob:
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(blob)
+                    clipboard.setPixmap(pixmap)
+                else:
+                    clipboard.setText(content)
+                self.db.increment_use_count(pid)
+                self.hide()
+                # 붙여넣기
+                QTimer.singleShot(200, lambda: keyboard.send('ctrl+v'))
+    
+    def open_main_window(self):
+        """메인 창 열기"""
+        if self.parent_window:
+            self.parent_window.show()
+            self.parent_window.activateWindow()
+        self.hide()
+    
+    def mousePressEvent(self, event):
+        """드래그 시작"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+    
+    def mouseMoveEvent(self, event):
+        """드래그 이동"""
+        if event.buttons() == Qt.MouseButton.LeftButton and self.drag_pos:
+            self.move(event.globalPosition().toPoint() - self.drag_pos)
+            event.accept()
+    
+    def showEvent(self, event):
+        """표시될 때 항목 로드"""
+        super().showEvent(event)
+        self.load_items()
+
+
+# --- v8.0: 핫키 설정 다이얼로그 ---
+class HotkeySettingsDialog(QDialog):
+    """커스텀 핫키 설정"""
+    
+    def __init__(self, parent, db):
+        super().__init__(parent)
+        self.db = db
+        self.setWindowTitle("⌨️ 핫키 설정")
+        self.setMinimumSize(400, 250)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        
+        info = QLabel("단축키를 설정하세요. (예: ctrl+shift+v, alt+v)")
+        info.setStyleSheet("color: gray;")
+        layout.addWidget(info)
+        
+        form = QFormLayout()
+        
+        # 현재 설정 로드
+        hotkeys = json.loads(self.db.get_setting("hotkeys", json.dumps(DEFAULT_HOTKEYS)))
+        
+        self.input_main = QLineEdit(hotkeys.get("show_main", "ctrl+shift+v"))
+        self.input_main.setPlaceholderText("ctrl+shift+v")
+        form.addRow("메인 창 열기:", self.input_main)
+        
+        self.input_mini = QLineEdit(hotkeys.get("show_mini", "alt+v"))
+        self.input_mini.setPlaceholderText("alt+v")
+        form.addRow("미니 창 열기:", self.input_mini)
+        
+        self.input_paste = QLineEdit(hotkeys.get("paste_last", "ctrl+shift+z"))
+        self.input_paste.setPlaceholderText("ctrl+shift+z")
+        form.addRow("마지막 항목 붙여넣기:", self.input_paste)
+        
+        layout.addLayout(form)
+        
+        # 버튼
+        btn_layout = QHBoxLayout()
+        btn_reset = QPushButton("🔄 기본값")
+        btn_reset.clicked.connect(self.reset_defaults)
+        btn_save = QPushButton("저장")
+        btn_save.clicked.connect(self.save_hotkeys)
+        btn_cancel = QPushButton("취소")
+        btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(btn_reset)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_save)
+        btn_layout.addWidget(btn_cancel)
+        layout.addLayout(btn_layout)
+    
+    def reset_defaults(self):
+        """기본값 복원"""
+        self.input_main.setText(DEFAULT_HOTKEYS["show_main"])
+        self.input_mini.setText(DEFAULT_HOTKEYS["show_mini"])
+        self.input_paste.setText(DEFAULT_HOTKEYS["paste_last"])
+    
+    def save_hotkeys(self):
+        """핫키 저장"""
+        hotkeys = {
+            "show_main": self.input_main.text().strip().lower(),
+            "show_mini": self.input_mini.text().strip().lower(),
+            "paste_last": self.input_paste.text().strip().lower()
+        }
+        self.db.set_setting("hotkeys", json.dumps(hotkeys))
+        QMessageBox.information(self, "저장 완료", "핫키 설정이 저장되었습니다.\n변경사항은 프로그램 재시작 후 적용됩니다.")
+        self.accept()
 
 
 # --- 스니펫 다이얼로그 ---
@@ -1120,6 +2471,12 @@ class MainWindow(QMainWindow):
             self.clipboard = QApplication.clipboard()
             self.clipboard.dataChanged.connect(self.on_clipboard_change)
             self.is_internal_copy = False
+            self.is_privacy_mode = False  # 프라이버시 모드 (모니터링 중지)
+            
+            # v8.0: 새 매니저들 초기화
+            self.vault_manager = SecureVaultManager(self.db)
+            self.action_manager = ClipboardActionManager(self.db)
+            self.export_manager = ExportImportManager(self.db)
             
             self.settings = QSettings(ORG_NAME, APP_NAME)
             self.current_theme = self.db.get_setting("theme", "dark")
@@ -1141,18 +2498,80 @@ class MainWindow(QMainWindow):
             self.init_tray()
             self.init_shortcuts()
             
-            self.hotkey_thread = HotkeyListener()
-            self.hotkey_thread.show_signal.connect(self.show_window_from_tray)
-            self.hotkey_thread.start()
+            # v8.0: 플로팅 미니 창
+            self.mini_window = FloatingMiniWindow(self.db, self)
+            
+            # 핫키 설정 로드 및 등록
+            self.register_hotkeys()
             
             self.update_always_on_top()
             self.load_data()
             self.update_status_bar()
             
-            logger.info("SmartClipboard Pro started")
+            # v8.0: 보관함 자동 잠금 타이머
+            self.vault_timer = QTimer(self)
+            self.vault_timer.timeout.connect(self.check_vault_timeout)
+            self.vault_timer.start(60000)  # 1분마다 체크
+            
+            logger.info("SmartClipboard Pro v8.0 started")
         except Exception as e:
             logger.error(f"MainWindow Init Error: {e}", exc_info=True)
             raise e
+    
+    def register_hotkeys(self):
+        """v8.0: 커스텀 핫키 등록"""
+        try:
+            hotkeys = json.loads(self.db.get_setting("hotkeys", json.dumps(DEFAULT_HOTKEYS)))
+            
+            self.hotkey_thread = HotkeyListener()
+            self.hotkey_thread.show_signal.connect(self.show_window_from_tray)
+            self.hotkey_thread.start()
+            
+            # 미니 창 핫키
+            mini_key = hotkeys.get("show_mini", "alt+v")
+            keyboard.add_hotkey(mini_key, self.toggle_mini_window)
+            
+            # 마지막 항목 즉시 붙여넣기 핫키
+            paste_key = hotkeys.get("paste_last", "ctrl+shift+z")
+            keyboard.add_hotkey(paste_key, self.paste_last_item)
+            
+        except Exception as e:
+            logger.warning(f"Hotkey registration error: {e}")
+    
+    def toggle_mini_window(self):
+        """미니 창 토글"""
+        if self.mini_window.isVisible():
+            self.mini_window.hide()
+        else:
+            # 커서 위치 근처에 표시
+            from PyQt6.QtGui import QCursor
+            cursor_pos = QCursor.pos()
+            self.mini_window.move(cursor_pos.x() - 150, cursor_pos.y() - 200)
+            self.mini_window.show()
+            self.mini_window.activateWindow()
+    
+    def paste_last_item(self):
+        """마지막 항목 즉시 붙여넣기"""
+        items = self.db.get_items("", "전체")
+        if items:
+            pid, content, ptype, *_ = items[0]
+            data = self.db.get_content(pid)
+            if data:
+                content, blob, ptype = data
+                self.is_internal_copy = True
+                if ptype == "IMAGE" and blob:
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(blob)
+                    self.clipboard.setPixmap(pixmap)
+                else:
+                    self.clipboard.setText(content)
+                self.db.increment_use_count(pid)
+                QTimer.singleShot(100, lambda: keyboard.send('ctrl+v'))
+    
+    def check_vault_timeout(self):
+        """보관함 자동 잠금 체크"""
+        if self.vault_manager.check_timeout():
+            logger.info("Vault auto-locked due to inactivity")
 
     def restore_window_state(self):
         geometry = self.settings.value("geometry")
@@ -1202,6 +2621,51 @@ class MainWindow(QMainWindow):
             logger.warning(f"Cleanup warning: {e}")
         self.db.close()
         QApplication.quit()
+
+    def toggle_privacy_mode(self):
+        """프라이버시 모드 토글"""
+        self.is_privacy_mode = not self.is_privacy_mode
+        
+        # UI 상태 동기화
+        self.action_privacy.setChecked(self.is_privacy_mode)
+        if hasattr(self, 'tray_privacy_action'):
+            self.tray_privacy_action.setChecked(self.is_privacy_mode)
+            
+        self.update_status_bar()
+        
+        msg = "프라이버시 모드가 켜졌습니다.\n이제 클립보드 내용이 저장되지 않습니다." if self.is_privacy_mode else "프라이버시 모드가 꺼졌습니다.\n다시 클립보드 기록을 시작합니다."
+        ToastNotification.show_toast(self, msg, duration=3000, toast_type="warning" if self.is_privacy_mode else "success")
+
+    def backup_data(self):
+        """데이터베이스 백업"""
+        file_name, _ = QFileDialog.getSaveFileName(self, "데이터 백업", f"backup_{datetime.date.today()}.db", "SQLite DB Files (*.db);;All Files (*)")
+        if file_name:
+            try:
+                import shutil
+                shutil.copy2(DB_FILE, file_name)
+                QMessageBox.information(self, "백업 완료", f"데이터가 성공적으로 백업되었습니다:\n{file_name}")
+            except Exception as e:
+                QMessageBox.critical(self, "백업 오류", f"백업 중 오류가 발생했습니다:\n{e}")
+
+    def restore_data(self):
+        """데이터베이스 복원"""
+        reply = QMessageBox.warning(self, "복원 경고", "데이터를 복원하면 현재 데이터가 모두 덮어씌워집니다.\n계속하시겠습니까?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.No:
+            return
+            
+        file_name, _ = QFileDialog.getOpenFileName(self, "데이터 복원", "", "SQLite DB Files (*.db);;All Files (*)")
+        if file_name:
+            try:
+                # DB 연결 종료 시도 (안전한 복사를 위해)
+                self.db.conn.close()
+                import shutil
+                shutil.copy2(file_name, DB_FILE)
+                QMessageBox.information(self, "복원 완료", "데이터가 복원되었습니다.\n프로그램을 재시작합니다.")
+                self.quit_app()
+            except Exception as e:
+                QMessageBox.critical(self, "복원 오류", f"복원 중 오류가 발생했습니다:\n{e}")
+                # 연결 재수립 시도
+                self.db = ClipboardDB()
 
     def create_app_icon(self):
         size = 64
@@ -1311,13 +2775,15 @@ class MainWindow(QMainWindow):
         QTableWidget::item {{
             padding: 8px;
             border-bottom: 1px solid {theme["border"]};
+            color: {theme["text"]};
         }}
         QTableWidget::item:selected {{
             background-color: {theme["primary"]};
-            color: white;
+            color: {theme.get("selected_text", "#ffffff")};
         }}
-        QTableWidget::item:hover {{
-            background-color: {theme["surface_variant"]};
+        QTableWidget::item:hover:!selected {{
+            background-color: {theme.get("hover_bg", theme["surface_variant"])};
+            color: {theme.get("hover_text", theme["text"])};
         }}
         QHeaderView::section {{ 
             background-color: {theme["surface_variant"]}; 
@@ -1340,50 +2806,75 @@ class MainWindow(QMainWindow):
         QLabel#ImagePreview {{
             background-color: {theme["surface_variant"]}; 
             border: 2px solid {theme["border"]}; 
-            border-radius: 8px;
+            border-radius: 12px;
         }}
         
         QPushButton {{ 
             background-color: {theme["surface_variant"]}; 
-            border: none; 
-            border-radius: 8px; 
-            padding: 10px 16px; 
+            border: 1px solid {theme["border"]}; 
+            border-radius: 10px; 
+            padding: 10px 18px; 
             color: {theme["text"]}; 
-            font-weight: bold;
+            font-weight: 600;
+            font-size: 13px;
         }}
         QPushButton:hover {{ 
             background-color: {theme["primary"]}; 
+            border-color: {theme["primary"]};
             color: white;
         }}
         QPushButton:pressed {{ 
             background-color: {theme["primary_variant"]}; 
         }}
+        QPushButton:disabled {{
+            background-color: {theme["surface"]};
+            color: {theme["text_secondary"]};
+            border-color: {theme["border"]};
+        }}
         
         QPushButton#PrimaryBtn {{
-            background-color: {theme["primary"]};
+            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {theme.get("gradient_start", theme["primary"])}, stop:1 {theme.get("gradient_end", theme["primary_variant"])});
             color: white;
+            border: none;
+            font-weight: bold;
         }}
         QPushButton#PrimaryBtn:hover {{
-            background-color: {theme["primary_variant"]};
+            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {theme.get("gradient_end", theme["primary_variant"])}, stop:1 {theme.get("gradient_start", theme["primary"])});
         }}
         
         QPushButton#ToolBtn {{
             background-color: {theme["surface"]}; 
             font-size: 12px; 
-            padding: 6px 12px;
-            border-radius: 6px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid {theme["border"]};
         }}
         QPushButton#ToolBtn:hover {{
             background-color: {theme["secondary"]};
+            border-color: {theme["secondary"]};
             color: white;
         }}
         
         QPushButton#DeleteBtn {{ 
             background-color: {theme["error"]}; 
             color: white;
+            border: none;
         }}
         QPushButton#DeleteBtn:hover {{ 
             background-color: #dc2626; 
+        }}
+        
+        /* v8.0 Enhanced Card Style */
+        QPushButton#CardBtn {{
+            background-color: {theme["surface"]};
+            border: 1px solid {theme["border"]};
+            border-radius: 12px;
+            padding: 12px 16px;
+            text-align: left;
+        }}
+        QPushButton#CardBtn:hover {{
+            background-color: {theme["surface_variant"]};
+            border-color: {theme["primary"]};
         }}
         
         QSplitter::handle {{
@@ -1536,6 +3027,16 @@ class MainWindow(QMainWindow):
         
         file_menu.addSeparator()
         
+        action_backup = QAction("📦 데이터 백업...", self)
+        action_backup.triggered.connect(self.backup_data)
+        file_menu.addAction(action_backup)
+        
+        action_restore = QAction("♻️ 데이터 복원...", self)
+        action_restore.triggered.connect(self.restore_data)
+        file_menu.addAction(action_restore)
+        
+        file_menu.addSeparator()
+        
         action_quit = QAction("❌ 종료", self)
         action_quit.setShortcut("Ctrl+Q")
         action_quit.triggered.connect(self.quit_app)
@@ -1553,6 +3054,17 @@ class MainWindow(QMainWindow):
         action_snippets = QAction("📝 스니펫 관리...", self)
         action_snippets.triggered.connect(self.show_snippet_manager)
         edit_menu.addAction(action_snippets)
+        
+        # v8.0: 내보내기/가져오기
+        edit_menu.addSeparator()
+        
+        action_export_adv = QAction("📤 고급 내보내기...", self)
+        action_export_adv.triggered.connect(self.show_export_dialog)
+        edit_menu.addAction(action_export_adv)
+        
+        action_import = QAction("📥 가져오기...", self)
+        action_import.triggered.connect(self.show_import_dialog)
+        edit_menu.addAction(action_import)
 
         # 보기 메뉴
         view_menu = menubar.addMenu("보기")
@@ -1560,6 +3072,12 @@ class MainWindow(QMainWindow):
         action_stats = QAction("📊 히스토리 통계...", self)
         action_stats.triggered.connect(self.show_statistics)
         view_menu.addAction(action_stats)
+        
+        # v8.0: 미니 창
+        action_mini = QAction("📋 빠른 클립보드 (미니 창)", self)
+        action_mini.setShortcut("Alt+V")
+        action_mini.triggered.connect(self.toggle_mini_window)
+        view_menu.addAction(action_mini)
         
         view_menu.addSeparator()
         
@@ -1592,9 +3110,32 @@ class MainWindow(QMainWindow):
         action_rules.triggered.connect(self.show_copy_rules)
         settings_menu.addAction(action_rules)
         
+        # v8.0: 클립보드 액션 자동화
+        action_actions = QAction("⚡ 액션 자동화...", self)
+        action_actions.triggered.connect(self.show_clipboard_actions)
+        settings_menu.addAction(action_actions)
+        
+        # v8.0: 핫키 설정
+        action_hotkeys = QAction("⌨️ 핫키 설정...", self)
+        action_hotkeys.triggered.connect(self.show_hotkey_settings)
+        settings_menu.addAction(action_hotkeys)
+        
         action_settings = QAction("⚙️ 설정...", self)
         action_settings.triggered.connect(self.show_settings)
         settings_menu.addAction(action_settings)
+        
+        settings_menu.addSeparator()
+        
+        # v8.0: 보안 보관함
+        action_vault = QAction("🔒 보안 보관함...", self)
+        action_vault.triggered.connect(self.show_secure_vault)
+        settings_menu.addAction(action_vault)
+        
+        settings_menu.addSeparator()
+        
+        self.action_privacy = QAction("🔒 프라이버시 모드 (기록 중지)", self, checkable=True)
+        self.action_privacy.triggered.connect(self.toggle_privacy_mode)
+        settings_menu.addAction(self.action_privacy)
         
         # 도움말 메뉴
         help_menu = menubar.addMenu("도움말")
@@ -1641,6 +3182,39 @@ class MainWindow(QMainWindow):
         dialog = CopyRulesDialog(self, self.db)
         dialog.exec()
     
+    # --- v8.0: 새 다이얼로그 핸들러 ---
+    def show_secure_vault(self):
+        """보안 보관함 표시"""
+        if not HAS_CRYPTO:
+            QMessageBox.warning(self, "라이브러리 필요", 
+                "암호화 기능을 사용하려면 cryptography 라이브러리가 필요합니다.\n\npip install cryptography")
+            return
+        dialog = SecureVaultDialog(self, self.db, self.vault_manager)
+        dialog.exec()
+    
+    def show_clipboard_actions(self):
+        """클립보드 액션 자동화 관리"""
+        dialog = ClipboardActionsDialog(self, self.db, self.action_manager)
+        dialog.exec()
+    
+    def show_export_dialog(self):
+        """고급 내보내기 다이얼로그"""
+        dialog = ExportDialog(self, self.export_manager)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.statusBar().showMessage("✅ 내보내기 완료", 3000)
+    
+    def show_import_dialog(self):
+        """가져오기 다이얼로그"""
+        dialog = ImportDialog(self, self.export_manager)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.load_data()
+            self.statusBar().showMessage("✅ 가져오기 완료", 3000)
+    
+    def show_hotkey_settings(self):
+        """핫키 설정 다이얼로그"""
+        dialog = HotkeySettingsDialog(self, self.db)
+        dialog.exec()
+    
     def show_shortcuts_dialog(self):
         """키보드 단축키 안내 다이얼로그"""
         shortcuts_text = """
@@ -1677,7 +3251,7 @@ class MainWindow(QMainWindow):
 <li>다크/라이트/오션 테마</li>
 </ul>
 <br>
-<p>© 2024-2025 MySmartTools</p>
+<p>© 2025-2026 MySmartTools</p>
 """
         QMessageBox.about(self, f"스마트 클립보드 프로 v{VERSION}", about_text)
 
@@ -1978,10 +3552,16 @@ class MainWindow(QMainWindow):
         
         show_action = QAction("📋 열기", self)
         show_action.triggered.connect(self.show_window_from_tray)
+        
+        self.tray_privacy_action = QAction("🔒 프라이버시 모드", self, checkable=True)
+        self.tray_privacy_action.triggered.connect(self.toggle_privacy_mode)
+        
         quit_action = QAction("❌ 종료", self)
         quit_action.triggered.connect(self.quit_app)
         
         self.tray_menu.addAction(show_action)
+        self.tray_menu.addSeparator()
+        self.tray_menu.addAction(self.tray_privacy_action)
         self.tray_menu.addSeparator()
         self.tray_menu.addAction(quit_action)
         
@@ -2021,13 +3601,34 @@ class MainWindow(QMainWindow):
             QMenu::item:selected {{ background-color: {theme["primary"]}; }}
         """)
 
-    def update_status_bar(self):
+    def update_status_bar(self, selection_count=0):
+        """상태바 업데이트 - 통계 및 선택 정보 표시"""
+        # 프라이버시 모드 표시
+        if self.is_privacy_mode:
+            self.statusBar().showMessage("🔒 프라이버시 모드 활성화됨 (클립보드 기록 중지)")
+            return
+            
         stats = self.db.get_statistics()
-        status_text = f"📊 총 {stats['total']}개 | 📌 고정 {stats['pinned']}개"
-        if stats['by_type']:
-            type_info = " | ".join([f"{k}: {v}" for k, v in stats['by_type'].items()])
-            status_text += f" | {type_info}"
-        self.statusBar().showMessage(status_text)
+        
+        # 기본 통계
+        status_parts = [f"📊 총 {stats['total']}개", f"📌 고정 {stats['pinned']}개"]
+        
+        # 현재 필터 상태
+        current_filter = self.filter_combo.currentText() if hasattr(self, 'filter_combo') else "전체"
+        if current_filter != "전체":
+            status_parts.append(f"🔍 {current_filter}")
+        
+        # 선택된 항목 수
+        if selection_count > 0:
+            status_parts.append(f"✅ {selection_count}개 선택")
+        
+        # 정렬 상태
+        if hasattr(self, 'sort_column') and self.sort_column > 0:
+            sort_names = {1: "유형", 2: "내용", 3: "시간", 4: "사용"}
+            order = "▲" if self.sort_order == Qt.SortOrder.AscendingOrder else "▼"
+            status_parts.append(f"{sort_names.get(self.sort_column, '')}{order}")
+        
+        self.statusBar().showMessage(" | ".join(status_parts))
 
     # --- 기능 로직 ---
     def toggle_always_on_top(self):
@@ -2187,9 +3788,12 @@ class MainWindow(QMainWindow):
         self.update_status_bar()
 
     def on_clipboard_change(self):
-        if self.is_internal_copy:
-            self.is_internal_copy = False
+        """클립보드 변경 감지"""
+        # 프라이버시 모드나 내부 복사면 무시
+        if self.is_privacy_mode or self.is_internal_copy:
+            self.is_internal_copy = False # 내부 복사 플래그는 한 번 사용 후 초기화
             return
+            
         QTimer.singleShot(100, self.process_clipboard)
 
     def process_clipboard(self):
@@ -2297,20 +3901,22 @@ class MainWindow(QMainWindow):
         
         theme = THEMES.get(self.current_theme, THEMES["dark"])
         
-        # 빈 결과 상태 표시
+        # 빈 결과 상태 표시 (개선된 UI)
         if not items:
             self.table.setRowCount(1)
             if search_query:
                 empty_msg = f"🔍 '{search_query}'에 대한 검색 결과가 없습니다"
+            elif self.current_tag_filter:
+                empty_msg = f"🏷️ '{self.current_tag_filter}' 태그를 가진 항목이 없습니다"
             else:
-                empty_msg = "📋 클립보드 히스토리가 비어있습니다\n복사하면 자동으로 저장됩니다"
+                empty_msg = "📋 클립보드 히스토리가 비어있습니다\n\n텍스트나 이미지를 복사하면 자동으로 저장됩니다\n⌨️ Ctrl+Shift+V로 언제든 호출 가능"
             empty_item = QTableWidgetItem(empty_msg)
             empty_item.setForeground(QColor(theme["text_secondary"]))
             empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self.table.setItem(0, 0, empty_item)
             self.table.setSpan(0, 0, 1, 5)
-            self.table.setRowHeight(0, 80)  # 빈 상태 행 높이 증가
+            self.table.setRowHeight(0, 100)  # 빈 상태 행 높이 증가
             return
         
         # 날짜 비교용
@@ -2334,11 +3940,17 @@ class MainWindow(QMainWindow):
             type_item.setData(Qt.ItemDataRole.UserRole + 1, ptype)  # 정렬용 원본 데이터
             self.table.setItem(row_idx, 1, type_item)
             
-            # 내용
+            # 내용 + 툴팁
             display = content.replace('\n', ' ').strip()
             if len(display) > 45: 
                 display = display[:45] + "..."
             content_item = QTableWidgetItem(display)
+            # 툴팁에 전체 내용 표시 (최대 500자)
+            if ptype == "IMAGE":
+                content_item.setToolTip("🖼️ 이미지 항목 - 더블클릭으로 미리보기")
+            else:
+                tooltip_text = content[:500] if len(content) > 500 else content
+                content_item.setToolTip(tooltip_text)
             if ptype == "LINK":
                 content_item.setForeground(QColor(theme["secondary"]))
             elif ptype == "CODE":
@@ -2373,8 +3985,15 @@ class MainWindow(QMainWindow):
             use_item.setForeground(QColor(theme["text_secondary"]))
             use_item.setData(Qt.ItemDataRole.UserRole + 1, use_count or 0)  # 정렬용 원본 데이터
             self.table.setItem(row_idx, 4, use_item)
+            
+        # 상태바 업데이트
+        self.update_status_bar()
 
     def on_selection_changed(self):
+        # 선택된 항목 수 계산 및 상태바 업데이트
+        selected_count = len(self.table.selectionModel().selectedRows())
+        self.update_status_bar(selected_count)
+        
         pid = self.get_selected_id()
         if not pid:
             self.update_ui_state(False)
@@ -2657,10 +4276,45 @@ class MainWindow(QMainWindow):
         delete_action = menu.addAction("🗑️ 삭제")
         delete_action.triggered.connect(self.delete_item)
         
+        # 텍스트 변환 서브메뉴 (텍스트 항목인 경우)
+        if pid:
+            data = self.db.get_content(pid)
+            if data and data[2] not in ["IMAGE"]:
+                menu.addSeparator()
+                transform_menu = menu.addMenu("✍️ 텍스트 변환")
+                
+                upper_action = transform_menu.addAction("ABC 대문자 변환")
+                upper_action.triggered.connect(lambda: self.transform_text("upper"))
+                
+                lower_action = transform_menu.addAction("abc 소문자 변환")
+                lower_action.triggered.connect(lambda: self.transform_text("lower"))
+                
+                strip_action = transform_menu.addAction("✂️ 공백 제거")
+                strip_action.triggered.connect(lambda: self.transform_text("strip"))
+                
+                normalize_action = transform_menu.addAction("📋 줄바꿈 정리")
+                normalize_action.triggered.connect(lambda: self.transform_text("normalize"))
+                
+                json_action = transform_menu.addAction("{ } JSON 포맷팅")
+                json_action.triggered.connect(lambda: self.transform_text("json"))
+        
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
 
 if __name__ == "__main__":
+    # 전역 예외 처리기
+    def global_exception_handler(exctype, value, traceback):
+        logger.error("Uncaught exception", exc_info=(exctype, value, traceback))
+        error_msg = f"{exctype.__name__}: {value}"
+        
+        # GUI가 살아있다면 메시지 박스 표시
+        if QApplication.instance():
+            QMessageBox.critical(None, "Critical Error", f"An unexpected error occurred:\n{error_msg}")
+        
+        sys.__excepthook__(exctype, value, traceback)
+
+    sys.excepthook = global_exception_handler
+
     try:
         # HiDPI 지원
         os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
