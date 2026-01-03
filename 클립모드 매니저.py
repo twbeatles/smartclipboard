@@ -60,7 +60,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QTabWidget, QGroupBox, QFrame, QInputDialog
 )
 from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray,
+    Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer,
     QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent
 )
 from PyQt6.QtGui import (
@@ -68,8 +68,20 @@ from PyQt6.QtGui import (
     QPainter, QKeySequence, QShortcut, QLinearGradient, QBrush, QPen
 )
 
+# --- 경로 설정 (Windows 시작 시 CWD가 System32가 되는 문제 해결) ---
+def get_app_directory():
+    """실행 파일 위치 기반 앱 디렉토리 반환"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller로 패키징된 경우
+        return os.path.dirname(sys.executable)
+    else:
+        # 개발 환경
+        return os.path.dirname(os.path.abspath(__file__))
+
+APP_DIR = get_app_directory()
+
 # --- 로깅 설정 ---
-LOG_FILE = "clipboard_manager.log"
+LOG_FILE = os.path.join(APP_DIR, "clipboard_manager.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -81,12 +93,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- 설정 ---
-DB_FILE = "clipboard_history_v6.db"
+DB_FILE = os.path.join(APP_DIR, "clipboard_history_v6.db")
 MAX_HISTORY = 100 
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "8.0"
+VERSION = "9.0"
 
 # 기본 핫키 설정
 DEFAULT_HOTKEYS = {
@@ -209,6 +221,21 @@ THEMES = {
         "selected_text": "#0f0f1a",
     }
 }
+
+# v9.0: 글래스모피즘 및 애니메이션 상수
+GLASS_STYLES = {
+    "dark": {"glass_bg": "rgba(22, 33, 62, 0.85)", "shadow": "rgba(0, 0, 0, 0.4)"},
+    "light": {"glass_bg": "rgba(255, 255, 255, 0.9)", "shadow": "rgba(0, 0, 0, 0.1)"},
+    "ocean": {"glass_bg": "rgba(21, 38, 66, 0.88)", "shadow": "rgba(0, 0, 0, 0.35)"},
+    "purple": {"glass_bg": "rgba(28, 26, 41, 0.9)", "shadow": "rgba(0, 0, 0, 0.45)"},
+    "midnight": {"glass_bg": "rgba(26, 26, 46, 0.92)", "shadow": "rgba(0, 0, 0, 0.5)"},
+}
+
+# 애니메이션 duration (ms)
+ANIM_FAST = 150
+ANIM_NORMAL = 250
+ANIM_SLOW = 400
+
 
 # --- 데이터베이스 클래스 ---
 class ClipboardDB:
@@ -1288,6 +1315,21 @@ class SettingsDialog(QDialog):
         history_layout.addRow("최대 저장 개수:", self.max_history_spin)
         general_layout.addWidget(history_group)
         
+        # v8.1: 로깅 레벨 설정
+        logging_group = QGroupBox("📝 로깅")
+        logging_layout = QFormLayout(logging_group)
+        self.log_level_combo = QComboBox()
+        log_levels = [("DEBUG - 상세 디버깅", "DEBUG"), ("INFO - 일반 정보", "INFO"), 
+                      ("WARNING - 경고만", "WARNING"), ("ERROR - 오류만", "ERROR")]
+        for name, value in log_levels:
+            self.log_level_combo.addItem(name, value)
+        current_level = self.db.get_setting("log_level", "INFO")
+        level_values = [v for _, v in log_levels]
+        if current_level in level_values:
+            self.log_level_combo.setCurrentIndex(level_values.index(current_level))
+        logging_layout.addRow("로깅 레벨:", self.log_level_combo)
+        general_layout.addWidget(logging_group)
+        
         general_layout.addStretch()
         tabs.addTab(general_tab, "일반")
         
@@ -1330,6 +1372,17 @@ class SettingsDialog(QDialog):
         
         self.db.set_setting("theme", selected_theme)
         self.db.set_setting("max_history", self.max_history_spin.value())
+        
+        # v8.1: 로깅 레벨 저장 및 적용
+        selected_log_level = self.log_level_combo.currentData()
+        self.db.set_setting("log_level", selected_log_level)
+        # 런타임에 로깅 레벨 변경
+        log_level_map = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, 
+                         "WARNING": logging.WARNING, "ERROR": logging.ERROR}
+        if selected_log_level in log_level_map:
+            logger.setLevel(log_level_map[selected_log_level])
+            for handler in logger.handlers:
+                handler.setLevel(log_level_map[selected_log_level])
         
         if selected_theme != current_theme:
             QMessageBox.information(self, "테마 변경", "설정한 테마가 적용되었습니다.")
@@ -2553,7 +2606,7 @@ class MainWindow(QMainWindow):
             # 기존 훅 모두 제거 (재등록 시 중복 방지)
             try:
                 keyboard.unhook_all()
-            except:
+            except Exception:
                 pass
 
             # 메인 창 열기 핫키 - 시그널 emit으로 메인 스레드에서 실행
@@ -2685,7 +2738,7 @@ class MainWindow(QMainWindow):
         # 3. DB 연결 종료
         try:
             self.db.close()
-        except:
+        except Exception:
             pass
             
         # 4. Qt 앱 종료
@@ -2777,74 +2830,103 @@ class MainWindow(QMainWindow):
 
     def apply_theme(self):
         theme = THEMES.get(self.current_theme, THEMES["dark"])
+        glass = GLASS_STYLES.get(self.current_theme, GLASS_STYLES["dark"])
         style = f"""
         QMainWindow {{ 
             background-color: {theme["background"]}; 
         }}
+        
+        /* v9.0: 글래스모피즘 메뉴바 */
         QMenuBar {{ 
-            background-color: {theme["surface"]}; 
+            background-color: {glass["glass_bg"]}; 
             color: {theme["text"]}; 
-            font-family: 'Malgun Gothic'; 
-            padding: 4px;
+            font-family: 'Malgun Gothic', 'Segoe UI', sans-serif; 
+            padding: 6px 4px;
+            border-bottom: 1px solid {theme["border"]};
+        }}
+        QMenuBar::item {{ 
+            padding: 6px 12px;
+            border-radius: 6px;
+            margin: 0 2px;
         }}
         QMenuBar::item:selected {{ 
             background-color: {theme["primary"]}; 
-            border-radius: 4px;
+            border-radius: 6px;
         }}
+        
+        /* v9.0: 글래스모피즘 메뉴 */
         QMenu {{ 
-            background-color: {theme["surface"]}; 
+            background-color: {glass["glass_bg"]}; 
             color: {theme["text"]}; 
             border: 1px solid {theme["border"]}; 
-            font-family: 'Malgun Gothic'; 
-            padding: 5px;
+            border-radius: 12px;
+            font-family: 'Malgun Gothic', 'Segoe UI', sans-serif; 
+            padding: 8px;
         }}
         QMenu::item {{ 
-            padding: 8px 20px; 
-            border-radius: 4px;
+            padding: 10px 24px; 
+            border-radius: 8px;
+            margin: 2px 4px;
         }}
         QMenu::item:selected {{ 
             background-color: {theme["primary"]}; 
         }}
+        QMenu::separator {{
+            height: 1px;
+            background-color: {theme["border"]};
+            margin: 6px 12px;
+        }}
         
         QWidget {{ 
             color: {theme["text"]}; 
-            font-family: 'Malgun Gothic'; 
+            font-family: 'Malgun Gothic', 'Segoe UI', sans-serif; 
             font-size: 13px; 
         }}
         
+        /* v9.0: 글래스모피즘 검색창 */
         QLineEdit, QComboBox {{ 
-            background-color: {theme["surface_variant"]}; 
+            background-color: {glass["glass_bg"]}; 
             border: 2px solid {theme["border"]}; 
-            border-radius: 12px; 
-            padding: 8px 16px; 
+            border-radius: 14px; 
+            padding: 10px 18px; 
             color: {theme["text"]}; 
             selection-background-color: {theme["primary"]};
+            font-size: 14px;
         }}
         QLineEdit:focus, QComboBox:focus {{ 
             border: 2px solid {theme["primary"]}; 
+            background-color: {theme["surface_variant"]};
+        }}
+        QLineEdit:hover, QComboBox:hover {{
+            border-color: {theme["primary_variant"]};
         }}
         QComboBox::drop-down {{ 
             border: none; 
-            padding-right: 10px;
+            padding-right: 12px;
+            width: 20px;
         }}
         QComboBox QAbstractItemView {{
-            background-color: {theme["surface"]};
+            background-color: {glass["glass_bg"]};
             border: 1px solid {theme["border"]};
+            border-radius: 10px;
             selection-background-color: {theme["primary"]};
+            padding: 4px;
         }}
         
+        /* v9.0: 글래스모피즘 테이블 */
         QTableWidget {{ 
-            background-color: {theme["surface"]}; 
+            background-color: {glass["glass_bg"]}; 
             border: none; 
-            border-radius: 8px;
+            border-radius: 16px;
             selection-background-color: {theme["primary"]}; 
             gridline-color: transparent;
             outline: none;
+            padding: 4px;
         }}
         QTableWidget::item {{
-            padding: 8px;
+            padding: 10px 8px;
             border-bottom: 1px solid {theme["border"]};
-            color: {theme["text"]};
+            border-radius: 0px;
         }}
         QTableWidget::item:selected {{
             background-color: {theme["primary"]};
@@ -2854,35 +2936,50 @@ class MainWindow(QMainWindow):
             background-color: {theme.get("hover_bg", theme["surface_variant"])};
             color: {theme.get("hover_text", theme["text"])};
         }}
+        
+        /* v9.0: 개선된 헤더 */
         QHeaderView::section {{ 
-            background-color: {theme["surface_variant"]}; 
-            padding: 10px; 
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 {theme["surface_variant"]}, stop:1 {theme["surface"]}); 
+            padding: 12px 8px; 
             border: none; 
-            font-weight: bold; 
+            border-bottom: 2px solid {theme["border"]};
+            font-weight: 700; 
+            font-size: 12px;
             color: {theme["text_secondary"]}; 
         }}
+        QHeaderView::section:hover {{
+            background-color: {theme["surface_variant"]};
+            color: {theme["primary"]};
+        }}
         
+        /* v9.0: 글래스 텍스트 영역 */
         QTextEdit {{ 
-            background-color: {theme["surface_variant"]}; 
+            background-color: {glass["glass_bg"]}; 
             border: 2px solid {theme["border"]}; 
-            border-radius: 8px; 
-            padding: 12px; 
-            font-family: 'Consolas', 'Malgun Gothic', monospace; 
+            border-radius: 14px; 
+            padding: 14px; 
+            font-family: 'Cascadia Code', 'Consolas', 'D2Coding', monospace; 
             font-size: 14px;
+            line-height: 1.5;
             selection-background-color: {theme["primary"]};
+        }}
+        QTextEdit:focus {{
+            border-color: {theme["primary"]};
         }}
         
         QLabel#ImagePreview {{
-            background-color: {theme["surface_variant"]}; 
+            background-color: {glass["glass_bg"]}; 
             border: 2px solid {theme["border"]}; 
-            border-radius: 12px;
+            border-radius: 16px;
         }}
         
+        /* v9.0: 현대적 버튼 스타일 */
         QPushButton {{ 
             background-color: {theme["surface_variant"]}; 
             border: 1px solid {theme["border"]}; 
-            border-radius: 10px; 
-            padding: 10px 18px; 
+            border-radius: 12px; 
+            padding: 12px 20px; 
             color: {theme["text"]}; 
             font-weight: 600;
             font-size: 13px;
@@ -2899,24 +2996,32 @@ class MainWindow(QMainWindow):
             background-color: {theme["surface"]};
             color: {theme["text_secondary"]};
             border-color: {theme["border"]};
+            opacity: 0.6;
         }}
         
+        /* v9.0: 그라데이션 Primary 버튼 */
         QPushButton#PrimaryBtn {{
-            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {theme.get("gradient_start", theme["primary"])}, stop:1 {theme.get("gradient_end", theme["primary_variant"])});
+            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
+                stop:0 {theme.get("gradient_start", theme["primary"])}, 
+                stop:1 {theme.get("gradient_end", theme["primary_variant"])});
             color: white;
             border: none;
             font-weight: bold;
+            font-size: 14px;
         }}
         QPushButton#PrimaryBtn:hover {{
-            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {theme.get("gradient_end", theme["primary_variant"])}, stop:1 {theme.get("gradient_start", theme["primary"])});
+            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
+                stop:0 {theme.get("gradient_end", theme["primary_variant"])}, 
+                stop:1 {theme.get("gradient_start", theme["primary"])});
         }}
         
+        /* v9.0: 미니멀 아이콘 버튼 */
         QPushButton#ToolBtn {{
-            background-color: {theme["surface"]}; 
-            font-size: 12px; 
-            padding: 8px 14px;
-            border-radius: 8px;
+            background-color: transparent; 
             border: 1px solid {theme["border"]};
+            font-size: 13px; 
+            padding: 8px 12px;
+            border-radius: 10px;
         }}
         QPushButton#ToolBtn:hover {{
             background-color: {theme["secondary"]};
@@ -2924,21 +3029,25 @@ class MainWindow(QMainWindow):
             color: white;
         }}
         
+        /* v9.0: 경고 삭제 버튼 */
         QPushButton#DeleteBtn {{ 
-            background-color: {theme["error"]}; 
+            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 {theme["error"]}, stop:1 #dc2626); 
             color: white;
             border: none;
+            font-weight: bold;
         }}
         QPushButton#DeleteBtn:hover {{ 
-            background-color: #dc2626; 
+            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #dc2626, stop:1 #b91c1c);
         }}
         
-        /* v8.0 Enhanced Card Style */
+        /* v9.0: 카드 스타일 버튼 */
         QPushButton#CardBtn {{
-            background-color: {theme["surface"]};
+            background-color: {glass["glass_bg"]};
             border: 1px solid {theme["border"]};
-            border-radius: 12px;
-            padding: 12px 16px;
+            border-radius: 14px;
+            padding: 14px 18px;
             text-align: left;
         }}
         QPushButton#CardBtn:hover {{
@@ -2946,44 +3055,61 @@ class MainWindow(QMainWindow):
             border-color: {theme["primary"]};
         }}
         
+        /* v9.0: 스플리터 */
         QSplitter::handle {{
             background-color: {theme["border"]};
-            height: 2px;
+            height: 3px;
+            border-radius: 1px;
+        }}
+        QSplitter::handle:hover {{
+            background-color: {theme["primary"]};
         }}
         
+        /* v9.0: 글래스 상태바 */
         QStatusBar {{
-            background-color: {theme["surface"]};
+            background-color: {glass["glass_bg"]};
             color: {theme["text_secondary"]};
             border-top: 1px solid {theme["border"]};
+            padding: 4px 8px;
+            font-size: 12px;
         }}
         
+        /* v9.0: 모던 탭 위젯 */
         QTabWidget::pane {{
             border: 1px solid {theme["border"]};
-            border-radius: 8px;
-            background-color: {theme["surface"]};
+            border-radius: 12px;
+            background-color: {glass["glass_bg"]};
         }}
         QTabBar::tab {{
             background-color: {theme["surface_variant"]};
             color: {theme["text_secondary"]};
-            padding: 10px 20px;
-            margin-right: 2px;
-            border-top-left-radius: 8px;
-            border-top-right-radius: 8px;
+            padding: 12px 24px;
+            margin-right: 4px;
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+            font-weight: 500;
+        }}
+        QTabBar::tab:hover {{
+            background-color: {theme["surface"]};
+            color: {theme["text"]};
         }}
         QTabBar::tab:selected {{
             background-color: {theme["primary"]};
             color: white;
+            font-weight: 600;
         }}
         
+        /* v9.0: 슬림 스크롤바 */
         QScrollBar:vertical {{
-            background-color: {theme["surface"]};
-            width: 10px;
-            border-radius: 5px;
+            background-color: transparent;
+            width: 8px;
+            border-radius: 4px;
+            margin: 4px 2px;
         }}
         QScrollBar::handle:vertical {{
             background-color: {theme["border"]};
-            border-radius: 5px;
-            min-height: 30px;
+            border-radius: 4px;
+            min-height: 40px;
         }}
         QScrollBar::handle:vertical:hover {{
             background-color: {theme["primary"]};
@@ -2991,16 +3117,71 @@ class MainWindow(QMainWindow):
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0px;
         }}
+        QScrollBar:horizontal {{
+            background-color: transparent;
+            height: 8px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:horizontal {{
+            background-color: {theme["border"]};
+            border-radius: 4px;
+            min-width: 40px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background-color: {theme["primary"]};
+        }}
+        
+        /* v9.0: 다이얼로그 스타일 */
+        QDialog {{
+            background-color: {theme["background"]};
+        }}
+        
+        /* v9.0: 그룹박스 */
+        QGroupBox {{
+            background-color: {glass["glass_bg"]};
+            border: 1px solid {theme["border"]};
+            border-radius: 12px;
+            margin-top: 12px;
+            padding-top: 12px;
+            font-weight: 600;
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            left: 12px;
+            padding: 0 8px;
+            color: {theme["text"]};
+        }}
+        
+        /* v9.0: 스핀박스 */
+        QSpinBox {{
+            background-color: {glass["glass_bg"]};
+            border: 2px solid {theme["border"]};
+            border-radius: 10px;
+            padding: 8px 12px;
+            color: {theme["text"]};
+        }}
+        QSpinBox:focus {{
+            border-color: {theme["primary"]};
+        }}
+        
+        /* v9.0: 체크박스 */
+        QCheckBox {{
+            spacing: 8px;
+        }}
+        QCheckBox::indicator {{
+            width: 20px;
+            height: 20px;
+            border-radius: 6px;
+            border: 2px solid {theme["border"]};
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {theme["primary"]};
+            border-color: {theme["primary"]};
+        }}
         """
         self.setStyleSheet(style)
-
-        QShortcut(QKeySequence("Escape"), self, self.hide)
-        QShortcut(QKeySequence("Ctrl+F"), self, lambda: self.search_input.setFocus())
-        QShortcut(QKeySequence("Delete"), self, self.delete_item)
-        QShortcut(QKeySequence("Shift+Delete"), self, self.delete_selected_items)  # 다중 삭제
-        QShortcut(QKeySequence("Ctrl+P"), self, self.toggle_pin)
-        QShortcut(QKeySequence("Return"), self, self.paste_selected)
-        QShortcut(QKeySequence("Ctrl+C"), self, self.copy_item)
+        # Note: 단축키는 init_shortcuts()에서 등록됨 (중복 방지)
 
     def eventFilter(self, source, event):
         """드래그 앤 드롭 이벤트 처리 (고정 항목 순서 변경)"""
@@ -3428,38 +3609,41 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(14)
 
-        # 상단 필터/검색 영역
+        # v9.0: 상단 필터/검색 영역 (개선된 레이아웃)
         top_layout = QHBoxLayout()
-        top_layout.setSpacing(10)
+        top_layout.setSpacing(12)
         
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["전체", "📌 고정", "텍스트", "이미지", "링크", "코드", "색상"])
-        self.filter_combo.setFixedWidth(130)
+        self.filter_combo.addItems(["전체", "📌 고정", "📝 텍스트", "🖼️ 이미지", "🔗 링크", "💻 코드", "🎨 색상"])
+        self.filter_combo.setFixedWidth(140)
+        self.filter_combo.setToolTip("유형별 필터")
         self.filter_combo.currentTextChanged.connect(self.load_data)
         
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 검색어 입력 (Ctrl+F)")
+        self.search_input.setPlaceholderText("🔍 검색어 입력... (Ctrl+F)")
         self.search_input.textChanged.connect(self.load_data)
         self.search_input.setClearButtonEnabled(True)
+        self.search_input.setMinimumHeight(40)
         
-        # 태그 필터 버튼
+        # v9.0: 태그 필터 버튼 개선
         self.btn_tag_filter = QPushButton("🏷️")
+        self.btn_tag_filter.setObjectName("ToolBtn")
         self.btn_tag_filter.setToolTip("태그 필터")
-        self.btn_tag_filter.setFixedWidth(40)
+        self.btn_tag_filter.setFixedSize(44, 40)
         self.btn_tag_filter.clicked.connect(self.show_tag_filter_menu)
         
         top_layout.addWidget(self.filter_combo)
-        top_layout.addWidget(self.search_input)
+        top_layout.addWidget(self.search_input, 1)  # stretch factor 1
         top_layout.addWidget(self.btn_tag_filter)
         main_layout.addLayout(top_layout)
 
         # 메인 스플리터
         splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # 테이블
+        # v9.0: 개선된 테이블
         self.table = QTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(["📌", "유형", "내용", "시간", "사용"])
@@ -3471,13 +3655,13 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         
-        self.table.setColumnWidth(0, 35)
-        self.table.setColumnWidth(1, 55)
-        self.table.setColumnWidth(3, 90)  # 시간 컨럼 넓이 증가 (12/25 13시 표시)
-        self.table.setColumnWidth(4, 45)
+        self.table.setColumnWidth(0, 40)
+        self.table.setColumnWidth(1, 60)
+        self.table.setColumnWidth(3, 95)
+        self.table.setColumnWidth(4, 50)
         
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(36)
+        self.table.verticalHeader().setDefaultSectionSize(42)  # v9.0: 행 높이 증가
         
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # 다중 선택 지원
@@ -3594,19 +3778,19 @@ class MainWindow(QMainWindow):
         self.btn_pin.clicked.connect(self.toggle_pin)
         
         self.btn_del = QPushButton("🗑 삭제")
-        self.btn_del.setMinimumHeight(44)
+        self.btn_del.setMinimumHeight(48)
         self.btn_del.setObjectName("DeleteBtn")
         self.btn_del.clicked.connect(self.delete_item)
 
-        btn_layout.addWidget(self.btn_copy, 2)
+        btn_layout.addWidget(self.btn_copy, 3)
         btn_layout.addWidget(self.btn_link, 2)
-        btn_layout.addWidget(self.btn_pin, 1)
+        btn_layout.addWidget(self.btn_pin, 2)
         btn_layout.addWidget(self.btn_del, 1)
         detail_layout.addLayout(btn_layout)
 
         splitter.addWidget(detail_container)
-        splitter.setStretchFactor(0, 6)
-        splitter.setStretchFactor(1, 4)
+        splitter.setStretchFactor(0, 7)  # v9.0: 테이블 영역 더 크게
+        splitter.setStretchFactor(1, 3)
         main_layout.addWidget(splitter)
         
         self.update_ui_state(False)
@@ -3640,6 +3824,10 @@ class MainWindow(QMainWindow):
 
     def init_shortcuts(self):
         """앱 내 키보드 단축키 설정"""
+        # Escape: 창 숨기기
+        shortcut_escape = QShortcut(QKeySequence("Escape"), self)
+        shortcut_escape.activated.connect(self.hide)
+        
         # Ctrl+F: 검색창 포커스
         shortcut_search = QShortcut(QKeySequence("Ctrl+F"), self)
         shortcut_search.activated.connect(lambda: self.search_input.setFocus())
@@ -3655,6 +3843,14 @@ class MainWindow(QMainWindow):
         # Shift+Delete: 다중 삭제
         shortcut_multi_delete = QShortcut(QKeySequence("Shift+Delete"), self)
         shortcut_multi_delete.activated.connect(self.delete_selected_items)
+        
+        # Return: 붙여넣기
+        shortcut_paste = QShortcut(QKeySequence("Return"), self)
+        shortcut_paste.activated.connect(self.paste_selected)
+        
+        # Ctrl+C: 복사
+        shortcut_copy = QShortcut(QKeySequence("Ctrl+C"), self)
+        shortcut_copy.activated.connect(self.copy_item)
 
     def update_tray_theme(self):
         """트레이 메뉴에 현재 테마 적용"""
@@ -3889,6 +4085,28 @@ class MainWindow(QMainWindow):
                 
                 tag = self.analyze_text(text)
                 if self.db.add_item(text, None, tag):
+                    # v8.0: 클립보드 액션 자동화 실행
+                    try:
+                        items = self.db.get_items("", "전체")
+                        if items:
+                            item_id = items[0][0]  # 방금 추가된 항목의 ID
+                            action_results = self.action_manager.process(text, item_id)
+                            for action_name, result in action_results:
+                                if result and result.get("type") == "notify":
+                                    ToastNotification.show_toast(
+                                        self, f"⚡ {action_name}: {result.get('message', '')}",
+                                        duration=3000, toast_type="info"
+                                    )
+                                elif result and result.get("type") == "title":
+                                    title = result.get("title")
+                                    if title:
+                                        ToastNotification.show_toast(
+                                            self, f"🔗 {title[:50]}...",
+                                            duration=2500, toast_type="info"
+                                        )
+                    except Exception as action_err:
+                        logger.debug(f"Action processing error: {action_err}")
+                    
                     self.load_data()
                     self.update_status_bar()
         except Exception as e:
@@ -4407,7 +4625,9 @@ if __name__ == "__main__":
     except Exception as e:
         import traceback
         error_msg = traceback.format_exc()
-        with open("debug_startup_error.log", "w", encoding="utf-8") as f:
+        # APP_DIR 기반 절대 경로로 로그 저장 (Windows 시작 시 CWD 문제 해결)
+        error_log_path = os.path.join(APP_DIR, "debug_startup_error.log")
+        with open(error_log_path, "w", encoding="utf-8") as f:
             f.write(error_msg)
             f.write(f"\nError: {e}")
         # MessageBox로도 표시 시도 (Qt가 로드되었다면)
@@ -4415,8 +4635,8 @@ if __name__ == "__main__":
             from PyQt6.QtWidgets import QMessageBox
             if not QApplication.instance():
                 app = QApplication(sys.argv)
-            QMessageBox.critical(None, "Startup Error", f"An error occurred:\n{e}\n\nSee debug_startup_error.log for details.")
-        except:
+            QMessageBox.critical(None, "Startup Error", f"An error occurred:\n{e}\n\nSee {error_log_path} for details.")
+        except Exception:
             print(f"Critical Error:\n{error_msg}")
         
         # 콘솔 창이 바로 꺼지지 않도록 대기
