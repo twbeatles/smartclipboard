@@ -81,12 +81,14 @@ def get_app_directory():
 APP_DIR = get_app_directory()
 
 # --- 로깅 설정 ---
+from logging.handlers import RotatingFileHandler
+
 LOG_FILE = os.path.join(APP_DIR, "clipboard_manager.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),
+        RotatingFileHandler(LOG_FILE, maxBytes=1*1024*1024, backupCount=3, encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -2724,24 +2726,40 @@ class MainWindow(QMainWindow):
 
     def quit_app(self):
         """앱 종료 및 리소스 정리"""
+        logger.info("앱 종료 시작...")
+        
         try:
             # 1. 핫키 훅 먼저 해제 (외부 이벤트 차단)
             keyboard.unhook_all()
+            logger.debug("핫키 훅 해제됨")
             
             # 2. 보관함 타이머 중지
             if hasattr(self, 'vault_timer') and self.vault_timer.isActive():
                 self.vault_timer.stop()
+                logger.debug("보관함 타이머 중지됨")
+            
+            # 3. 클립보드 모니터 중지
+            if hasattr(self, 'clipboard_monitor'):
+                self.clipboard_monitor.stop()
+                logger.debug("클립보드 모니터 중지됨")
+            
+            # 4. 플로팅 미니 창 닫기
+            if hasattr(self, 'mini_window') and self.mini_window:
+                self.mini_window.close()
+                logger.debug("미니 창 닫힘")
                 
         except Exception as e:
             logger.warning(f"Cleanup warning: {e}")
             
-        # 3. DB 연결 종료
+        # 5. DB 연결 종료
         try:
             self.db.close()
+            logger.debug("DB 연결 종료됨")
         except Exception:
             pass
             
-        # 4. Qt 앱 종료
+        logger.info("앱 종료 완료")
+        # 6. Qt 앱 종료
         QApplication.quit()
 
     def toggle_privacy_mode(self):
@@ -2757,6 +2775,18 @@ class MainWindow(QMainWindow):
         
         msg = "프라이버시 모드가 켜졌습니다.\n이제 클립보드 내용이 저장되지 않습니다." if self.is_privacy_mode else "프라이버시 모드가 꺼졌습니다.\n다시 클립보드 기록을 시작합니다."
         ToastNotification.show_toast(self, msg, duration=3000, toast_type="warning" if self.is_privacy_mode else "success")
+
+    def toggle_debug_mode(self):
+        """디버그 모드 토글 - 로그 레벨 변경"""
+        if self.action_debug.isChecked():
+            logging.getLogger().setLevel(logging.DEBUG)
+            logger.info("디버그 모드 활성화됨 - 로그 레벨: DEBUG")
+            self.statusBar().showMessage("🐛 디버그 모드 활성화", 2000)
+            ToastNotification.show_toast(self, "디버그 모드 활성화\n상세 로그가 기록됩니다.", duration=2000, toast_type="info")
+        else:
+            logging.getLogger().setLevel(logging.INFO)
+            logger.info("디버그 모드 비활성화됨 - 로그 레벨: INFO")
+            self.statusBar().showMessage("디버그 모드 비활성화", 2000)
 
     def backup_data(self):
         """데이터베이스 백업"""
@@ -2991,12 +3021,13 @@ class MainWindow(QMainWindow):
         }}
         QPushButton:pressed {{ 
             background-color: {theme["primary_variant"]}; 
+            padding-left: 22px;
+            padding-top: 14px;
         }}
         QPushButton:disabled {{
             background-color: {theme["surface"]};
             color: {theme["text_secondary"]};
             border-color: {theme["border"]};
-            opacity: 0.6;
         }}
         
         /* v9.0: 그라데이션 Primary 버튼 */
@@ -3387,6 +3418,10 @@ class MainWindow(QMainWindow):
         self.action_privacy.triggered.connect(self.toggle_privacy_mode)
         settings_menu.addAction(self.action_privacy)
         
+        self.action_debug = QAction("🐛 디버그 모드", self, checkable=True)
+        self.action_debug.triggered.connect(self.toggle_debug_mode)
+        settings_menu.addAction(self.action_debug)
+        
         # 도움말 메뉴
         help_menu = menubar.addMenu("도움말")
         
@@ -3704,10 +3739,12 @@ class MainWindow(QMainWindow):
         
         self.btn_google = QPushButton("🔍 구글")
         self.btn_google.setObjectName("ToolBtn")
+        self.btn_google.setToolTip("구글에서 검색 (Ctrl+G)")
         self.btn_google.clicked.connect(self.search_google)
         
         self.btn_qr = QPushButton("📱 QR")
         self.btn_qr.setObjectName("ToolBtn")
+        self.btn_qr.setToolTip("QR 코드 생성")
         self.btn_qr.clicked.connect(self.generate_qr)
         
         self.btn_upper = QPushButton("ABC")
@@ -3767,19 +3804,23 @@ class MainWindow(QMainWindow):
         self.btn_copy = QPushButton("📄 복사")
         self.btn_copy.setMinimumHeight(44)
         self.btn_copy.setObjectName("PrimaryBtn")
+        self.btn_copy.setToolTip("클립보드에 복사 (Enter)")
         self.btn_copy.clicked.connect(self.copy_item)
         
         self.btn_link = QPushButton("🔗 링크 열기")
         self.btn_link.setMinimumHeight(44)
+        self.btn_link.setToolTip("브라우저에서 링크 열기 (Ctrl+L)")
         self.btn_link.clicked.connect(self.open_link)
         
         self.btn_pin = QPushButton("📌 고정")
         self.btn_pin.setMinimumHeight(44)
+        self.btn_pin.setToolTip("항목 고정/해제 (Ctrl+P)")
         self.btn_pin.clicked.connect(self.toggle_pin)
         
         self.btn_del = QPushButton("🗑 삭제")
         self.btn_del.setMinimumHeight(48)
         self.btn_del.setObjectName("DeleteBtn")
+        self.btn_del.setToolTip("항목 삭제 (Delete)")
         self.btn_del.clicked.connect(self.delete_item)
 
         btn_layout.addWidget(self.btn_copy, 3)
@@ -3874,9 +3915,14 @@ class MainWindow(QMainWindow):
             return
             
         stats = self.db.get_statistics()
+        today_count = self.db.get_today_count()
         
         # 기본 통계
-        status_parts = [f"📊 총 {stats['total']}개", f"📌 고정 {stats['pinned']}개"]
+        status_parts = [
+            f"📊 총 {stats['total']}개",
+            f"📌 고정 {stats['pinned']}개",
+            f"📅 오늘 {today_count}개"
+        ]
         
         # 현재 필터 상태
         current_filter = self.filter_combo.currentText() if hasattr(self, 'filter_combo') else "전체"
@@ -3924,18 +3970,27 @@ class MainWindow(QMainWindow):
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_WRITE)
             if enable:
                 if getattr(sys, 'frozen', False):
-                    exe_path = f'"{sys.executable}"'
+                    # 패키징된 EXE 경로 (절대 경로 보장)
+                    exe_path = f'"{os.path.abspath(sys.executable)}"'
                 else:
-                    python_exe = sys.executable.replace("python.exe", "pythonw.exe")
+                    # 개발 환경: pythonw.exe 경로를 정확히 찾기
+                    python_dir = os.path.dirname(sys.executable)
+                    pythonw_path = os.path.join(python_dir, "pythonw.exe")
+                    if not os.path.exists(pythonw_path):
+                        # pythonw.exe가 없으면 python.exe 사용 (콘솔 창 표시됨)
+                        pythonw_path = sys.executable
+                        logger.warning("pythonw.exe not found, using python.exe")
                     script_path = os.path.abspath(__file__)
-                    exe_path = f'"{python_exe}" "{script_path}"'
+                    exe_path = f'"{pythonw_path}" "{script_path}"'
                 
+                logger.info(f"Setting startup registry: {exe_path}")
                 winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, exe_path)
                 self.statusBar().showMessage("✅ 시작 시 자동 실행 설정됨", 2000)
             else:
                 try:
                     winreg.DeleteValue(key, APP_NAME)
                     self.statusBar().showMessage("✅ 자동 실행 해제됨", 2000)
+                    logger.info("Startup registry removed")
                 except WindowsError:
                     pass
             winreg.CloseKey(key)
@@ -4621,6 +4676,16 @@ if __name__ == "__main__":
 
         window = MainWindow()
         window.show()
+        
+        # 정상 시작 시 이전 에러 로그 삭제
+        error_log_path = os.path.join(APP_DIR, "debug_startup_error.log")
+        if os.path.exists(error_log_path):
+            try:
+                os.remove(error_log_path)
+                logger.info("이전 에러 로그 정리됨")
+            except Exception:
+                pass
+        
         sys.exit(app.exec())
     except Exception as e:
         import traceback

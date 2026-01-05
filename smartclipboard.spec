@@ -1,10 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-SmartClipboard Pro v9.0 - PyInstaller Spec File
+SmartClipboard Pro v9.1 - PyInstaller Spec File
 경량화 및 최적화된 빌드 설정
 
 빌드 명령어:
-    pyinstaller SmartClipboard.spec
+    pyinstaller smartclipboard.spec
 
 결과물:
     dist/SmartClipboard.exe (단일 실행 파일)
@@ -21,36 +21,42 @@ MAIN_SCRIPT = '클립모드 매니저.py'
 ICON_FILE = None  # 아이콘 파일이 있으면 경로 지정: 'app.ico'
 
 # ============================================
-# 경량화를 위한 제외 목록
+# 경량화를 위한 제외 목록 (강화됨)
 # ============================================
 EXCLUDES = [
     # 테스트/개발 관련
     'pytest', 'unittest', 'test', 'tests',
-    'setuptools', 'pip', 'wheel',
+    'setuptools', 'pip', 'wheel', 'pkg_resources',
     
     # 사용하지 않는 대형 라이브러리
     'numpy', 'pandas', 'scipy', 'matplotlib',
-    'tensorflow', 'torch', 'sklearn',
+    'tensorflow', 'torch', 'sklearn', 'cv2',
     'IPython', 'jupyter', 'notebook',
     
-    # Qt 사용하지 않는 모듈
+    # Qt 사용하지 않는 모듈 (전체 목록)
     'PyQt6.QtBluetooth',
+    'PyQt6.QtDBus',
     'PyQt6.QtDesigner',
     'PyQt6.QtHelp',
     'PyQt6.QtMultimedia',
     'PyQt6.QtMultimediaWidgets',
     'PyQt6.QtNetwork',
+    'PyQt6.QtNetworkAuth',
     'PyQt6.QtNfc',
     'PyQt6.QtOpenGL',
     'PyQt6.QtOpenGLWidgets',
+    'PyQt6.QtPdf',
+    'PyQt6.QtPdfWidgets',
     'PyQt6.QtPositioning',
     'PyQt6.QtPrintSupport',
+    'PyQt6.QtQml',
     'PyQt6.QtQuick',
     'PyQt6.QtQuick3D',
     'PyQt6.QtQuickWidgets',
     'PyQt6.QtRemoteObjects',
     'PyQt6.QtSensors',
     'PyQt6.QtSerialPort',
+    'PyQt6.QtSpatialAudio',
     'PyQt6.QtSql',
     'PyQt6.QtSvg',
     'PyQt6.QtSvgWidgets',
@@ -70,10 +76,14 @@ EXCLUDES = [
     'PyQt6.Qt3DRender',
     
     # 기타 불필요한 모듈
-    'tkinter', 'tcl', 'tk',
-    'email', 'html', 'http',
+    'tkinter', 'tcl', 'tk', '_tkinter',
     'xmlrpc', 'pydoc', 'doctest',
     'distutils', 'lib2to3',
+    'multiprocessing',
+    'asyncio',
+    'concurrent',
+    'curses',
+    'ensurepip',
 ]
 
 # ============================================
@@ -84,6 +94,9 @@ HIDDEN_IMPORTS = [
     'PyQt6.QtCore',
     'PyQt6.QtGui',
     'PyQt6.QtWidgets',
+    
+    # 로깅 핸들러
+    'logging.handlers',
     
     # 선택적 라이브러리 (없으면 무시됨)
     'cryptography',
@@ -118,27 +131,15 @@ a = Analysis(
 # ============================================
 EXCLUDE_BINARIES = [
     # Qt 관련 불필요 DLL
-    'Qt6Bluetooth',
-    'Qt6Designer',
-    'Qt6Help',
-    'Qt6Multimedia',
-    'Qt6Network',
-    'Qt6Nfc',
-    'Qt6OpenGL',
-    'Qt6Positioning',
-    'Qt6PrintSupport',
-    'Qt6Quick',
-    'Qt6RemoteObjects',
-    'Qt6Sensors',
-    'Qt6SerialPort',
-    'Qt6Sql',
-    'Qt6Svg',
-    'Qt6Test',
-    'Qt6WebChannel',
-    'Qt6WebEngine',
-    'Qt6WebSockets',
-    'Qt6Xml',
-    'Qt63D',
+    'Qt6Bluetooth', 'Qt6DBus', 'Qt6Designer', 'Qt6Help',
+    'Qt6Multimedia', 'Qt6Network', 'Qt6Nfc', 'Qt6OpenGL',
+    'Qt6Pdf', 'Qt6Positioning', 'Qt6PrintSupport', 'Qt6Qml',
+    'Qt6Quick', 'Qt6RemoteObjects', 'Qt6Sensors', 'Qt6SerialPort',
+    'Qt6Sql', 'Qt6Svg', 'Qt6Test', 'Qt6WebChannel',
+    'Qt6WebEngine', 'Qt6WebSockets', 'Qt6Xml', 'Qt63D',
+    
+    # 언어 리소스 (영어만 유지)
+    'qtbase_', 'qt_',  # 부분 매칭으로 번역 파일 제외
     
     # 디버그 심볼
     '.pdb',
@@ -146,6 +147,8 @@ EXCLUDE_BINARIES = [
     # 개발용 파일
     'd3dcompiler',
     'opengl32sw',
+    'libGLESv2',
+    'libEGL',
 ]
 
 def should_exclude_binary(name):
@@ -158,6 +161,12 @@ def should_exclude_binary(name):
 
 # 바이너리 필터링
 a.binaries = [b for b in a.binaries if not should_exclude_binary(b[0])]
+
+# ============================================
+# 데이터 파일 제거 (경량화)
+# ============================================
+# Qt 번역 파일 제거
+a.datas = [d for d in a.datas if not d[0].startswith('PyQt6/Qt6/translations')]
 
 # ============================================
 # PYZ 아카이브 (Python 바이트코드)
@@ -185,6 +194,7 @@ exe = EXE(
     upx_exclude=[
         # UPX 압축에서 제외할 파일 (문제 발생 시)
         'vcruntime140.dll',
+        'vcruntime140_1.dll',
         'python*.dll',
         'Qt6Core.dll',
         'Qt6Gui.dll',
@@ -207,7 +217,7 @@ exe = EXE(
 # 빌드 정보 출력
 # ============================================
 print("\n" + "=" * 50)
-print(f"  SmartClipboard Pro v9.0 Build Configuration")
+print(f"  SmartClipboard Pro v9.1 Build Configuration")
 print("=" * 50)
 print(f"  Main Script: {MAIN_SCRIPT}")
 print(f"  Output: dist/{APP_NAME}.exe")
