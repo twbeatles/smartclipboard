@@ -100,7 +100,7 @@ MAX_HISTORY = 100
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "9.0"
+VERSION = "10.0"
 
 # 기본 핫키 설정
 DEFAULT_HOTKEYS = {
@@ -108,6 +108,27 @@ DEFAULT_HOTKEYS = {
     "show_mini": "alt+v",
     "paste_last": "ctrl+shift+z",
 }
+
+# v10.0: 필터 태그 매핑 (성능 최적화)
+FILTER_TAG_MAP = {
+    "📝 텍스트": "TEXT",
+    "🖼️ 이미지": "IMAGE",
+    "🔗 링크": "LINK",
+    "💻 코드": "CODE",
+    "🎨 색상": "COLOR"
+}
+
+# v10.0: cleanup 호출 간격 (매번 아닌 N회마다)
+CLEANUP_INTERVAL = 10
+
+# v10.0: 클립보드 분석용 사전 컴파일된 정규식 (성능 최적화)
+RE_URL = re.compile(r'^https?://')
+RE_HEX_COLOR = re.compile(r'^#(?:[0-9a-fA-F]{3}){1,2}$')
+RE_RGB_COLOR = re.compile(r'^rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$', re.I)
+RE_HSL_COLOR = re.compile(r'^hsl\s*\(\s*\d+\s*,\s*\d+%?\s*,\s*\d+%?\s*\)$', re.I)
+
+# v10.0: 코드 감지 인디케이터 (상수화)
+CODE_INDICATORS = frozenset(["def ", "class ", "function ", "const ", "let ", "var ", "{", "}", "=>", "import ", "from ", "#include", "public ", "private "])
 
 # --- 테마 정의 ---
 # v8.0: hover_bg, hover_text 추가로 호버 시 가독성 보장
@@ -244,6 +265,7 @@ class ClipboardDB:
     def __init__(self):
         self.conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         self.lock = threading.Lock()
+        self.add_count = 0  # v10.0: cleanup 최적화를 위한 카운터
         self.create_tables()
 
     def create_tables(self):
@@ -336,8 +358,54 @@ class ClipboardDB:
                 cursor.execute("ALTER TABLE history ADD COLUMN url_title TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+            
+            # v10.0: 컬렉션 테이블
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS collections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    icon TEXT DEFAULT '📁',
+                    color TEXT DEFAULT '#6366f1',
+                    created_at TEXT
+                )
+            """)
+            
+            # v10.0: 휴지통 (실행취소용)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS deleted_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    original_id INTEGER,
+                    content TEXT,
+                    image_data BLOB,
+                    type TEXT,
+                    deleted_at TEXT,
+                    expires_at TEXT
+                )
+            """)
+            
+            # v10.0: collection_id 컬럼 추가
+            try:
+                cursor.execute("ALTER TABLE history ADD COLUMN collection_id INTEGER DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            # v10.0: note 컬럼 추가 (메모 첨부)
+            try:
+                cursor.execute("ALTER TABLE history ADD COLUMN note TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            # v10.0: bookmark 컬럼 추가
+            try:
+                cursor.execute("ALTER TABLE history ADD COLUMN bookmark INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            # v10.0: expires_at 컬럼 추가 (임시 클립보드)
+            try:
+                cursor.execute("ALTER TABLE history ADD COLUMN expires_at TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            
             self.conn.commit()
-            logger.info("DB 테이블 초기화 완료 (v8.0)")
+            logger.info("DB 테이블 초기화 완료 (v10.0)")
         except sqlite3.Error as e:
             logger.error(f"DB Init Error: {e}")
 
@@ -358,9 +426,14 @@ class ClipboardDB:
                     (content, image_data, type_tag, timestamp)
                 )
                 self.conn.commit()
-                self.cleanup()
-                logger.debug(f"항목 추가: {type_tag}")
-                return True
+                # v10.0: cleanup 최적화 - 매번이 아닌 N회마다 실행
+                self.add_count += 1
+                if self.add_count >= CLEANUP_INTERVAL:
+                    self.cleanup()
+                    self.add_count = 0
+                item_id = cursor.lastrowid
+                logger.debug(f"항목 추가: {type_tag} (id={item_id})")
+                return item_id  # 삽입된 항목 ID 반환 (성능 최적화)
             except sqlite3.Error as e:
                 logger.error(f"DB Add Error: {e}")
                 self.conn.rollback()
@@ -379,11 +452,15 @@ class ClipboardDB:
                 
                 if type_filter == "📌 고정":
                     sql += " AND pinned = 1"
-                elif type_filter != "전체":
-                    tag_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
-                    target_tag = tag_map.get(type_filter, "TEXT")
+                elif type_filter in FILTER_TAG_MAP:  # v10.0: 상수 사용
                     sql += " AND type = ?"
-                    params.append(target_tag)
+                    params.append(FILTER_TAG_MAP[type_filter])
+                elif type_filter != "전체":
+                    # 레거시 필터 호환성
+                    legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
+                    if type_filter in legacy_map:
+                        sql += " AND type = ?"
+                        params.append(legacy_map[type_filter])
 
                 sql += " ORDER BY pinned DESC, pin_order ASC, id DESC"
                 cursor.execute(sql, params)
@@ -537,6 +614,7 @@ class ClipboardDB:
                 logger.error(f"Setting Save Error: {e}")
 
     def cleanup(self):
+        """오래된 항목 정리 - 주의: add_item() 내부에서 lock 보유 상태로 호출됨 (데드락 방지)"""
         try:
             cursor = self.conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM history WHERE pinned = 0")
@@ -754,6 +832,210 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"URL Title Update Error: {e}")
+
+    # --- v10.0: 컬렉션 메서드 ---
+    def add_collection(self, name, icon="📁", color="#6366f1"):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute("INSERT INTO collections (name, icon, color, created_at) VALUES (?, ?, ?, ?)",
+                               (name, icon, color, created_at))
+                self.conn.commit()
+                return cursor.lastrowid
+            except sqlite3.Error as e:
+                logger.error(f"Collection Add Error: {e}")
+                return None
+    
+    def get_collections(self):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id, name, icon, color FROM collections ORDER BY name")
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Get Collections Error: {e}")
+                return []
+    
+    def delete_collection(self, collection_id):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                # 컬렉션 내 항목들은 컬렉션 없음 상태로
+                cursor.execute("UPDATE history SET collection_id = NULL WHERE collection_id = ?", (collection_id,))
+                cursor.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Delete Collection Error: {e}")
+    
+    def move_to_collection(self, item_id, collection_id):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET collection_id = ? WHERE id = ?", (collection_id, item_id))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Move to Collection Error: {e}")
+    
+    def get_items_by_collection(self, collection_id):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                if collection_id is None:
+                    cursor.execute("SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE collection_id IS NULL ORDER BY pinned DESC, id DESC")
+                else:
+                    cursor.execute("SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE collection_id = ? ORDER BY pinned DESC, id DESC", (collection_id,))
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Get Items by Collection Error: {e}")
+                return []
+
+    # --- v10.0: 북마크 메서드 ---
+    def toggle_bookmark(self, item_id):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT bookmark FROM history WHERE id = ?", (item_id,))
+                current = cursor.fetchone()
+                if current:
+                    new_status = 0 if current[0] else 1
+                    cursor.execute("UPDATE history SET bookmark = ? WHERE id = ?", (new_status, item_id))
+                    self.conn.commit()
+                    return new_status
+            except sqlite3.Error as e:
+                logger.error(f"Toggle Bookmark Error: {e}")
+            return 0
+    
+    def get_bookmarked_items(self):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE bookmark = 1 ORDER BY id DESC")
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Get Bookmarked Error: {e}")
+                return []
+
+    # --- v10.0: 메모 메서드 ---
+    def set_note(self, item_id, note):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET note = ? WHERE id = ?", (note, item_id))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Set Note Error: {e}")
+    
+    def get_note(self, item_id):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT note FROM history WHERE id = ?", (item_id,))
+                result = cursor.fetchone()
+                return result[0] if result else ""
+            except sqlite3.Error as e:
+                logger.error(f"Get Note Error: {e}")
+                return ""
+
+    # --- v10.0: 휴지통 (실행취소) 메서드 ---
+    def soft_delete(self, item_id):
+        """항목을 휴지통으로 이동 (7일 후 영구 삭제)"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT content, image_data, type FROM history WHERE id = ?", (item_id,))
+                item = cursor.fetchone()
+                if item:
+                    deleted_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    expires_at = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+                    cursor.execute("INSERT INTO deleted_history (original_id, content, image_data, type, deleted_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                   (item_id, item[0], item[1], item[2], deleted_at, expires_at))
+                    cursor.execute("DELETE FROM history WHERE id = ?", (item_id,))
+                    self.conn.commit()
+                    return True
+            except sqlite3.Error as e:
+                logger.error(f"Soft Delete Error: {e}")
+            return False
+    
+    def restore_item(self, deleted_id):
+        """휴지통에서 항목 복원"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT content, image_data, type FROM deleted_history WHERE id = ?", (deleted_id,))
+                item = cursor.fetchone()
+                if item:
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    cursor.execute("INSERT INTO history (content, image_data, type, timestamp) VALUES (?, ?, ?, ?)",
+                                   (item[0], item[1], item[2], timestamp))
+                    cursor.execute("DELETE FROM deleted_history WHERE id = ?", (deleted_id,))
+                    self.conn.commit()
+                    return True
+            except sqlite3.Error as e:
+                logger.error(f"Restore Item Error: {e}")
+            return False
+    
+    def get_deleted_items(self):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id, content, type, deleted_at, expires_at FROM deleted_history ORDER BY deleted_at DESC")
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Get Deleted Items Error: {e}")
+                return []
+    
+    def empty_trash(self):
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM deleted_history")
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Empty Trash Error: {e}")
+    
+    def cleanup_expired_trash(self):
+        """만료된 휴지통 항목 영구 삭제"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute("DELETE FROM deleted_history WHERE expires_at < ?", (now,))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"Cleanup Expired Trash Error: {e}")
+
+    # --- v10.0: 임시 클립보드 메서드 ---
+    def add_temp_item(self, content, image_data, type_tag, minutes=30):
+        """임시 항목 추가 (N분 후 자동 만료)"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                expires_at = (datetime.datetime.now() + datetime.timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute("INSERT INTO history (content, image_data, type, timestamp, expires_at) VALUES (?, ?, ?, ?, ?)",
+                               (content, image_data, type_tag, timestamp, expires_at))
+                self.conn.commit()
+                return cursor.lastrowid
+            except sqlite3.Error as e:
+                logger.error(f"Add Temp Item Error: {e}")
+                return None
+    
+    def cleanup_expired_items(self):
+        """만료된 임시 항목 삭제"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute("DELETE FROM history WHERE expires_at IS NOT NULL AND expires_at < ?", (now,))
+                deleted = cursor.rowcount
+                self.conn.commit()
+                if deleted > 0:
+                    logger.info(f"만료된 임시 항목 {deleted}개 삭제됨")
+                return deleted
+            except sqlite3.Error as e:
+                logger.error(f"Cleanup Expired Items Error: {e}")
+                return 0
 
     def close(self):
         if self.conn:
@@ -1075,27 +1357,8 @@ class ExportImportManager:
         except Exception as e:
             logger.error(f"CSV Import Error: {e}")
             return -1
-class HotkeyListener(QThread):
-    show_signal = pyqtSignal()
 
-    def __init__(self):
-        super().__init__()
-        self._running = True
-
-    def run(self):
-        try:
-            keyboard.add_hotkey(HOTKEY, self.show_signal.emit)
-            while self._running:
-                time.sleep(0.1)
-        except Exception as e:
-            logger.error(f"Hotkey Error: {e}")
-
-    def stop(self):
-        self._running = False
-        try:
-            keyboard.remove_hotkey(HOTKEY)
-        except Exception as e:
-            logger.debug(f"Hotkey remove: {e}")
+# --- (레거시 HotkeyListener 클래스 제거됨 - MainWindow.register_hotkeys()로 대체) ---
 
 
 # --- 토스트 알림 ---
@@ -2522,9 +2785,15 @@ class CopyRulesDialog(QDialog):
         if ok:
             self.db.add_copy_rule(name.strip(), pattern.strip(), action)
             self.load_rules()
+            # v10.0: 캐시 무효화
+            if hasattr(self.parent(), 'invalidate_rules_cache'):
+                self.parent().invalidate_rules_cache()
     
     def toggle_rule(self, rule_id, state):
         self.db.toggle_copy_rule(rule_id, 1 if state else 0)
+        # v10.0: 캐시 무효화
+        if hasattr(self.parent(), 'invalidate_rules_cache'):
+            self.parent().invalidate_rules_cache()
     
     def delete_rule(self):
         rows = self.table.selectionModel().selectedRows()
@@ -2532,6 +2801,9 @@ class CopyRulesDialog(QDialog):
             rid = self.table.item(rows[0].row(), 1).data(Qt.ItemDataRole.UserRole)
             self.db.delete_copy_rule(rid)
             self.load_rules()
+            # v10.0: 캐시 무효화
+            if hasattr(self.parent(), 'invalidate_rules_cache'):
+                self.parent().invalidate_rules_cache()
 
 
 # --- 메인 윈도우 ---
@@ -2568,6 +2840,10 @@ class MainWindow(QMainWindow):
             self.current_tag_filter = None  # 태그 필터
             self.sort_column = 3  # 기본 정렬: 시간 컨럼
             self.sort_order = Qt.SortOrder.DescendingOrder  # 기본: 내림차순
+            
+            # v10.0: 복사 규칙 캐싱 (성능 최적화)
+            self._rules_cache = None
+            self._rules_cache_dirty = True
             
             self.apply_theme()
             self.init_menu()
@@ -2738,12 +3014,7 @@ class MainWindow(QMainWindow):
                 self.vault_timer.stop()
                 logger.debug("보관함 타이머 중지됨")
             
-            # 3. 클립보드 모니터 중지
-            if hasattr(self, 'clipboard_monitor'):
-                self.clipboard_monitor.stop()
-                logger.debug("클립보드 모니터 중지됨")
-            
-            # 4. 플로팅 미니 창 닫기
+            # 3. 플로팅 미니 창 닫기
             if hasattr(self, 'mini_window') and self.mini_window:
                 self.mini_window.close()
                 logger.debug("미니 창 닫힘")
@@ -3652,8 +3923,8 @@ class MainWindow(QMainWindow):
         top_layout.setSpacing(12)
         
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["전체", "📌 고정", "📝 텍스트", "🖼️ 이미지", "🔗 링크", "💻 코드", "🎨 색상"])
-        self.filter_combo.setFixedWidth(140)
+        self.filter_combo.addItems(["전체", "📌 고정", "⭐ 북마크", "📝 텍스트", "🖼️ 이미지", "🔗 링크", "💻 코드", "🎨 색상"])
+        self.filter_combo.setFixedWidth(150)
         self.filter_combo.setToolTip("유형별 필터")
         self.filter_combo.currentTextChanged.connect(self.load_data)
         
@@ -3776,8 +4047,24 @@ class MainWindow(QMainWindow):
         self.tools_layout.addWidget(self.btn_google)
         if HAS_QRCODE:
             self.tools_layout.addWidget(self.btn_qr)
+        
+        # 그룹 구분선 1: 검색/공유 | 대소문자
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.VLine)
+        sep1.setFixedWidth(2)
+        sep1.setStyleSheet("background-color: rgba(128,128,128,0.4);")
+        self.tools_layout.addWidget(sep1)
+        
         self.tools_layout.addWidget(self.btn_upper)
         self.tools_layout.addWidget(self.btn_lower)
+        
+        # 그룹 구분선 2: 대소문자 | 공백/포맷
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.VLine)
+        sep2.setFixedWidth(2)
+        sep2.setStyleSheet("background-color: rgba(128,128,128,0.4);")
+        self.tools_layout.addWidget(sep2)
+        
         self.tools_layout.addWidget(self.btn_strip)
         self.tools_layout.addWidget(self.btn_normalize)
         self.tools_layout.addWidget(self.btn_json)
@@ -4127,6 +4414,15 @@ class MainWindow(QMainWindow):
                     buffer.open(QBuffer.OpenModeFlag.WriteOnly)
                     image.save(buffer, "PNG")
                     blob_data = ba.data()
+                    
+                    # v10.0: 이미지 중복 체크 (해시 기반)
+                    import hashlib
+                    img_hash = hashlib.md5(blob_data).hexdigest()
+                    if hasattr(self, '_last_image_hash') and self._last_image_hash == img_hash:
+                        logger.debug("Duplicate image skipped")
+                        return
+                    self._last_image_hash = img_hash
+                    
                     if self.db.add_item("[이미지 캡처됨]", blob_data, "IMAGE"):
                         self.load_data()
                         self.update_status_bar()
@@ -4139,26 +4435,25 @@ class MainWindow(QMainWindow):
                 text = self.apply_copy_rules(text)
                 
                 tag = self.analyze_text(text)
-                if self.db.add_item(text, None, tag):
+                item_id = self.db.add_item(text, None, tag)
+                if item_id:
                     # v8.0: 클립보드 액션 자동화 실행
                     try:
-                        items = self.db.get_items("", "전체")
-                        if items:
-                            item_id = items[0][0]  # 방금 추가된 항목의 ID
-                            action_results = self.action_manager.process(text, item_id)
-                            for action_name, result in action_results:
-                                if result and result.get("type") == "notify":
+                        # 성능 최적화: add_item이 반환한 ID 직접 사용 (get_items 호출 제거)
+                        action_results = self.action_manager.process(text, item_id)
+                        for action_name, result in action_results:
+                            if result and result.get("type") == "notify":
+                                ToastNotification.show_toast(
+                                    self, f"⚡ {action_name}: {result.get('message', '')}",
+                                    duration=3000, toast_type="info"
+                                )
+                            elif result and result.get("type") == "title":
+                                title = result.get("title")
+                                if title:
                                     ToastNotification.show_toast(
-                                        self, f"⚡ {action_name}: {result.get('message', '')}",
-                                        duration=3000, toast_type="info"
+                                        self, f"🔗 {title[:50]}...",
+                                        duration=2500, toast_type="info"
                                     )
-                                elif result and result.get("type") == "title":
-                                    title = result.get("title")
-                                    if title:
-                                        ToastNotification.show_toast(
-                                            self, f"🔗 {title[:50]}...",
-                                            duration=2500, toast_type="info"
-                                        )
                     except Exception as action_err:
                         logger.debug(f"Action processing error: {action_err}")
                     
@@ -4168,9 +4463,14 @@ class MainWindow(QMainWindow):
             logger.debug(f"Clipboard access: {e}")
 
     def apply_copy_rules(self, text):
-        """활성화된 복사 규칙 적용"""
-        rules = self.db.get_copy_rules()
-        for rule in rules:
+        """활성화된 복사 규칙 적용 - 캐싱으로 성능 최적화"""
+        # v10.0: 캐싱으로 DB I/O 최소화
+        if self._rules_cache_dirty or self._rules_cache is None:
+            self._rules_cache = self.db.get_copy_rules()
+            self._rules_cache_dirty = False
+            logger.debug("Copy rules cache refreshed")
+        
+        for rule in self._rules_cache:
             rid, name, pattern, action, replacement, enabled, priority = rule
             if not enabled:
                 continue
@@ -4190,21 +4490,26 @@ class MainWindow(QMainWindow):
             except re.error as e:
                 logger.warning(f"Invalid regex in rule '{name}': {e}")
         return text
+    
+    def invalidate_rules_cache(self):
+        """v10.0: 규칙 캐시 무효화 (규칙 변경 시 호출)"""
+        self._rules_cache_dirty = True
+        logger.debug("Copy rules cache invalidated")
 
     def analyze_text(self, text):
-        # URL 패턴
-        if re.match(r'https?://', text): 
+        """텍스트 유형 분석 - 사전 컴파일된 정규식 사용 (성능 최적화)"""
+        # URL 패턴 (사전 컴파일된 정규식 사용)
+        if RE_URL.match(text): 
             return "LINK"
-        # 확장된 색상 패턴
-        if re.match(r'^#(?:[0-9a-fA-F]{3}){1,2}$', text): 
+        # 확장된 색상 패턴 (사전 컴파일된 정규식 사용)
+        if RE_HEX_COLOR.match(text): 
             return "COLOR"
-        if re.match(r'^rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$', text, re.I):
+        if RE_RGB_COLOR.match(text):
             return "COLOR"
-        if re.match(r'^hsl\s*\(\s*\d+\s*,\s*\d+%?\s*,\s*\d+%?\s*\)$', text, re.I):
+        if RE_HSL_COLOR.match(text):
             return "COLOR"
-        # 코드 패턴
-        code_indicators = ["def ", "class ", "function ", "const ", "let ", "var ", "{", "}", "=>", "import ", "from "]
-        if any(x in text for x in code_indicators): 
+        # 코드 패턴 (전역 상수 사용)
+        if any(x in text for x in CODE_INDICATORS): 
             return "CODE"
         return "TEXT"
 
@@ -4216,6 +4521,11 @@ class MainWindow(QMainWindow):
         if self.current_tag_filter:
             items = self.db.get_items_by_tag(self.current_tag_filter)
             # 추가 필터 적용
+            if search_query:
+                items = [i for i in items if search_query.lower() in (i[1] or '').lower()]
+        # v10.0: 북마크 필터
+        elif filter_type == "⭐ 북마크":
+            items = self.db.get_bookmarked_items()
             if search_query:
                 items = [i for i in items if search_query.lower() in (i[1] or '').lower()]
         else:
@@ -4268,10 +4578,13 @@ class MainWindow(QMainWindow):
         for row_idx, (pid, content, ptype, timestamp, pinned, use_count, pin_order) in enumerate(items):
             self.table.insertRow(row_idx)
             
-            # 고정 아이콘
+            # 고정 아이콘 (배경 강조)
             pin_item = QTableWidgetItem("📌" if pinned else "")
             pin_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             pin_item.setData(Qt.ItemDataRole.UserRole, pid)
+            if pinned:
+                # 고정 항목은 미세한 배경색으로 구분
+                pin_item.setBackground(QColor(theme["primary"]).lighter(170))
             self.table.setItem(row_idx, 0, pin_item)
             
             # 타입 (색상 코드화)
@@ -4321,8 +4634,16 @@ class MainWindow(QMainWindow):
             time_item.setData(Qt.ItemDataRole.UserRole + 1, timestamp)  # 정렬용 원본 타임스탬프
             self.table.setItem(row_idx, 3, time_item)
             
-            # 사용 횟수
-            use_item = QTableWidgetItem(str(use_count) if use_count else "-")
+            # 사용 횟수 (인기도 인디케이터)
+            if use_count and use_count >= 10:
+                use_display = f"🔥 {use_count}"
+            elif use_count and use_count >= 5:
+                use_display = f"⭐ {use_count}"
+            elif use_count:
+                use_display = str(use_count)
+            else:
+                use_display = "-"
+            use_item = QTableWidgetItem(use_display)
             use_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             use_item.setForeground(QColor(theme["text_secondary"]))
             use_item.setData(Qt.ItemDataRole.UserRole + 1, use_count or 0)  # 정렬용 원본 데이터
@@ -4500,7 +4821,7 @@ class MainWindow(QMainWindow):
         else:
             pid = self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
             if pid:
-                self.db.delete_item(pid)
+                self.db.soft_delete(pid)  # v10.0: 휴지통으로 이동
                 self.load_data()
                 self.update_ui_state(False)
                 self.update_status_bar()
@@ -4525,7 +4846,7 @@ class MainWindow(QMainWindow):
         for row in rows:
             pid = self.table.item(row.row(), 0).data(Qt.ItemDataRole.UserRole)
             if pid:
-                self.db.delete_item(pid)
+                self.db.soft_delete(pid)  # v10.0: 휴지통으로 이동
         
         self.load_data()
         self.update_ui_state(False)
@@ -4539,6 +4860,47 @@ class MainWindow(QMainWindow):
             self.load_data()
             self.on_selection_changed()
             self.update_status_bar()
+
+    # --- v10.0: 북마크 ---
+    def toggle_bookmark(self):
+        pid = self.get_selected_id()
+        if pid:
+            new_status = self.db.toggle_bookmark(pid)
+            status_text = "북마크 추가" if new_status else "북마크 해제"
+            self.statusBar().showMessage(f"⭐ {status_text}", 2000)
+            self.load_data()
+    
+    # --- v10.0: 메모 ---
+    def edit_note(self):
+        pid = self.get_selected_id()
+        if not pid:
+            return
+        current_note = self.db.get_note(pid)
+        note, ok = QInputDialog.getMultiLineText(
+            self, "📝 메모 편집", "이 항목에 대한 메모:", current_note
+        )
+        if ok:
+            self.db.set_note(pid, note)
+            self.statusBar().showMessage("📝 메모가 저장되었습니다.", 2000)
+    
+    # --- v10.0: 컬렉션 ---
+    def create_collection(self):
+        name, ok = QInputDialog.getText(self, "📁 새 컬렉션", "컬렉션 이름:")
+        if ok and name:
+            icons = ["📁", "📂", "🗂️", "📦", "💼", "🎯", "⭐", "❤️", "🔖", "📌"]
+            icon, _ = QInputDialog.getItem(self, "아이콘 선택", "아이콘:", icons, 0, False)
+            self.db.add_collection(name, icon or "📁")
+            self.statusBar().showMessage(f"📁 '{name}' 컬렉션이 생성되었습니다.", 2000)
+    
+    def move_to_collection(self, collection_id):
+        pid = self.get_selected_id()
+        if pid:
+            self.db.move_to_collection(pid, collection_id)
+            if collection_id:
+                self.statusBar().showMessage("📁 컬렉션으로 이동됨", 2000)
+            else:
+                self.statusBar().showMessage("🚫 컬렉션에서 제거됨", 2000)
+            self.load_data()
 
     def open_link(self):
         text = self.detail_text.toPlainText()
@@ -4603,8 +4965,29 @@ class MainWindow(QMainWindow):
         pin_action = menu.addAction("📌 고정/해제")
         pin_action.triggered.connect(self.toggle_pin)
         
+        # v10.0: 북마크
+        bookmark_action = menu.addAction("⭐ 북마크 토글")
+        bookmark_action.triggered.connect(self.toggle_bookmark)
+        
         tag_action = menu.addAction("🏷️ 태그 편집")
         tag_action.triggered.connect(self.edit_tag)
+        
+        # v10.0: 메모
+        note_action = menu.addAction("📝 메모 추가/편집")
+        note_action.triggered.connect(self.edit_note)
+        
+        # v10.0: 컬렉션 서브메뉴
+        collection_menu = menu.addMenu("📁 컬렉션으로 이동")
+        collections = self.db.get_collections()
+        if collections:
+            for cid, cname, cicon, ccolor in collections:
+                c_action = collection_menu.addAction(f"{cicon} {cname}")
+                c_action.triggered.connect(lambda checked, col_id=cid: self.move_to_collection(col_id))
+            collection_menu.addSeparator()
+        new_col_action = collection_menu.addAction("➕ 새 컬렉션 만들기")
+        new_col_action.triggered.connect(self.create_collection)
+        remove_col_action = collection_menu.addAction("🚫 컬렉션에서 제거")
+        remove_col_action.triggered.connect(lambda: self.move_to_collection(None))
         
         menu.addSeparator()
         
@@ -4615,7 +4998,7 @@ class MainWindow(QMainWindow):
             merge_action.triggered.connect(self.merge_selected)
             menu.addSeparator()
         
-        delete_action = menu.addAction("🗑️ 삭제")
+        delete_action = menu.addAction("🗑️ 삭제 (휴지통)")
         delete_action.triggered.connect(self.delete_item)
         
         # 텍스트 변환 서브메뉴 (텍스트 항목인 경우)

@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-SmartClipboard Pro v9.1 - PyInstaller Spec File
+SmartClipboard Pro v10.0 - PyInstaller Spec File
 경량화 및 최적화된 빌드 설정
 
 빌드 명령어:
@@ -17,6 +17,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 # 기본 설정
 # ============================================
 APP_NAME = 'SmartClipboard'
+APP_VERSION = '10.0'
 MAIN_SCRIPT = '클립모드 매니저.py'
 ICON_FILE = None  # 아이콘 파일이 있으면 경로 지정: 'app.ico'
 
@@ -27,11 +28,13 @@ EXCLUDES = [
     # 테스트/개발 관련
     'pytest', 'unittest', 'test', 'tests',
     'setuptools', 'pip', 'wheel', 'pkg_resources',
+    '_pytest', 'nose', 'mock',
     
     # 사용하지 않는 대형 라이브러리
     'numpy', 'pandas', 'scipy', 'matplotlib',
     'tensorflow', 'torch', 'sklearn', 'cv2',
     'IPython', 'jupyter', 'notebook',
+    'sympy', 'networkx', 'nltk',
     
     # Qt 사용하지 않는 모듈 (전체 목록)
     'PyQt6.QtBluetooth',
@@ -84,6 +87,21 @@ EXCLUDES = [
     'concurrent',
     'curses',
     'ensurepip',
+    
+    # 추가 경량화 (v10.0)
+    'html.parser',
+    'email',
+    'http.server',
+    'socketserver',
+    'ftplib',
+    'imaplib',
+    'poplib',
+    'smtplib',
+    'telnetlib',
+    'turtle',
+    'turtledemo',
+    'pydoc_data',
+    'idlelib',
 ]
 
 # ============================================
@@ -97,6 +115,9 @@ HIDDEN_IMPORTS = [
     
     # 로깅 핸들러
     'logging.handlers',
+    
+    # hashlib (이미지 중복 체크용)
+    'hashlib',
     
     # 선택적 라이브러리 (없으면 무시됨)
     'cryptography',
@@ -123,7 +144,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=EXCLUDES,
     noarchive=False,
-    optimize=2,  # Python 최적화 레벨 (2 = -OO)
+    optimize=2,  # Python 최적화 레벨 (2 = -OO, docstring 제거)
 )
 
 # ============================================
@@ -149,6 +170,13 @@ EXCLUDE_BINARIES = [
     'opengl32sw',
     'libGLESv2',
     'libEGL',
+    
+    # 추가 경량화 (v10.0)
+    'Qt6VirtualKeyboard',
+    'Qt6Charts',
+    'Qt6DataVisualization',
+    'Qt6Scxml',
+    'Qt6ShaderTools',
 ]
 
 def should_exclude_binary(name):
@@ -163,10 +191,19 @@ def should_exclude_binary(name):
 a.binaries = [b for b in a.binaries if not should_exclude_binary(b[0])]
 
 # ============================================
-# 데이터 파일 제거 (경량화)
+# 데이터 파일 정리 (경량화)
 # ============================================
 # Qt 번역 파일 제거
 a.datas = [d for d in a.datas if not d[0].startswith('PyQt6/Qt6/translations')]
+
+# 불필요한 데이터 파일 제거
+EXCLUDE_DATA_PATTERNS = [
+    'certifi',  # SSL 인증서 (필요 시 유지)
+    'tcl', 'tk',
+    'matplotlib',
+    'numpy',
+]
+a.datas = [d for d in a.datas if not any(p in d[0] for p in EXCLUDE_DATA_PATTERNS)]
 
 # ============================================
 # PYZ 아카이브 (Python 바이트코드)
@@ -217,7 +254,7 @@ exe = EXE(
 # 빌드 정보 출력
 # ============================================
 print("\n" + "=" * 50)
-print(f"  SmartClipboard Pro v9.1 Build Configuration")
+print(f"  SmartClipboard Pro v{APP_VERSION} Build Configuration")
 print("=" * 50)
 print(f"  Main Script: {MAIN_SCRIPT}")
 print(f"  Output: dist/{APP_NAME}.exe")
@@ -226,4 +263,10 @@ print(f"  UPX Compression: {'Enabled' if exe.upx else 'Disabled'}")
 print(f"  Optimization Level: {a.optimize}")
 print(f"  Excluded Modules: {len(EXCLUDES)}")
 print(f"  Hidden Imports: {len(HIDDEN_IMPORTS)}")
+print("=" * 50)
+print("  경량화 최적화 적용:")
+print("    - 불필요한 Qt 모듈 제외")
+print("    - 번역 파일 제거")
+print("    - UPX 압축 활성화")
+print("    - Python -OO 최적화")
 print("=" * 50 + "\n")

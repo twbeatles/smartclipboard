@@ -1,8 +1,8 @@
-# 📋 SmartClipboard Pro v9.1
+# 📋 SmartClipboard Pro v10.0
 
 > 고급 클립보드 매니저 - PyQt6 기반의 현대적이고 강력한 클립보드 관리 도구
 
-![Version](https://img.shields.io/badge/version-9.1-blue)
+![Version](https://img.shields.io/badge/version-10.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -16,6 +16,7 @@
 - 최대 500개 항목 저장 (설정 가능)
 - 📌 중요 항목 고정 기능
 - 🏷️ 태그 시스템으로 항목 정리
+- ⭐ 북마크 기능
 
 ### 🔒 보안 보관함
 - AES-256 암호화로 민감한 데이터 안전 보관
@@ -100,7 +101,7 @@ pyinstaller smartclipboard.spec
 ```
 
 ### 빌드 결과물
-- `dist/SmartClipboard.exe` (단일 실행 파일, ~50MB)
+- `dist/SmartClipboard.exe` (단일 실행 파일, ~45MB)
 
 ---
 
@@ -131,18 +132,25 @@ pyinstaller smartclipboard.spec
 
 ---
 
-## 📝 v9.1 변경사항
+## 📝 v10.0 변경사항
 
-### 🔧 디버깅 개선
-- **로그 파일 로테이션** (최대 1MB, 백업 3개)
-- **디버그 모드 토글** (설정 메뉴에서 런타임 로그 레벨 변경)
-- **리소스 정리 강화** (앱 종료 시 클립보드 모니터, 미니 창 명시적 종료)
-- **Windows 자동 실행** 경로 처리 개선
+### ⚡ 성능 최적화
+- **정규식 사전 컴파일**: 클립보드 분석용 정규식을 전역 상수로 컴파일하여 CPU 사용량 감소
+- **코드 인디케이터 상수화**: `CODE_INDICATORS`를 `frozenset`으로 변환하여 O(1) 조회
+- **복사 규칙 캐싱**: DB I/O 최소화, 규칙 변경 시에만 리로드
+- **이미지 중복 체크**: MD5 해시 기반 중복 감지로 DB 공간 절약
 
-### 🎨 UI/UX 개선
-- **상태바** 오늘 복사 횟수 표시 추가
-- **버튼 애니메이션** 클릭 시 푸시 효과
-- **툴팁** 모든 주요 버튼에 단축키 포함 상세 툴팁
+### 🔧 코드 품질 개선
+- **analyze_text()**: 사전 컴파일된 정규식 사용
+- **apply_copy_rules()**: 캐시 메커니즘 도입
+- **cleanup 최적화**: 매번이 아닌 N회마다 실행
+
+### 🎨 v9.1 기능 유지
+- 로그 파일 로테이션 (최대 1MB, 백업 3개)
+- 디버그 모드 토글
+- 리소스 정리 강화
+- 상태바 오늘 복사 횟수 표시
+- 버튼 애니메이션 클릭 효과
 
 ---
 
