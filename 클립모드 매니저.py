@@ -25,6 +25,7 @@ import shutil
 import base64
 import uuid
 import csv
+import hashlib  # v10.1: 모듈 레벨 import로 이동 (성능 최적화)
 
 # 암호화 라이브러리 체크
 try:
@@ -129,6 +130,18 @@ RE_HSL_COLOR = re.compile(r'^hsl\s*\(\s*\d+\s*,\s*\d+%?\s*,\s*\d+%?\s*\)$', re.I
 
 # v10.0: 코드 감지 인디케이터 (상수화)
 CODE_INDICATORS = frozenset(["def ", "class ", "function ", "const ", "let ", "var ", "{", "}", "=>", "import ", "from ", "#include", "public ", "private "])
+
+# v10.1: 타입 아이콘 상수 (UI 렌더링 최적화)
+TYPE_ICONS = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨"}
+
+# v10.1: UI 텍스트 상수 (유지보수성 및 향후 다국어 지원 대비)
+UI_TEXTS = {
+    "empty_history": "📋 클립보드 히스토리가 비어있습니다\n\n텍스트나 이미지를 복사하면 자동으로 저장됩니다\n⌨️ Ctrl+Shift+V로 언제든 호출 가능",
+    "search_no_results": "🔍 '{query}'에 대한 검색 결과가 없습니다",
+    "tag_no_results": "🏷️ '{tag}' 태그를 가진 항목이 없습니다",
+    "image_item": "[이미지 캡처됨]",
+    "image_tooltip": "🖼️ 이미지 항목 - 더블클릭으로 미리보기",
+}
 
 # --- 테마 정의 ---
 # v8.0: hover_bg, hover_text 추가로 호버 시 가독성 보장
@@ -404,8 +417,17 @@ class ClipboardDB:
             except sqlite3.OperationalError:
                 pass
             
+            # v10.1: 자주 사용되는 컬럼에 인덱스 추가 (쿼리 성능 최적화)
+            try:
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_pinned ON history(pinned)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_type ON history(type)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_bookmark ON history(bookmark)")
+            except sqlite3.OperationalError as e:
+                logger.debug(f"Index creation skipped: {e}")
+            
             self.conn.commit()
-            logger.info("DB 테이블 초기화 완료 (v10.0)")
+            logger.info("DB 테이블 초기화 완료 (v10.1)")
         except sqlite3.Error as e:
             logger.error(f"DB Init Error: {e}")
 
@@ -1083,7 +1105,7 @@ class SecureVaultManager:
         return True
     
     def unlock(self, password):
-        """보관함 잠금 해제"""
+        """보관함 잠금 해제 - v10.1: 예외 처리 개선"""
         if not HAS_CRYPTO:
             return False
         salt_b64 = self.db.get_setting("vault_salt")
@@ -1102,8 +1124,13 @@ class SecureVaultManager:
                 self.is_unlocked = True
                 self.last_activity = time.time()
                 return True
+        except (ValueError, TypeError) as e:
+            # Base64 디코딩 오류 또는 타입 오류
+            logger.debug(f"Vault unlock decode error: {e}")
         except Exception as e:
-            logger.debug(f"Vault unlock failed: {e}")
+            # 암호화 관련 오류 (InvalidToken 등)
+            logger.debug(f"Vault unlock crypto error: {e}")
+            self.fernet = None  # 실패 시 fernet 초기화
         return False
     
     def lock(self):
@@ -3224,18 +3251,25 @@ class MainWindow(QMainWindow):
             outline: none;
             padding: 4px;
         }}
+        /* v10.1: 개선된 테이블 항목 스타일 - 선택 시각화 강화 */
         QTableWidget::item {{
-            padding: 10px 8px;
+            padding: 12px 10px;
             border-bottom: 1px solid {theme["border"]};
             border-radius: 0px;
         }}
         QTableWidget::item:selected {{
             background-color: {theme["primary"]};
             color: {theme.get("selected_text", "#ffffff")};
+            font-weight: 500;
         }}
         QTableWidget::item:hover:!selected {{
             background-color: {theme.get("hover_bg", theme["surface_variant"])};
             color: {theme.get("hover_text", theme["text"])};
+            border-left: 3px solid {theme["primary"]};
+        }}
+        QTableWidget::item:focus {{
+            outline: none;
+            border: 1px solid {theme["primary"]};
         }}
         
         /* v9.0: 개선된 헤더 */
@@ -3275,30 +3309,37 @@ class MainWindow(QMainWindow):
             border-radius: 16px;
         }}
         
-        /* v9.0: 현대적 버튼 스타일 */
+        /* v10.1: 개선된 버튼 스타일 - 마이크로 인터랙션 강화 */
         QPushButton {{ 
             background-color: {theme["surface_variant"]}; 
-            border: 1px solid {theme["border"]}; 
+            border: 2px solid {theme["border"]}; 
             border-radius: 12px; 
             padding: 12px 20px; 
             color: {theme["text"]}; 
             font-weight: 600;
             font-size: 13px;
+            outline: none;
         }}
         QPushButton:hover {{ 
             background-color: {theme["primary"]}; 
             border-color: {theme["primary"]};
             color: white;
         }}
+        QPushButton:focus {{
+            border: 2px solid {theme["primary"]};
+            background-color: {theme["surface_variant"]};
+        }}
         QPushButton:pressed {{ 
             background-color: {theme["primary_variant"]}; 
-            padding-left: 22px;
-            padding-top: 14px;
+            border-color: {theme["primary_variant"]};
+            padding-left: 21px;
+            padding-top: 13px;
         }}
         QPushButton:disabled {{
             background-color: {theme["surface"]};
             color: {theme["text_secondary"]};
             border-color: {theme["border"]};
+            opacity: 0.6;
         }}
         
         /* v9.0: 그라데이션 Primary 버튼 */
@@ -3317,18 +3358,27 @@ class MainWindow(QMainWindow):
                 stop:1 {theme.get("gradient_start", theme["primary"])});
         }}
         
-        /* v9.0: 미니멀 아이콘 버튼 */
+        /* v10.1: 개선된 아이콘 버튼 - 호버 피드백 강화 */
         QPushButton#ToolBtn {{
             background-color: transparent; 
-            border: 1px solid {theme["border"]};
+            border: 2px solid {theme["border"]};
             font-size: 13px; 
-            padding: 8px 12px;
+            padding: 8px 14px;
             border-radius: 10px;
+            min-width: 36px;
         }}
         QPushButton#ToolBtn:hover {{
             background-color: {theme["secondary"]};
             border-color: {theme["secondary"]};
             color: white;
+        }}
+        QPushButton#ToolBtn:focus {{
+            border-color: {theme["primary"]};
+            background-color: rgba(255, 255, 255, 0.05);
+        }}
+        QPushButton#ToolBtn:pressed {{
+            background-color: {theme["primary"]};
+            border-color: {theme["primary"]};
         }}
         
         /* v9.0: 경고 삭제 버튼 */
@@ -4415,8 +4465,7 @@ class MainWindow(QMainWindow):
                     image.save(buffer, "PNG")
                     blob_data = ba.data()
                     
-                    # v10.0: 이미지 중복 체크 (해시 기반)
-                    import hashlib
+                    # v10.0: 이미지 중복 체크 (해시 기반) - v10.1: 모듈 레벨 import 사용
                     img_hash = hashlib.md5(blob_data).hexdigest()
                     if hasattr(self, '_last_image_hash') and self._last_image_hash == img_hash:
                         logger.debug("Duplicate image skipped")
@@ -4549,108 +4598,119 @@ class MainWindow(QMainWindow):
             reverse = self.sort_order == Qt.SortOrder.DescendingOrder
             items = sorted(items, key=get_sort_key, reverse=reverse)
         
-        self.table.setRowCount(0)
-        
-        theme = THEMES.get(self.current_theme, THEMES["dark"])
-        
-        # 빈 결과 상태 표시 (개선된 UI)
-        if not items:
-            self.table.setRowCount(1)
-            if search_query:
-                empty_msg = f"🔍 '{search_query}'에 대한 검색 결과가 없습니다"
-            elif self.current_tag_filter:
-                empty_msg = f"🏷️ '{self.current_tag_filter}' 태그를 가진 항목이 없습니다"
-            else:
-                empty_msg = "📋 클립보드 히스토리가 비어있습니다\n\n텍스트나 이미지를 복사하면 자동으로 저장됩니다\n⌨️ Ctrl+Shift+V로 언제든 호출 가능"
-            empty_item = QTableWidgetItem(empty_msg)
-            empty_item.setForeground(QColor(theme["text_secondary"]))
-            empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            self.table.setItem(0, 0, empty_item)
-            self.table.setSpan(0, 0, 1, 5)
-            self.table.setRowHeight(0, 100)  # 빈 상태 행 높이 증가
-            return
-        
-        # 날짜 비교용
-        today = datetime.date.today()
-        yesterday = today - datetime.timedelta(days=1)
-        
-        for row_idx, (pid, content, ptype, timestamp, pinned, use_count, pin_order) in enumerate(items):
-            self.table.insertRow(row_idx)
+        # v10.1: UI 업데이트 일괄 처리 (성능 최적화)
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.setRowCount(0)
             
-            # 고정 아이콘 (배경 강조)
-            pin_item = QTableWidgetItem("📌" if pinned else "")
-            pin_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            pin_item.setData(Qt.ItemDataRole.UserRole, pid)
-            if pinned:
-                # 고정 항목은 미세한 배경색으로 구분
-                pin_item.setBackground(QColor(theme["primary"]).lighter(170))
-            self.table.setItem(row_idx, 0, pin_item)
-            
-            # 타입 (색상 코드화)
-            type_icons = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨"}
-            type_item = QTableWidgetItem(type_icons.get(ptype, "📝"))
-            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            type_item.setToolTip(ptype)
-            type_item.setData(Qt.ItemDataRole.UserRole + 1, ptype)  # 정렬용 원본 데이터
-            self.table.setItem(row_idx, 1, type_item)
-            
-            # 내용 + 툴팁
-            display = content.replace('\n', ' ').strip()
-            if len(display) > 45: 
-                display = display[:45] + "..."
-            content_item = QTableWidgetItem(display)
-            # 툴팁에 전체 내용 표시 (최대 500자)
-            if ptype == "IMAGE":
-                content_item.setToolTip("🖼️ 이미지 항목 - 더블클릭으로 미리보기")
-            else:
-                tooltip_text = content[:500] if len(content) > 500 else content
-                content_item.setToolTip(tooltip_text)
-            if ptype == "LINK":
-                content_item.setForeground(QColor(theme["secondary"]))
-            elif ptype == "CODE":
-                content_item.setForeground(QColor(theme["success"]))
-            elif ptype == "COLOR":
-                content_item.setForeground(QColor(content) if content.startswith("#") else QColor(theme["warning"]))
-            content_item.setData(Qt.ItemDataRole.UserRole + 1, content)  # 정렬용 원본 데이터
-            self.table.setItem(row_idx, 2, content_item)
-            
-            # 시간 (개선된 형식)
-            try:
-                dt = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
-                if dt.date() == today:
-                    time_str = dt.strftime("%H:%M")  # 오늘: "14:30"
-                elif dt.date() == yesterday:
-                    time_str = f"어제 {dt.hour}시"  # 어제: "어제 13시"
+            theme = THEMES.get(self.current_theme, THEMES["dark"])
+        
+            # v10.1: 개선된 빈 결과 상태 표시 - 친화적인 온보딩 UI
+            if not items:
+                self.table.setRowCount(1)
+                if search_query:
+                    empty_msg = f"🔍 '{search_query}'에 대한 검색 결과가 없습니다\n\n다른 검색어를 입력하거나 필터를 변경해보세요"
+                elif self.current_tag_filter:
+                    empty_msg = f"🏷️ '{self.current_tag_filter}' 태그가 없습니다\n\n항목을 선택하고 마우스 오른쪽 버튼으로 태그를 추가하세요"
                 else:
-                    time_str = f"{dt.month}/{dt.day} {dt.hour}시"  # 그 외: "12/25 13시"
-            except (ValueError, TypeError) as e:
-                logger.debug(f"Timestamp parse error: {e}")
-                time_str = timestamp
+                    empty_msg = "📋 클립보드 히스토리가 비어있습니다\n\n"
+                    empty_msg += "💡 시작 방법:\n"
+                    empty_msg += "• 텍스트나 이미지를 복사하면 자동 저장\n"
+                    empty_msg += "• Ctrl+Shift+V: 클립보드 창 열기\n"
+                    empty_msg += "• Alt+V: 미니 창 열기\n"
+                    empty_msg += "• 더블클릭으로 항목 붙여넣기"
+                empty_item = QTableWidgetItem(empty_msg)
+                empty_item.setForeground(QColor(theme["text_secondary"]))
+                empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.table.setItem(0, 0, empty_item)
+                self.table.setSpan(0, 0, 1, 5)
+                self.table.setRowHeight(0, 150)  # v10.1: 온보딩 UI를 위해 높이 증가
+                return
             
-            time_item = QTableWidgetItem(time_str)
-            time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            time_item.setForeground(QColor(theme["text_secondary"]))
-            time_item.setData(Qt.ItemDataRole.UserRole + 1, timestamp)  # 정렬용 원본 타임스탬프
-            self.table.setItem(row_idx, 3, time_item)
+            # 날짜 비교용
+            today = datetime.date.today()
+            yesterday = today - datetime.timedelta(days=1)
             
-            # 사용 횟수 (인기도 인디케이터)
-            if use_count and use_count >= 10:
-                use_display = f"🔥 {use_count}"
-            elif use_count and use_count >= 5:
-                use_display = f"⭐ {use_count}"
-            elif use_count:
-                use_display = str(use_count)
-            else:
-                use_display = "-"
-            use_item = QTableWidgetItem(use_display)
-            use_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            use_item.setForeground(QColor(theme["text_secondary"]))
-            use_item.setData(Qt.ItemDataRole.UserRole + 1, use_count or 0)  # 정렬용 원본 데이터
-            self.table.setItem(row_idx, 4, use_item)
+            for row_idx, (pid, content, ptype, timestamp, pinned, use_count, pin_order) in enumerate(items):
+                self.table.insertRow(row_idx)
+                
+                # 고정 아이콘 (배경 강조)
+                pin_item = QTableWidgetItem("📌" if pinned else "")
+                pin_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                pin_item.setData(Qt.ItemDataRole.UserRole, pid)
+                if pinned:
+                    # 고정 항목은 미세한 배경색으로 구분
+                    pin_item.setBackground(QColor(theme["primary"]).lighter(170))
+                self.table.setItem(row_idx, 0, pin_item)
+                
+                # 타입 (색상 코드화) - 전역 상수 사용 (성능 최적화)
+                type_item = QTableWidgetItem(TYPE_ICONS.get(ptype, "📝"))
+                type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                type_item.setToolTip(ptype)
+                type_item.setData(Qt.ItemDataRole.UserRole + 1, ptype)  # 정렬용 원본 데이터
+                self.table.setItem(row_idx, 1, type_item)
+                
+                # 내용 + 툴팁
+                display = content.replace('\n', ' ').strip()
+                if len(display) > 45: 
+                    display = display[:45] + "..."
+                content_item = QTableWidgetItem(display)
+                # 툴팁에 전체 내용 표시 (최대 500자)
+                if ptype == "IMAGE":
+                    content_item.setToolTip("🖼️ 이미지 항목 - 더블클릭으로 미리보기")
+                else:
+                    tooltip_text = content[:500] if len(content) > 500 else content
+                    content_item.setToolTip(tooltip_text)
+                if ptype == "LINK":
+                    content_item.setForeground(QColor(theme["secondary"]))
+                elif ptype == "CODE":
+                    content_item.setForeground(QColor(theme["success"]))
+                elif ptype == "COLOR":
+                    content_item.setForeground(QColor(content) if content.startswith("#") else QColor(theme["warning"]))
+                content_item.setData(Qt.ItemDataRole.UserRole + 1, content)  # 정렬용 원본 데이터
+                self.table.setItem(row_idx, 2, content_item)
+                
+                # 시간 (개선된 형식)
+                try:
+                    dt = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+                    if dt.date() == today:
+                        time_str = dt.strftime("%H:%M")  # 오늘: "14:30"
+                    elif dt.date() == yesterday:
+                        time_str = f"어제 {dt.hour}시"  # 어제: "어제 13시"
+                    else:
+                        time_str = f"{dt.month}/{dt.day} {dt.hour}시"  # 그 외: "12/25 13시"
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"Timestamp parse error: {e}")
+                    time_str = timestamp
+                
+                time_item = QTableWidgetItem(time_str)
+                time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                time_item.setForeground(QColor(theme["text_secondary"]))
+                time_item.setData(Qt.ItemDataRole.UserRole + 1, timestamp)  # 정렬용 원본 타임스탬프
+                self.table.setItem(row_idx, 3, time_item)
+                
+                # 사용 횟수 (인기도 인디케이터)
+                if use_count and use_count >= 10:
+                    use_display = f"🔥 {use_count}"
+                elif use_count and use_count >= 5:
+                    use_display = f"⭐ {use_count}"
+                elif use_count:
+                    use_display = str(use_count)
+                else:
+                    use_display = "-"
+                use_item = QTableWidgetItem(use_display)
+                use_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                use_item.setForeground(QColor(theme["text_secondary"]))
+                use_item.setData(Qt.ItemDataRole.UserRole + 1, use_count or 0)  # 정렬용 원본 데이터
+                self.table.setItem(row_idx, 4, use_item)
             
-        # 상태바 업데이트
-        self.update_status_bar()
+            # 상태바 업데이트 (for 루프 외부)
+            self.update_status_bar()
+        finally:
+            # v10.1: UI 업데이트 재개
+            self.table.setUpdatesEnabled(True)
+
 
     def on_selection_changed(self):
         # 선택된 항목 수 계산 및 상태바 업데이트
