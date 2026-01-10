@@ -613,6 +613,21 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Snippet Delete Error: {e}")
+    
+    def update_snippet(self, snippet_id, name, content, shortcut="", category="일반"):
+        """v10.2: 스니펫 수정"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "UPDATE snippets SET name=?, content=?, shortcut=?, category=? WHERE id=?",
+                    (name, content, shortcut, category, snippet_id)
+                )
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Snippet Update Error: {e}")
+                return False
 
     # --- 설정 메서드 ---
     def get_setting(self, key, default=None):
@@ -1213,17 +1228,28 @@ class ClipboardActionManager:
         return None
     
     def fetch_url_title(self, url, item_id):
-        """URL에서 제목 가져오기"""
+        """URL에서 제목 가져오기 - v10.2: 개선된 타임아웃/에러 처리"""
         if not HAS_WEB:
             return None
         try:
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            response = requests.get(url, headers=headers, timeout=5)
+            # v10.2: 연결 타임아웃 3초, 읽기 타임아웃 5초로 분리
+            response = requests.get(url, headers=headers, timeout=(3, 5), verify=True)
+            response.raise_for_status()  # HTTP 에러 코드도 처리 (4xx, 5xx)
             soup = BeautifulSoup(response.text, 'html.parser')
             title = soup.title.string if soup.title else None
             if title and item_id:
                 self.db.update_url_title(item_id, title.strip())
             return {"type": "title", "title": title.strip() if title else None}
+        except requests.exceptions.Timeout:
+            logger.debug(f"Fetch title timeout: {url}")
+            return None
+        except requests.exceptions.HTTPError as e:
+            logger.debug(f"Fetch title HTTP error: {e}")
+            return None
+        except requests.exceptions.SSLError as e:
+            logger.debug(f"Fetch title SSL error: {e}")
+            return None
         except Exception as e:
             logger.debug(f"Fetch title error: {e}")
             return None
@@ -1784,9 +1810,10 @@ class SecureVaultDialog(QDialog):
             return
         
         if not self.vault.has_master_password():
-            # 최초 설정
-            if len(password) < 4:
-                QMessageBox.warning(self, "경고", "비밀번호는 최소 4자 이상이어야 합니다.")
+            # 최초 설정 - v10.2: 비밀번호 강도 검증 강화
+            is_valid, error_msg = self.validate_password_strength(password)
+            if not is_valid:
+                QMessageBox.warning(self, "비밀번호 강도 부족", error_msg)
                 return
             if self.vault.set_master_password(password):
                 QMessageBox.information(self, "설정 완료", "마스터 비밀번호가 설정되었습니다.")
@@ -1872,6 +1899,16 @@ class SecureVaultDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             self.db.delete_vault_item(vid)
             self.load_items()
+    
+    def validate_password_strength(self, password):
+        """v10.2: 비밀번호 강도 검증"""
+        if len(password) < 8:
+            return False, "비밀번호는 최소 8자 이상이어야 합니다."
+        if not any(c.isdigit() for c in password):
+            return False, "비밀번호에 숫자가 포함되어야 합니다."
+        if not any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password):
+            return False, "비밀번호에 특수문자가 포함되어야 합니다."
+        return True, ""
 
 
 # --- v8.0: 클립보드 액션 다이얼로그 ---
@@ -1974,13 +2011,20 @@ class ClipboardActionsDialog(QDialog):
             self.table.setCellWidget(row_idx, 4, btn_del)
     
     def add_action(self):
-        """새 액션 추가"""
+        """새 액션 추가 - v10.2: 정규식 패턴 유효성 검증 추가"""
         name, ok = QInputDialog.getText(self, "액션 추가", "액션 이름:")
         if not ok or not name.strip():
             return
         
         pattern, ok = QInputDialog.getText(self, "액션 추가", "패턴 (정규식):", text="https?://")
         if not ok or not pattern.strip():
+            return
+        
+        # v10.2: 정규식 패턴 유효성 검증
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            QMessageBox.warning(self, "패턴 오류", f"잘못된 정규식 패턴입니다:\n{e}")
             return
         
         action_types = ["fetch_title", "format_phone", "format_email", "notify", "transform"]
@@ -2160,6 +2204,170 @@ class ImportDialog(QDialog):
             self.accept()
         else:
             QMessageBox.critical(self, "오류", "가져오기에 실패했습니다.")
+
+
+# --- v10.2: 휴지통 다이얼로그 ---
+class TrashDialog(QDialog):
+    """휴지통 관리 다이얼로그 - 삭제된 항목 복원/영구 삭제"""
+    
+    def __init__(self, parent, db):
+        super().__init__(parent)
+        self.db = db
+        self.parent_window = parent
+        self.current_theme = parent.current_theme if hasattr(parent, 'current_theme') else 'dark'
+        self.setWindowTitle("🗑️ 휴지통")
+        self.setMinimumSize(550, 400)
+        self.apply_dialog_theme()  # v10.2: 테마 적용
+        self.init_ui()
+        self.load_items()
+    
+    def apply_dialog_theme(self):
+        """v10.2: 다이얼로그에 테마 적용"""
+        theme = THEMES.get(self.current_theme, THEMES["dark"])
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {theme["background"]};
+                color: {theme["text"]};
+            }}
+            QTableWidget {{
+                background-color: {theme["surface"]};
+                border: 1px solid {theme["border"]};
+                border-radius: 8px;
+                color: {theme["text"]};
+            }}
+            QTableWidget::item {{
+                padding: 8px;
+            }}
+            QTableWidget::item:selected {{
+                background-color: {theme["primary"]};
+            }}
+            QHeaderView::section {{
+                background-color: {theme["surface_variant"]};
+                color: {theme["text"]};
+                padding: 10px;
+                border: none;
+            }}
+            QLabel {{
+                color: {theme["text_secondary"]};
+            }}
+            QPushButton {{
+                background-color: {theme["surface_variant"]};
+                border: none;
+                border-radius: 6px;
+                padding: 10px 16px;
+                color: {theme["text"]};
+            }}
+            QPushButton:hover {{
+                background-color: {theme["primary"]};
+                color: white;
+            }}
+        """)
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        
+        # 정보 라벨
+        info = QLabel("삭제된 항목은 7일 후 자동으로 영구 삭제됩니다.")
+        info.setStyleSheet("color: gray; font-style: italic;")
+        layout.addWidget(info)
+        
+        # 테이블
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["내용", "유형", "삭제일", "만료일"])
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(1, 70)
+        self.table.setColumnWidth(2, 90)
+        self.table.setColumnWidth(3, 90)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.verticalHeader().setVisible(False)
+        layout.addWidget(self.table)
+        
+        # 버튼
+        btn_layout = QHBoxLayout()
+        btn_restore = QPushButton("♻️ 복원")
+        btn_restore.clicked.connect(self.restore_selected)
+        btn_empty = QPushButton("🗑️ 휴지통 비우기")
+        btn_empty.setStyleSheet("color: #ef4444;")
+        btn_empty.clicked.connect(self.empty_trash)
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(self.close)
+        
+        btn_layout.addWidget(btn_restore)
+        btn_layout.addWidget(btn_empty)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_close)
+        layout.addLayout(btn_layout)
+    
+    def load_items(self):
+        """휴지통 항목 로드"""
+        items = self.db.get_deleted_items()
+        self.table.setRowCount(len(items))
+        
+        TYPE_ICONS = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨"}
+        
+        for row, (did, content, dtype, deleted_at, expires_at) in enumerate(items):
+            display = (content or "[이미지]")[:50].replace('\n', ' ')
+            if len(content or "") > 50:
+                display += "..."
+            
+            content_item = QTableWidgetItem(display)
+            content_item.setData(Qt.ItemDataRole.UserRole, did)
+            content_item.setToolTip(content[:200] if content else "이미지 항목")
+            self.table.setItem(row, 0, content_item)
+            
+            type_item = QTableWidgetItem(TYPE_ICONS.get(dtype, "📝"))
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, 1, type_item)
+            
+            self.table.setItem(row, 2, QTableWidgetItem(deleted_at[:10] if deleted_at else ""))
+            self.table.setItem(row, 3, QTableWidgetItem(expires_at[:10] if expires_at else ""))
+        
+        if not items:
+            self.table.setRowCount(1)
+            empty_item = QTableWidgetItem("🎉 휴지통이 비어 있습니다")
+            empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(0, 0, empty_item)
+            self.table.setSpan(0, 0, 1, 4)
+    
+    def restore_selected(self):
+        """선택된 항목 복원 - v10.2: 다중 선택 지원"""
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            QMessageBox.information(self, "알림", "복원할 항목을 선택하세요.")
+            return
+        
+        # v10.2: 모든 선택된 항목 복원
+        restored_count = 0
+        for row in rows:
+            did = self.table.item(row.row(), 0).data(Qt.ItemDataRole.UserRole)
+            if did and self.db.restore_item(did):
+                restored_count += 1
+        
+        if restored_count > 0:
+            self.load_items()
+            if self.parent_window:
+                self.parent_window.load_data()
+                self.parent_window.statusBar().showMessage(f"♻️ {restored_count}개 항목이 복원되었습니다.", 2000)
+    
+    def empty_trash(self):
+        """휴지통 비우기"""
+        reply = QMessageBox.question(
+            self, "휴지통 비우기",
+            "휴지통의 모든 항목을 영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.db.empty_trash()
+            self.load_items()
+            if self.parent_window:
+                self.parent_window.statusBar().showMessage("🗑️ 휴지통이 비워졌습니다.", 2000)
 
 
 # --- v8.0: 플로팅 미니 창 ---
@@ -2453,6 +2661,7 @@ class SnippetDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def save_snippet(self):
+        """v10.2: 스니펫 저장 (생성/편집 모드 지원)"""
         name = self.name_input.text().strip()
         content = self.content_input.toPlainText().strip()
         category = self.category_input.currentText()
@@ -2461,10 +2670,16 @@ class SnippetDialog(QDialog):
             QMessageBox.warning(self, "경고", "이름과 내용을 입력해주세요.")
             return
         
-        if self.db.add_snippet(name, content, "", category):
-            self.accept()
-        else:
-            QMessageBox.critical(self, "오류", "스니펫 저장에 실패했습니다.")
+        if self.snippet:  # 편집 모드
+            if self.db.update_snippet(self.snippet[0], name, content, "", category):
+                self.accept()
+            else:
+                QMessageBox.critical(self, "오류", "스니펫 수정에 실패했습니다.")
+        else:  # 새로 만들기 모드
+            if self.db.add_snippet(name, content, "", category):
+                self.accept()
+            else:
+                QMessageBox.critical(self, "오류", "스니펫 저장에 실패했습니다.")
 
 
 # --- 스니펫 관리자 다이얼로그 ---
@@ -2510,16 +2725,19 @@ class SnippetManagerDialog(QDialog):
         self.table.cellDoubleClicked.connect(self.use_snippet)
         layout.addWidget(self.table)
         
-        # 하단 버튼
+        # 하단 버튼 - v10.2: 편집 버튼 추가
         bottom_layout = QHBoxLayout()
         btn_use = QPushButton("📋 사용")
         btn_use.clicked.connect(self.use_snippet)
+        btn_edit = QPushButton("✏️ 편집")
+        btn_edit.clicked.connect(self.edit_snippet)
         btn_delete = QPushButton("🗑️ 삭제")
         btn_delete.clicked.connect(self.delete_snippet)
         btn_close = QPushButton("닫기")
         btn_close.clicked.connect(self.close)
         
         bottom_layout.addWidget(btn_use)
+        bottom_layout.addWidget(btn_edit)
         bottom_layout.addWidget(btn_delete)
         bottom_layout.addStretch()
         bottom_layout.addWidget(btn_close)
@@ -2609,6 +2827,20 @@ class SnippetManagerDialog(QDialog):
             if reply == QMessageBox.StandardButton.Yes:
                 self.db.delete_snippet(sid)
                 self.load_snippets()
+    
+    def edit_snippet(self):
+        """v10.2: 스니펫 편집"""
+        sid = self.get_selected_id()
+        if not sid:
+            QMessageBox.information(self, "알림", "편집할 스니펫을 선택하세요.")
+            return
+        snippets = self.db.get_snippets()
+        for s in snippets:
+            if s[0] == sid:
+                dialog = SnippetDialog(self, self.db, snippet=s)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    self.load_snippets()
+                break
 
 
 # --- 태그 편집 다이얼로그 ---
@@ -2898,43 +3130,52 @@ class MainWindow(QMainWindow):
             self.vault_timer.timeout.connect(self.check_vault_timeout)
             self.vault_timer.start(60000)  # 1분마다 체크
             
-            logger.info("SmartClipboard Pro v8.0 started")
+            # v10.2: 만료 항목 정리 타이머 (1시간마다)
+            self.cleanup_timer = QTimer(self)
+            self.cleanup_timer.timeout.connect(self.run_periodic_cleanup)
+            self.cleanup_timer.start(3600000)  # 1시간 = 3600000ms
+            
+            # v10.2: 등록된 핫키 추적 (안전한 해제를 위해)
+            self._registered_hotkeys = []
+            
+            # 앱 시작 시 5초 후 정리 작업 실행
+            QTimer.singleShot(5000, self.run_periodic_cleanup)
+            
+            logger.info("SmartClipboard Pro v10.2 started")
         except Exception as e:
             logger.error(f"MainWindow Init Error: {e}", exc_info=True)
             raise e
     
     def register_hotkeys(self):
-        """v8.0: 커스텀 핫키 등록"""
+        """v10.2: 커스텀 핫키 등록 - 개선된 버전 (앱 전용 핫키만 관리)"""
         try:
             hotkeys = json.loads(self.db.get_setting("hotkeys", json.dumps(DEFAULT_HOTKEYS)))
             
-            # 기존 훅 모두 제거 (재등록 시 중복 방지)
-            try:
-                keyboard.unhook_all()
-            except Exception:
-                pass
+            # v10.2: 이전에 등록된 핫키만 해제 (다른 앱 핫키 보호)
+            if hasattr(self, '_registered_hotkeys') and self._registered_hotkeys:
+                for hk in self._registered_hotkeys:
+                    try:
+                        keyboard.remove_hotkey(hk)
+                    except Exception:
+                        pass
+            self._registered_hotkeys = []
 
             # 메인 창 열기 핫키 - 시그널 emit으로 메인 스레드에서 실행
             main_key = hotkeys.get("show_main", "ctrl+shift+v")
-            # show_window_from_tray는 슬롯이므로 바로 연결하지 않고 lambda로 감싸거나 시그널 생성 필요하지만
-            # 가장 안전하게는 새 시그널을 만드는 것이 좋으나, 여기서는 lambda 사용
-            # 주의: keyboard 콜백은 별도 스레드이므로 UI조작 함수 직접 호출 위험.
-            # show_window_from_tray 내부에서 UI조작이 많으므로 시그널 방식 권장.
-            # MainWindow에 show_main_signal을 추가하는 것이 가장 안전함.
-            keyboard.add_hotkey(main_key, lambda: self.show_main_signal.emit())
-            
-            # 시그널 연결 (스레드 안전한 UI 조작)
-            # toggle_mini_signal, paste_last_signal은 __init__에서 이미 연결됨.
+            hk1 = keyboard.add_hotkey(main_key, lambda: self.show_main_signal.emit())
+            self._registered_hotkeys.append(hk1)
             
             # 미니 창 핫키 - 시그널 emit
             mini_key = hotkeys.get("show_mini", "alt+v")
-            keyboard.add_hotkey(mini_key, lambda: self.toggle_mini_signal.emit())
+            hk2 = keyboard.add_hotkey(mini_key, lambda: self.toggle_mini_signal.emit())
+            self._registered_hotkeys.append(hk2)
             
             # 마지막 항목 즉시 붙여넣기 핫키 - 시그널 emit
             paste_key = hotkeys.get("paste_last", "ctrl+shift+z")
-            keyboard.add_hotkey(paste_key, lambda: self.paste_last_signal.emit())
+            hk3 = keyboard.add_hotkey(paste_key, lambda: self.paste_last_signal.emit())
+            self._registered_hotkeys.append(hk3)
             
-            logger.info("Hotkeys registered successfully")
+            logger.info(f"Hotkeys registered: {main_key}, {mini_key}, {paste_key}")
             
         except Exception as e:
             logger.warning(f"Hotkey registration error: {e}")
@@ -2987,6 +3228,17 @@ class MainWindow(QMainWindow):
         """보관함 자동 잠금 체크"""
         if self.vault_manager.check_timeout():
             logger.info("Vault auto-locked due to inactivity")
+    
+    def run_periodic_cleanup(self):
+        """v10.2: 주기적 정리 작업 실행 (만료된 임시 항목 및 휴지통 정리)"""
+        try:
+            expired_count = self.db.cleanup_expired_items()
+            self.db.cleanup_expired_trash()
+            if expired_count > 0:
+                logger.info(f"주기적 정리: 만료 항목 {expired_count}개 삭제됨")
+                self.load_data()  # UI 갱신
+        except Exception as e:
+            logger.debug(f"Periodic cleanup error: {e}")
 
     def restore_window_state(self):
         geometry = self.settings.value("geometry")
@@ -3028,18 +3280,28 @@ class MainWindow(QMainWindow):
             event.accept()
 
     def quit_app(self):
-        """앱 종료 및 리소스 정리"""
+        """v10.2: 앱 종료 및 리소스 정리 - 개선된 버전"""
         logger.info("앱 종료 시작...")
         
         try:
-            # 1. 핫키 훅 먼저 해제 (외부 이벤트 차단)
-            keyboard.unhook_all()
+            # 1. 등록된 핫키만 해제 (다른 앱 핫키 보호)
+            if hasattr(self, '_registered_hotkeys') and self._registered_hotkeys:
+                for hk in self._registered_hotkeys:
+                    try:
+                        keyboard.remove_hotkey(hk)
+                    except Exception:
+                        pass
+                self._registered_hotkeys = []
             logger.debug("핫키 훅 해제됨")
             
-            # 2. 보관함 타이머 중지
+            # 2. 타이머들 중지
             if hasattr(self, 'vault_timer') and self.vault_timer.isActive():
                 self.vault_timer.stop()
                 logger.debug("보관함 타이머 중지됨")
+            
+            if hasattr(self, 'cleanup_timer') and self.cleanup_timer.isActive():
+                self.cleanup_timer.stop()
+                logger.debug("정리 타이머 중지됨")
             
             # 3. 플로팅 미니 창 닫기
             if hasattr(self, 'mini_window') and self.mini_window:
@@ -3049,7 +3311,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.warning(f"Cleanup warning: {e}")
             
-        # 5. DB 연결 종료
+        # 4. DB 연결 종료
         try:
             self.db.close()
             logger.debug("DB 연결 종료됨")
@@ -3057,7 +3319,7 @@ class MainWindow(QMainWindow):
             pass
             
         logger.info("앱 종료 완료")
-        # 6. Qt 앱 종료
+        # 5. Qt 앱 종료
         QApplication.quit()
 
     def toggle_privacy_mode(self):
@@ -3098,7 +3360,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "백업 오류", f"백업 중 오류가 발생했습니다:\n{e}")
 
     def restore_data(self):
-        """데이터베이스 복원"""
+        """데이터베이스 복원 - v10.2: 매니저 갱신 추가"""
         reply = QMessageBox.warning(self, "복원 경고", "데이터를 복원하면 현재 데이터가 모두 덮어씌워집니다.\n계속하시겠습니까?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.No:
             return
@@ -3114,8 +3376,12 @@ class MainWindow(QMainWindow):
                 self.quit_app()
             except Exception as e:
                 QMessageBox.critical(self, "복원 오류", f"복원 중 오류가 발생했습니다:\n{e}")
-                # 연결 재수립 시도
+                # v10.2: 연결 재수립 및 모든 매니저 갱신
                 self.db = ClipboardDB()
+                self.vault_manager = SecureVaultManager(self.db)
+                self.action_manager = ClipboardActionManager(self.db)
+                self.export_manager = ExportImportManager(self.db)
+                logger.warning("복원 실패 후 DB 연결 및 매니저 재초기화됨")
 
     def create_app_icon(self):
         size = 64
@@ -3667,6 +3933,13 @@ class MainWindow(QMainWindow):
         action_import = QAction("📥 가져오기...", self)
         action_import.triggered.connect(self.show_import_dialog)
         edit_menu.addAction(action_import)
+        
+        edit_menu.addSeparator()
+        
+        # v10.2: 휴지통 메뉴
+        action_trash = QAction("🗑️ 휴지통...", self)
+        action_trash.triggered.connect(self.show_trash)
+        edit_menu.addAction(action_trash)
 
         # 보기 메뉴
         view_menu = menubar.addMenu("보기")
@@ -3815,6 +4088,11 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.load_data()
             self.statusBar().showMessage("✅ 가져오기 완료", 3000)
+    
+    def show_trash(self):
+        """v10.2: 휴지통 다이얼로그 표시"""
+        dialog = TrashDialog(self, self.db)
+        dialog.exec()
     
     def show_hotkey_settings(self):
         """핫키 설정 다이얼로그"""
@@ -4464,6 +4742,16 @@ class MainWindow(QMainWindow):
                     buffer.open(QBuffer.OpenModeFlag.WriteOnly)
                     image.save(buffer, "PNG")
                     blob_data = ba.data()
+                    
+                    # v10.2: 이미지 크기 제한 (5MB)
+                    MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+                    if len(blob_data) > MAX_IMAGE_SIZE:
+                        logger.warning(f"Image too large ({len(blob_data)} bytes), skipping")
+                        ToastNotification.show_toast(
+                            self, f"⚠️ 이미지가 너무 큽니다 (최대 5MB)",
+                            duration=2500, toast_type="warning"
+                        )
+                        return
                     
                     # v10.0: 이미지 중복 체크 (해시 기반) - v10.1: 모듈 레벨 import 사용
                     img_hash = hashlib.md5(blob_data).hexdigest()
