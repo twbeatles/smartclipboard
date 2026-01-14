@@ -1203,6 +1203,9 @@ class ClipboardActionManager:
             aid, name, pattern, action_type, params_json, enabled, priority = action
             if not enabled:
                 continue
+            if not pattern:
+                logger.warning(f"Empty pattern in action '{name}' (id={aid}), skipping")
+                continue
             try:
                 if re.search(pattern, text):
                     params = json.loads(params_json) if params_json else {}
@@ -4765,19 +4768,23 @@ class MainWindow(QMainWindow):
                         self.update_status_bar()
                 return
             if mime_data.hasText():
-                text = mime_data.text().strip()
-                if not text: return
+                raw_text = mime_data.text()
+                if not raw_text:
+                    return
                 
-                # 복사 규칙 적용
-                text = self.apply_copy_rules(text)
+                # 복사 규칙 적용 (원본 텍스트 기반)
+                text = self.apply_copy_rules(raw_text)
+                normalized_text = text.strip()
+                if not normalized_text:
+                    return
                 
-                tag = self.analyze_text(text)
+                tag = self.analyze_text(normalized_text)
                 item_id = self.db.add_item(text, None, tag)
                 if item_id:
                     # v8.0: 클립보드 액션 자동화 실행
                     try:
                         # 성능 최적화: add_item이 반환한 ID 직접 사용 (get_items 호출 제거)
-                        action_results = self.action_manager.process(text, item_id)
+                        action_results = self.action_manager.process(normalized_text, item_id)
                         for action_name, result in action_results:
                             if result and result.get("type") == "notify":
                                 ToastNotification.show_toast(
@@ -4811,6 +4818,9 @@ class MainWindow(QMainWindow):
             rid, name, pattern, action, replacement, enabled, priority = rule
             if not enabled:
                 continue
+            if not pattern:
+                logger.warning(f"Empty pattern in copy rule '{name}' (id={rid}), skipping")
+                continue
             try:
                 if re.search(pattern, text):
                     if action == "trim":
@@ -4821,8 +4831,8 @@ class MainWindow(QMainWindow):
                         text = text.upper()
                     elif action == "remove_newlines":
                         text = text.replace('\n', ' ').replace('\r', '')
-                    elif action == "custom_replace" and replacement:
-                        text = re.sub(pattern, replacement, text)
+                    elif action == "custom_replace":
+                        text = re.sub(pattern, replacement or "", text)
                     logger.debug(f"Rule '{name}' applied")
             except re.error as e:
                 logger.warning(f"Invalid regex in rule '{name}': {e}")
