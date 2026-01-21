@@ -491,6 +491,71 @@ class ClipboardDB:
                 logger.error(f"DB Get Error: {e}")
                 return []
 
+    def get_items_for_export(self):
+        """내보내기용 항목 조회 (메타데이터 포함)"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, content, type, timestamp, pinned, use_count, tags, note, bookmark, pin_order
+                    FROM history
+                    ORDER BY pinned DESC, pin_order ASC, id DESC
+                    """
+                )
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"DB Export Get Error: {e}")
+                return []
+
+    def update_item_metadata(
+        self,
+        item_id,
+        pinned=None,
+        use_count=None,
+        tags=None,
+        note=None,
+        bookmark=None,
+        timestamp=None,
+    ):
+        """항목 메타데이터 업데이트 (선택 필드만 갱신)"""
+        fields = []
+        params = []
+        if pinned is not None:
+            fields.append("pinned = ?")
+            params.append(int(bool(pinned)))
+        if use_count is not None:
+            fields.append("use_count = ?")
+            params.append(int(use_count))
+        if tags is not None:
+            fields.append("tags = ?")
+            params.append(tags)
+        if note is not None:
+            fields.append("note = ?")
+            params.append(note)
+        if bookmark is not None:
+            fields.append("bookmark = ?")
+            params.append(int(bool(bookmark)))
+        if timestamp is not None:
+            fields.append("timestamp = ?")
+            params.append(timestamp)
+
+        if not fields:
+            logger.debug(f"Metadata update skipped (no fields) for item_id={item_id}")
+            return
+
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                params.append(item_id)
+                cursor.execute(f"UPDATE history SET {', '.join(fields)} WHERE id = ?", params)
+                if cursor.rowcount == 0:
+                    logger.warning(f"Metadata update target not found: item_id={item_id}")
+                self.conn.commit()
+            except sqlite3.Error as e:
+                logger.error(f"DB Metadata Update Error: {e}")
+                self.conn.rollback()
+
     def toggle_pin(self, item_id):
         with self.lock:
             try:
@@ -1295,7 +1360,7 @@ class ExportImportManager:
     def export_json(self, path, filter_type="all", date_from=None):
         """JSON으로 내보내기"""
         try:
-            items = self.db.get_items("", "전체")
+            items = self.db.get_items_for_export()
             export_data = {
                 "app": "SmartClipboard Pro",
                 "version": VERSION,
@@ -1303,7 +1368,7 @@ class ExportImportManager:
                 "items": []
             }
             for item in items:
-                pid, content, ptype, timestamp, pinned, use_count, pin_order = item
+                pid, content, ptype, timestamp, pinned, use_count, tags, note, bookmark, pin_order = item
                 if filter_type != "all" and filter_type != ptype:
                     continue
                 if ptype == "IMAGE":
@@ -1313,7 +1378,10 @@ class ExportImportManager:
                     "type": ptype,
                     "timestamp": timestamp,
                     "pinned": bool(pinned),
-                    "use_count": use_count
+                    "use_count": use_count,
+                    "tags": tags or "",
+                    "note": note or "",
+                    "bookmark": bool(bookmark)
                 })
             
             with open(path, 'w', encoding='utf-8') as f:
@@ -1385,12 +1453,35 @@ class ExportImportManager:
                 data = json.load(f)
             
             imported = 0
-            for item in data.get("items", []):
+            items = data.get("items", [])
+            if not isinstance(items, list):
+                logger.error("JSON Import Error: 'items' must be a list")
+                return -1
+
+            for item in items:
+                if not isinstance(item, dict):
+                    logger.warning(f"JSON Import skip: invalid item format {type(item)}")
+                    continue
                 content = item.get("content", "")
                 ptype = item.get("type", "TEXT")
                 if content:
-                    self.db.add_item(content, None, ptype)
+                    item_id = self.db.add_item(content, None, ptype)
+                    if item_id:
+                        self.db.update_item_metadata(
+                            item_id,
+                            pinned=item.get("pinned"),
+                            use_count=item.get("use_count"),
+                            tags=item.get("tags"),
+                            note=item.get("note"),
+                            bookmark=item.get("bookmark"),
+                            timestamp=item.get("timestamp"),
+                        )
+                    else:
+                        logger.warning("JSON Import skip: DB insert failed")
+                        continue
                     imported += 1
+                else:
+                    logger.warning("JSON Import skip: empty content")
             return imported
         except Exception as e:
             logger.error(f"JSON Import Error: {e}")
@@ -2202,9 +2293,11 @@ class ImportDialog(QDialog):
             QMessageBox.warning(self, "경고", "지원하지 않는 파일 형식입니다.")
             return
         
-        if count >= 0:
+        if count > 0:
             QMessageBox.information(self, "완료", f"✅ {count}개 항목을 가져왔습니다.")
             self.accept()
+        elif count == 0:
+            QMessageBox.warning(self, "알림", "가져올 항목이 없습니다.")
         else:
             QMessageBox.critical(self, "오류", "가져오기에 실패했습니다.")
 
