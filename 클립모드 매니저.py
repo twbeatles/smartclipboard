@@ -26,6 +26,7 @@ import base64
 import uuid
 import csv
 import hashlib  # v10.1: 모듈 레벨 import로 이동 (성능 최적화)
+from urllib.parse import quote  # v10.3: URL 인코딩용
 
 # 암호화 라이브러리 체크
 try:
@@ -101,7 +102,7 @@ MAX_HISTORY = 100
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "10.0"
+VERSION = "10.3"
 
 # 기본 핫키 설정
 DEFAULT_HOTKEYS = {
@@ -490,71 +491,6 @@ class ClipboardDB:
             except sqlite3.Error as e:
                 logger.error(f"DB Get Error: {e}")
                 return []
-
-    def get_items_for_export(self):
-        """내보내기용 항목 조회 (메타데이터 포함)"""
-        with self.lock:
-            try:
-                cursor = self.conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT id, content, type, timestamp, pinned, use_count, tags, note, bookmark, pin_order
-                    FROM history
-                    ORDER BY pinned DESC, pin_order ASC, id DESC
-                    """
-                )
-                return cursor.fetchall()
-            except sqlite3.Error as e:
-                logger.error(f"DB Export Get Error: {e}")
-                return []
-
-    def update_item_metadata(
-        self,
-        item_id,
-        pinned=None,
-        use_count=None,
-        tags=None,
-        note=None,
-        bookmark=None,
-        timestamp=None,
-    ):
-        """항목 메타데이터 업데이트 (선택 필드만 갱신)"""
-        fields = []
-        params = []
-        if pinned is not None:
-            fields.append("pinned = ?")
-            params.append(int(bool(pinned)))
-        if use_count is not None:
-            fields.append("use_count = ?")
-            params.append(int(use_count))
-        if tags is not None:
-            fields.append("tags = ?")
-            params.append(tags)
-        if note is not None:
-            fields.append("note = ?")
-            params.append(note)
-        if bookmark is not None:
-            fields.append("bookmark = ?")
-            params.append(int(bool(bookmark)))
-        if timestamp is not None:
-            fields.append("timestamp = ?")
-            params.append(timestamp)
-
-        if not fields:
-            logger.debug(f"Metadata update skipped (no fields) for item_id={item_id}")
-            return
-
-        with self.lock:
-            try:
-                cursor = self.conn.cursor()
-                params.append(item_id)
-                cursor.execute(f"UPDATE history SET {', '.join(fields)} WHERE id = ?", params)
-                if cursor.rowcount == 0:
-                    logger.warning(f"Metadata update target not found: item_id={item_id}")
-                self.conn.commit()
-            except sqlite3.Error as e:
-                logger.error(f"DB Metadata Update Error: {e}")
-                self.conn.rollback()
 
     def toggle_pin(self, item_id):
         with self.lock:
@@ -1095,6 +1031,7 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Empty Trash Error: {e}")
+                self.conn.rollback()
     
     def cleanup_expired_trash(self):
         """만료된 휴지통 항목 영구 삭제"""
@@ -1358,9 +1295,9 @@ class ExportImportManager:
         self.db = db
     
     def export_json(self, path, filter_type="all", date_from=None):
-        """JSON으로 내보내기"""
+        """JSON으로 내보내기 - v10.3: date_from 필터링 구현"""
         try:
-            items = self.db.get_items_for_export()
+            items = self.db.get_items("", "전체")
             export_data = {
                 "app": "SmartClipboard Pro",
                 "version": VERSION,
@@ -1368,20 +1305,25 @@ class ExportImportManager:
                 "items": []
             }
             for item in items:
-                pid, content, ptype, timestamp, pinned, use_count, tags, note, bookmark, pin_order = item
+                pid, content, ptype, timestamp, pinned, use_count, pin_order = item
                 if filter_type != "all" and filter_type != ptype:
                     continue
                 if ptype == "IMAGE":
                     continue  # 이미지는 JSON에서 제외
+                # v10.3: 날짜 필터링 적용
+                if date_from and timestamp:
+                    try:
+                        item_date = datetime.datetime.strptime(timestamp.split()[0], "%Y-%m-%d").date()
+                        if item_date < date_from:
+                            continue
+                    except (ValueError, IndexError):
+                        pass  # 날짜 파싱 실패 시 포함
                 export_data["items"].append({
                     "content": content,
                     "type": ptype,
                     "timestamp": timestamp,
                     "pinned": bool(pinned),
-                    "use_count": use_count,
-                    "tags": tags or "",
-                    "note": note or "",
-                    "bookmark": bool(bookmark)
+                    "use_count": use_count
                 })
             
             with open(path, 'w', encoding='utf-8') as f:
@@ -1430,7 +1372,7 @@ class ExportImportManager:
                         continue
                     
                     pin_mark = "📌 " if pinned else ""
-                    type_icon = {"TEXT": "📝", "LINK": "🔗", "CODE": "💻", "COLOR": "🎨", "FILE": "📁"}.get(ptype, "📝")
+                    type_icon = TYPE_ICONS.get(ptype, "📝")  # v10.3: 상수 사용
                     
                     f.write(f"### {pin_mark}{type_icon} {timestamp}\n\n")
                     if ptype == "CODE":
@@ -1447,48 +1389,30 @@ class ExportImportManager:
             return -1
     
     def import_json(self, path):
-        """JSON에서 가져오기"""
+        """JSON에서 가져오기 - v10.3: 타입 유효성 검증 추가"""
+        VALID_TYPES = {"TEXT", "LINK", "IMAGE", "CODE", "COLOR"}
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
             imported = 0
-            items = data.get("items", [])
-            if not isinstance(items, list):
-                logger.error("JSON Import Error: 'items' must be a list")
-                return -1
-
-            for item in items:
-                if not isinstance(item, dict):
-                    logger.warning(f"JSON Import skip: invalid item format {type(item)}")
-                    continue
+            for item in data.get("items", []):
                 content = item.get("content", "")
                 ptype = item.get("type", "TEXT")
+                # v10.3: 유효하지 않은 타입은 TEXT로 폴백
+                if ptype not in VALID_TYPES:
+                    ptype = "TEXT"
                 if content:
-                    item_id = self.db.add_item(content, None, ptype)
-                    if item_id:
-                        self.db.update_item_metadata(
-                            item_id,
-                            pinned=item.get("pinned"),
-                            use_count=item.get("use_count"),
-                            tags=item.get("tags"),
-                            note=item.get("note"),
-                            bookmark=item.get("bookmark"),
-                            timestamp=item.get("timestamp"),
-                        )
-                    else:
-                        logger.warning("JSON Import skip: DB insert failed")
-                        continue
+                    self.db.add_item(content, None, ptype)
                     imported += 1
-                else:
-                    logger.warning("JSON Import skip: empty content")
             return imported
         except Exception as e:
             logger.error(f"JSON Import Error: {e}")
             return -1
     
     def import_csv(self, path):
-        """CSV에서 가져오기"""
+        """CSV에서 가져오기 - v10.3: 타입 유효성 검증 추가"""
+        VALID_TYPES = {"TEXT", "LINK", "IMAGE", "CODE", "COLOR"}
         try:
             imported = 0
             with open(path, 'r', encoding='utf-8-sig') as f:
@@ -1497,6 +1421,9 @@ class ExportImportManager:
                 for row in reader:
                     if len(row) >= 2:
                         content, ptype = row[0], row[1]
+                        # v10.3: 유효하지 않은 타입은 TEXT로 폴백
+                        if ptype not in VALID_TYPES:
+                            ptype = "TEXT"
                         if content:
                             self.db.add_item(content, None, ptype)
                             imported += 1
@@ -1727,6 +1654,15 @@ class SettingsDialog(QDialog):
         history_layout.addRow("최대 저장 개수:", self.max_history_spin)
         general_layout.addWidget(history_group)
         
+        # 미니 창 설정
+        mini_window_group = QGroupBox("🔲 미니 창")
+        mini_window_layout = QFormLayout(mini_window_group)
+        self.mini_window_enabled = QCheckBox("미니 클립보드 창 활성화")
+        self.mini_window_enabled.setChecked(self.db.get_setting("mini_window_enabled", "true").lower() == "true")
+        self.mini_window_enabled.setToolTip("비활성화하면 Alt+V 단축키로 미니 창이 열리지 않습니다.")
+        mini_window_layout.addRow(self.mini_window_enabled)
+        general_layout.addWidget(mini_window_group)
+        
         # v8.1: 로깅 레벨 설정
         logging_group = QGroupBox("📝 로깅")
         logging_layout = QFormLayout(logging_group)
@@ -1784,6 +1720,13 @@ class SettingsDialog(QDialog):
         
         self.db.set_setting("theme", selected_theme)
         self.db.set_setting("max_history", self.max_history_spin.value())
+        
+        # 미니 창 설정 저장 및 핫키 즉시 재등록
+        mini_enabled = "true" if self.mini_window_enabled.isChecked() else "false"
+        self.db.set_setting("mini_window_enabled", mini_enabled)
+        # 핫키 재등록하여 설정 즉시 반영
+        if self.parent() and hasattr(self.parent(), 'register_hotkeys'):
+            self.parent().register_hotkeys()
         
         # v8.1: 로깅 레벨 저장 및 적용
         selected_log_level = self.log_level_combo.currentData()
@@ -2293,11 +2236,9 @@ class ImportDialog(QDialog):
             QMessageBox.warning(self, "경고", "지원하지 않는 파일 형식입니다.")
             return
         
-        if count > 0:
+        if count >= 0:
             QMessageBox.information(self, "완료", f"✅ {count}개 항목을 가져왔습니다.")
             self.accept()
-        elif count == 0:
-            QMessageBox.warning(self, "알림", "가져올 항목이 없습니다.")
         else:
             QMessageBox.critical(self, "오류", "가져오기에 실패했습니다.")
 
@@ -2581,10 +2522,9 @@ class FloatingMiniWindow(QWidget):
             self.list_widget.addItem(empty_item)
             return
         
-        type_icons = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨", "FILE": "📁"}
         
         for pid, content, ptype, timestamp, pinned, use_count, pin_order in items:
-            icon = type_icons.get(ptype, "📝")
+            icon = TYPE_ICONS.get(ptype, "📝")  # v10.3: 상수 사용
             pin_mark = "📌 " if pinned else ""
             display = content.replace('\n', ' ')[:35] + ("..." if len(content) > 35 else "")
             
@@ -3200,6 +3140,9 @@ class MainWindow(QMainWindow):
             self._rules_cache = None
             self._rules_cache_dirty = True
             
+            # v10.3: 클립보드 디바운스 타이머 (중복 호출 방지)
+            self._clipboard_debounce_timer = None
+            
             self.apply_theme()
             self.init_menu()
             self.init_ui()
@@ -3237,7 +3180,7 @@ class MainWindow(QMainWindow):
             # 앱 시작 시 5초 후 정리 작업 실행
             QTimer.singleShot(5000, self.run_periodic_cleanup)
             
-            logger.info("SmartClipboard Pro v10.2 started")
+            logger.info("SmartClipboard Pro v10.3 started")
         except Exception as e:
             logger.error(f"MainWindow Init Error: {e}", exc_info=True)
             raise e
@@ -3261,10 +3204,16 @@ class MainWindow(QMainWindow):
             hk1 = keyboard.add_hotkey(main_key, lambda: self.show_main_signal.emit())
             self._registered_hotkeys.append(hk1)
             
-            # 미니 창 핫키 - 시그널 emit
-            mini_key = hotkeys.get("show_mini", "alt+v")
-            hk2 = keyboard.add_hotkey(mini_key, lambda: self.toggle_mini_signal.emit())
-            self._registered_hotkeys.append(hk2)
+            # 미니 창 핫키 - 설정에서 활성화된 경우만 등록
+            mini_enabled = self.db.get_setting("mini_window_enabled", "true").lower() == "true"
+            if mini_enabled:
+                mini_key = hotkeys.get("show_mini", "alt+v")
+                hk2 = keyboard.add_hotkey(mini_key, lambda: self.toggle_mini_signal.emit())
+                self._registered_hotkeys.append(hk2)
+                logger.info(f"Mini window hotkey registered: {mini_key}")
+            else:
+                mini_key = "(비활성화)"
+                logger.info("Mini window hotkey disabled by user setting")
             
             # 마지막 항목 즉시 붙여넣기 핫키 - 시그널 emit
             paste_key = hotkeys.get("paste_last", "ctrl+shift+z")
@@ -3283,6 +3232,10 @@ class MainWindow(QMainWindow):
     def _toggle_mini_window_slot(self):
         """미니 창 토글 (메인 스레드에서 실행되는 슬롯)"""
         try:
+            # 미니 창 비활성화 시 무시
+            if self.db.get_setting("mini_window_enabled", "true").lower() != "true":
+                return
+            
             if self.mini_window.isVisible():
                 self.mini_window.hide()
             else:
@@ -4769,7 +4722,8 @@ class MainWindow(QMainWindow):
     def search_google(self):
         text = self.detail_text.toPlainText()
         if text:
-            url = f"https://www.google.com/search?q={text}"
+            # v10.3: URL 인코딩 추가 - 특수문자 처리
+            url = f"https://www.google.com/search?q={quote(text)}"
             webbrowser.open(url)
 
     def generate_qr(self):
@@ -4819,13 +4773,22 @@ class MainWindow(QMainWindow):
         self.update_status_bar()
 
     def on_clipboard_change(self):
-        """클립보드 변경 감지"""
+        """클립보드 변경 감지 - v10.3: 디바운스 개선"""
         # 프라이버시 모드나 내부 복사면 무시
         if self.is_privacy_mode or self.is_internal_copy:
             self.is_internal_copy = False # 내부 복사 플래그는 한 번 사용 후 초기화
             return
-            
-        QTimer.singleShot(100, self.process_clipboard)
+        
+        # v10.3: 이전 대기 중인 타이머 취소 (중복 호출 방지)
+        if self._clipboard_debounce_timer is not None:
+            self._clipboard_debounce_timer.stop()
+            self._clipboard_debounce_timer.deleteLater()
+        
+        # 새 타이머 생성
+        self._clipboard_debounce_timer = QTimer(self)
+        self._clipboard_debounce_timer.setSingleShot(True)
+        self._clipboard_debounce_timer.timeout.connect(self.process_clipboard)
+        self._clipboard_debounce_timer.start(100)
 
     def process_clipboard(self):
         try:

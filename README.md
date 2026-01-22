@@ -1,8 +1,8 @@
-# 📋 SmartClipboard Pro v10.2
+# 📋 SmartClipboard Pro v10.3
 
 > 고급 클립보드 매니저 - PyQt6 기반의 현대적이고 강력한 클립보드 관리 도구
 
-![Version](https://img.shields.io/badge/version-10.2-blue)
+![Version](https://img.shields.io/badge/version-10.3-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -132,6 +132,27 @@ pyinstaller smartclipboard.spec
 
 ---
 
+## 📝 v10.3 변경사항
+
+### 🔲 미니 창 개선
+- 미니 클립보드 창 **On/Off 옵션** 추가 (설정 > 일반 > 미니 창)
+- 비활성화 시 `Alt+V` 단축키 등록 해제
+- 설정 변경 시 재시작 없이 즉시 적용
+
+### 🔒 보안 강화
+- Google 검색 URL 인코딩 추가 (특수문자 처리)
+- Import 시 타입 유효성 검증 (잘못된 타입 자동 복구)
+
+### ⚡ 성능 개선
+- 클립보드 감지 디바운스 개선 (빠른 연속 복사 시 중복 호출 방지)
+- `export_json` 날짜 필터링 기능 구현 (`date_from` 파라미터)
+
+### 🛠️ 코드 품질
+- `TYPE_ICONS` 상수 통일 (3개 위치에서 중복 제거)
+- `empty_trash()` rollback 추가 (DB 일관성 보장)
+
+---
+
 ## 📝 v10.2 변경사항
 
 ### 🔐 보안 강화
@@ -185,7 +206,7 @@ pyinstaller smartclipboard.spec
 
 ```
 smartclipboard-main/
-├── 클립모드 매니저.py    # 메인 애플리케이션 (5,400+ lines)
+├── 클립모드 매니저.py    # 메인 애플리케이션 (5,500+ lines)
 ├── requirements.txt      # Python 의존성
 ├── smartclipboard.spec   # PyInstaller 빌드 설정
 ├── README.md             # 문서
