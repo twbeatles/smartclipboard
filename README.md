@@ -1,8 +1,8 @@
-# 📋 SmartClipboard Pro v10.3
+# 📋 SmartClipboard Pro v10.5
 
 > 고급 클립보드 매니저 - PyQt6 기반의 현대적이고 강력한 클립보드 관리 도구
 
-![Version](https://img.shields.io/badge/version-10.3-blue)
+![Version](https://img.shields.io/badge/version-10.5-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -129,6 +129,22 @@ pyinstaller smartclipboard.spec
 | `Enter` | 복사 후 붙여넣기 |
 | `Delete` | 선택 항목 삭제 |
 | `Escape` | 창 숨기기 |
+
+## 📝 v10.5 변경사항
+
+### 🚀 비동기 시스템 (Async)
+- **URL 제목 가져오기 비동기화**: 네트워크 요청 시 UI 프리징 현상 완전 해결
+- `Worker` 클래스 및 스레드풀 도입 (Background Processing)
+- 즉각적인 클립보드 반응성 및 처리 상태 시각화 (Fetching...)
+
+### 🛡️ 데이터 안전성 & 최적화
+- **자동 DB 백업**: 매일 1회 `backups/` 폴더에 DB 자동 백업 (최근 7일 보관)
+- **클립보드 모니터 리셋**: 트레이 메뉴 > 고급 > 모니터 재시작 기능 (체인 끊김 해결)
+- **이미지 히스토리 제한**: 이미지 항목은 최신 20개만 유지하여 DB 용량 최적화
+
+### 🎨 UI 개선
+- **가독성 향상**: UI 기본 폰트를 **'맑은 고딕(Malgun Gothic)'**으로 변경
+- 텍스트 미리보기 영역 폰트 가독성 개선
 
 ---
 
