@@ -63,7 +63,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer,
-    QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent
+    QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent,
+    QObject, QRunnable, QThreadPool, pyqtSlot
 )
 from PyQt6.QtGui import (
     QColor, QFont, QIcon, QAction, QPixmap, QImage,
@@ -275,6 +276,35 @@ ANIM_SLOW = 400
 
 
 # --- 데이터베이스 클래스 ---
+# v10.5: Worker Signals 클래스
+class WorkerSignals(QObject):
+    finished = pyqtSignal()
+    error = pyqtSignal(tuple)
+    result = pyqtSignal(object)
+
+class Worker(QRunnable):
+    """비동기 작업 실행을 위한 Worker 클래스"""
+    def __init__(self, fn, *args, **kwargs):
+        super(Worker, self).__init__()
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+        except:
+            import traceback
+            traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            self.signals.error.emit((exctype, value, traceback.format_exc()))
+        else:
+            self.signals.result.emit(result)
+        finally:
+            self.signals.finished.emit()
+
 class ClipboardDB:
     def __init__(self):
         self.conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -432,7 +462,7 @@ class ClipboardDB:
         except sqlite3.Error as e:
             logger.error(f"DB Init Error: {e}")
 
-    def add_item(self, content, image_data, type_tag):
+    def add_item(self, content: str, image_data: bytes | None, type_tag: str) -> int | bool:
         """항목 추가 - 중복 텍스트는 끌어올리기"""
         with self.lock:
             try:
@@ -458,11 +488,11 @@ class ClipboardDB:
                 logger.debug(f"항목 추가: {type_tag} (id={item_id})")
                 return item_id  # 삽입된 항목 ID 반환 (성능 최적화)
             except sqlite3.Error as e:
-                logger.error(f"DB Add Error: {e}")
+                logger.exception("DB Add Error")
                 self.conn.rollback()
                 return False
 
-    def get_items(self, search_query="", type_filter="전체"):
+    def get_items(self, search_query: str = "", type_filter: str = "전체") -> list:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
@@ -489,7 +519,7 @@ class ClipboardDB:
                 cursor.execute(sql, params)
                 return cursor.fetchall()
             except sqlite3.Error as e:
-                logger.error(f"DB Get Error: {e}")
+                logger.exception("DB Get Error")
                 return []
 
     def toggle_pin(self, item_id):
@@ -652,12 +682,26 @@ class ClipboardDB:
                 logger.error(f"Setting Save Error: {e}")
 
     def cleanup(self):
-        """오래된 항목 정리 - 주의: add_item() 내부에서 lock 보유 상태로 호출됨 (데드락 방지)"""
+        """오래된 항목 정리 - 이미지 제한 및 전체 제한 적용"""
         try:
             cursor = self.conn.cursor()
+            
+            # v10.5: 이미지 항목 별도 제한 (최대 20개)
+            MAX_IMAGE_HISTORY = 20
+            cursor.execute("SELECT COUNT(*) FROM history WHERE type='IMAGE' AND pinned=0")
+            img_count = cursor.fetchone()[0]
+            if img_count > MAX_IMAGE_HISTORY:
+                diff = img_count - MAX_IMAGE_HISTORY
+                # 오래된 이미지 삭제
+                cursor.execute(f"DELETE FROM history WHERE id IN (SELECT id FROM history WHERE type='IMAGE' AND pinned=0 ORDER BY id ASC LIMIT {diff})")
+                logger.info(f"오래된 이미지 {diff}개 정리됨")
+
+            # 전체 히스토리 제한
             cursor.execute("SELECT COUNT(*) FROM history WHERE pinned = 0")
             result = cursor.fetchone()
-            if not result: return
+            if not result:
+                self.conn.commit()
+                return
             
             count = result[0]
             if count > MAX_HISTORY:
@@ -665,8 +709,41 @@ class ClipboardDB:
                 cursor.execute(f"DELETE FROM history WHERE id IN (SELECT id FROM history WHERE pinned = 0 ORDER BY id ASC LIMIT {diff})")
                 self.conn.commit()
                 logger.info(f"오래된 항목 {diff}개 정리")
+            else:
+                self.conn.commit()
+                
         except sqlite3.Error as e:
             logger.error(f"DB Cleanup Error: {e}")
+
+    def backup_db(self):
+        """v10.5: DB 백업 (일 1회)"""
+        try:
+            backup_dir = os.path.join(APP_DIR, "backups")
+            if not os.path.exists(backup_dir):
+                os.makedirs(backup_dir)
+            
+            today = datetime.datetime.now().strftime("%Y%m%d")
+            backup_file = os.path.join(backup_dir, f"clipboard_history_{today}.db")
+            
+            # 오늘 이미 백업했으면 스킵
+            if os.path.exists(backup_file):
+                return
+
+            import shutil
+            shutil.copy2(DB_FILE, backup_file)
+            logger.info(f"Database backup created: {backup_file}")
+            
+            # 오래된 백업 정리 (최근 7일 유지)
+            backups = sorted([f for f in os.listdir(backup_dir) if f.endswith(".db")])
+            if len(backups) > 7:
+                for old_backup in backups[:-7]:
+                    try:
+                        os.remove(os.path.join(backup_dir, old_backup))
+                        logger.info(f"Old backup deleted: {old_backup}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete old backup: {e}")
+        except Exception as e:
+            logger.error(f"Backup Error: {e}")
 
     # --- 태그 관련 메서드 ---
     def get_item_tags(self, item_id):
@@ -1186,13 +1263,16 @@ class SecureVaultManager:
 
 
 # --- v8.0: 클립보드 액션 자동화 관리자 ---
-class ClipboardActionManager:
+class ClipboardActionManager(QObject):  # v10.5: QObject 상속 (시그널 사용)
     """복사된 내용에 따라 자동 액션을 수행하는 관리자"""
+    action_completed = pyqtSignal(str, object)  # v10.5: 액션 완료 시그널
     
     def __init__(self, db):
+        super().__init__()
         self.db = db
         self.actions_cache = []
         self.reload_actions()
+        self.threadpool = QThreadPool.globalInstance()  # v10.5: 전역 스레드풀
     
     def reload_actions(self):
         """액션 규칙 캐시 갱신"""
@@ -1211,17 +1291,23 @@ class ClipboardActionManager:
             try:
                 if re.search(pattern, text):
                     params = json.loads(params_json) if params_json else {}
-                    result = self.execute_action(action_type, text, params, item_id)
-                    if result:
-                        results.append((name, result))
+                    
+                    # v10.5: fetch_url_title은 비동기로 처리
+                    if action_type == "fetch_title":
+                        self.fetch_url_title_async(text, item_id, name)
+                        results.append((name, {"type": "notify", "message": "URL 제목 가져오는 중..."}))
+                    else:
+                        result = self.execute_action(action_type, text, params, item_id)
+                        if result:
+                            results.append((name, result))
             except re.error as e:
                 logger.warning(f"Invalid regex in action '{name}': {e}")
         return results
     
     def execute_action(self, action_type, text, params, item_id):
-        """액션 실행"""
+        """동기 액션 실행"""
         if action_type == "fetch_title":
-            return self.fetch_url_title(text, item_id)
+            return None  # 비동기로 별도 처리
         elif action_type == "format_phone":
             return self.format_phone(text)
         elif action_type == "format_email":
@@ -1232,32 +1318,43 @@ class ClipboardActionManager:
             return self.transform_text(text, params.get("mode", "trim"))
         return None
     
-    def fetch_url_title(self, url, item_id):
-        """URL에서 제목 가져오기 - v10.2: 개선된 타임아웃/에러 처리"""
+    def fetch_url_title_async(self, url, item_id, action_name):
+        """URL 제목 비동기 요청"""
         if not HAS_WEB:
-            return None
+            return
+            
+        worker = Worker(self._fetch_title_logic, url, item_id)
+        worker.signals.result.connect(lambda res: self._handle_title_result(res, action_name))
+        self.threadpool.start(worker)
+
+    @staticmethod
+    def _fetch_title_logic(url, item_id):
+        """작업 스레드에서 실행될 로직"""
         try:
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            # v10.2: 연결 타임아웃 3초, 읽기 타임아웃 5초로 분리
             response = requests.get(url, headers=headers, timeout=(3, 5), verify=True)
-            response.raise_for_status()  # HTTP 에러 코드도 처리 (4xx, 5xx)
+            response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
             title = soup.title.string if soup.title else None
-            if title and item_id:
-                self.db.update_url_title(item_id, title.strip())
-            return {"type": "title", "title": title.strip() if title else None}
-        except requests.exceptions.Timeout:
-            logger.debug(f"Fetch title timeout: {url}")
-            return None
-        except requests.exceptions.HTTPError as e:
-            logger.debug(f"Fetch title HTTP error: {e}")
-            return None
-        except requests.exceptions.SSLError as e:
-            logger.debug(f"Fetch title SSL error: {e}")
-            return None
+            return {"title": title.strip() if title else None, "item_id": item_id, "url": url}
         except Exception as e:
             logger.debug(f"Fetch title error: {e}")
-            return None
+            return {"title": None, "item_id": item_id, "error": str(e)}
+
+    def _handle_title_result(self, result, action_name):
+        """비동기 결과 처리 (메인 스레드)"""
+        title = result.get("title")
+        item_id = result.get("item_id")
+        
+        if title and item_id:
+            # DB 캐시 업데이트
+            self.db.update_url_title(item_id, title)
+            # 메인 윈도우에 알림
+            self.action_completed.emit(action_name, {"type": "title", "title": title})
+    
+    def fetch_url_title(self, url, item_id):
+        return None
+
     
     def format_phone(self, text):
         """전화번호 포맷팅"""
@@ -3108,8 +3205,10 @@ class MainWindow(QMainWindow):
     paste_last_signal = pyqtSignal()
     show_main_signal = pyqtSignal()
     
-    def __init__(self):
+    def __init__(self, start_minimized=False):
         super().__init__()
+        self.start_minimized = start_minimized
+        self.is_data_dirty = True  # v10.4: Lazy loading flag
         try:
             self.db = ClipboardDB()
             self.clipboard = QApplication.clipboard()
@@ -3122,6 +3221,9 @@ class MainWindow(QMainWindow):
             self.action_manager = ClipboardActionManager(self.db)
             self.export_manager = ExportImportManager(self.db)
             
+            # v10.5: 비동기 액션 시그널 연결
+            self.action_manager.action_completed.connect(self.on_action_completed)
+            
             self.settings = QSettings(ORG_NAME, APP_NAME)
             self.current_theme = self.db.get_setting("theme", "dark")
             
@@ -3131,7 +3233,8 @@ class MainWindow(QMainWindow):
             self.app_icon = self.create_app_icon()
             self.setWindowIcon(self.app_icon)
             
-            self.always_on_top = True
+            # v10.5: 기본값 변경 - 항상 위 해제
+            self.always_on_top = False
             self.current_tag_filter = None  # 태그 필터
             self.sort_column = 3  # 기본 정렬: 시간 컨럼
             self.sort_order = Qt.SortOrder.DescendingOrder  # 기본: 내림차순
@@ -3161,18 +3264,23 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(1000, self.register_hotkeys)
             
             self.update_always_on_top()
-            self.load_data()
+            
+            # v10.4: Lazy loading - started minimized면 로드 지연
+            if not self.start_minimized:
+                self.load_data()
+            
             self.update_status_bar()
             
             # v8.0: 보관함 자동 잠금 타이머
             self.vault_timer = QTimer(self)
             self.vault_timer.timeout.connect(self.check_vault_timeout)
-            self.vault_timer.start(60000)  # 1분마다 체크
-            
-            # v10.2: 만료 항목 정리 타이머 (1시간마다)
+        # v10.2: 만료 항목 정리 타이머 (1시간마다)
             self.cleanup_timer = QTimer(self)
             self.cleanup_timer.timeout.connect(self.run_periodic_cleanup)
             self.cleanup_timer.start(3600000)  # 1시간 = 3600000ms
+            
+            # v10.5: 시작 시 백업 실행
+            QTimer.singleShot(3000, self.db.backup_db)
             
             # v10.2: 등록된 핫키 추적 (안전한 해제를 위해)
             self._registered_hotkeys = []
@@ -3283,11 +3391,20 @@ class MainWindow(QMainWindow):
         try:
             expired_count = self.db.cleanup_expired_items()
             self.db.cleanup_expired_trash()
+            # v10.5: 이미지 캐시 정리
+            # v10.5: 이미지 및 오래된 항목 정리
+            self.db.cleanup()
             if expired_count > 0:
                 logger.info(f"주기적 정리: 만료 항목 {expired_count}개 삭제됨")
                 self.load_data()  # UI 갱신
         except Exception as e:
             logger.debug(f"Periodic cleanup error: {e}")
+
+    # v10.4: 화면 표시 시 데이터 갱신 (Lazy Loading)
+    def showEvent(self, event):
+        if self.is_data_dirty:
+            self.load_data()
+        super().showEvent(event)
 
     def restore_window_state(self):
         geometry = self.settings.value("geometry")
@@ -3609,7 +3726,7 @@ class MainWindow(QMainWindow):
             border: 2px solid {theme["border"]}; 
             border-radius: 14px; 
             padding: 14px; 
-            font-family: 'Cascadia Code', 'Consolas', 'D2Coding', monospace; 
+            font-family: 'Malgun Gothic', 'Cascadia Code', 'Consolas', 'D2Coding', monospace; 
             font-size: 14px;
             line-height: 1.5;
             selection-background-color: {theme["primary"]};
@@ -4500,6 +4617,23 @@ class MainWindow(QMainWindow):
         
         self.update_ui_state(False)
 
+    # --- v10.5: 비동기 액션 완료 핸들러 ---
+    def on_action_completed(self, action_name, result):
+        """비동기 액션 완료 처리"""
+        try:
+            res_type = result.get("type")
+            if res_type == "title":
+                title = result.get("title")
+                if title:
+                    self.clipboard.dataChanged.disconnect(self.on_clipboard_change)  # 일시적 연결 해제
+                    self.show_toast("🔗 링크 제목 발견", f"{title}")
+                    # UI 입력 중이 아닐 때만 데이터 다시 로드
+                    if not self.input_search.hasFocus():
+                        self.load_data()
+                    self.clipboard.dataChanged.connect(self.on_clipboard_change)
+        except Exception as e:
+            logger.error(f"Action Handler Error: {e}")
+
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(self.app_icon)
@@ -4516,10 +4650,16 @@ class MainWindow(QMainWindow):
         
         quit_action = QAction("❌ 종료", self)
         quit_action.triggered.connect(self.quit_app)
+
+        adv_menu = QMenu("고급")
+        adv_menu.addAction("설정 초기화", self.reset_settings)
+        adv_menu.addAction("클립보드 모니터 재시작", self.reset_clipboard_monitor)
         
         self.tray_menu.addAction(show_action)
         self.tray_menu.addSeparator()
         self.tray_menu.addAction(self.tray_privacy_action)
+        self.tray_menu.addSeparator()
+        self.tray_menu.addMenu(adv_menu)
         self.tray_menu.addSeparator()
         self.tray_menu.addAction(quit_action)
         
@@ -4635,7 +4775,7 @@ class MainWindow(QMainWindow):
             if enable:
                 if getattr(sys, 'frozen', False):
                     # 패키징된 EXE 경로 (절대 경로 보장)
-                    exe_path = f'"{os.path.abspath(sys.executable)}"'
+                    exe_path = f'"{os.path.abspath(sys.executable)}" --minimized'
                 else:
                     # 개발 환경: pythonw.exe 경로를 정확히 찾기
                     python_dir = os.path.dirname(sys.executable)
@@ -4645,7 +4785,7 @@ class MainWindow(QMainWindow):
                         pythonw_path = sys.executable
                         logger.warning("pythonw.exe not found, using python.exe")
                     script_path = os.path.abspath(__file__)
-                    exe_path = f'"{pythonw_path}" "{script_path}"'
+                    exe_path = f'"{pythonw_path}" "{script_path}" --minimized'
                 
                 logger.info(f"Setting startup registry: {exe_path}")
                 winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, exe_path)
@@ -4662,6 +4802,31 @@ class MainWindow(QMainWindow):
             logger.error(f"레지스트리 설정 실패: {e}")
             QMessageBox.critical(self, "오류", f"레지스트리 설정 실패: {e}")
             self.action_startup.setChecked(not enable)
+
+    def reset_settings(self):
+        confirm = QMessageBox.question(
+            self, "설정 초기화", 
+            "모든 설정을 기본값으로 되돌리시겠습니까?\n(데이터는 삭제되지 않습니다)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            self.db.set_setting("theme", "dark")
+            self.db.set_setting("opacity", "1.0")
+            self.current_theme = "dark"
+            self.apply_theme()
+            QMessageBox.information(self, "완료", "설정이 초기화되었습니다.")
+
+    def reset_clipboard_monitor(self):
+        """v10.5: 클립보드 모니터링 강제 재시작"""
+        try:
+            self.clipboard.dataChanged.disconnect(self.on_clipboard_change)
+            # 잠시 대기 후 재연결
+            QTimer.singleShot(500, lambda: self.clipboard.dataChanged.connect(self.on_clipboard_change))
+            self.statusBar().showMessage("✅ 클립보드 모니터 재시작됨", 2000)
+            logger.info("Clipboard monitor restarted manually")
+        except Exception as e:
+            logger.exception("Monitor reset failed")
+            self.statusBar().showMessage(f"❌ 재시작 실패: {e}", 2000)
 
     def clear_all_history(self):
         reply = QMessageBox.question(
@@ -4794,73 +4959,102 @@ class MainWindow(QMainWindow):
         try:
             mime_data = self.clipboard.mimeData()
             if mime_data.hasImage():
-                image = self.clipboard.image()
-                if not image.isNull():
-                    ba = QByteArray()
-                    buffer = QBuffer(ba)
-                    buffer.open(QBuffer.OpenModeFlag.WriteOnly)
-                    image.save(buffer, "PNG")
-                    blob_data = ba.data()
-                    
-                    # v10.2: 이미지 크기 제한 (5MB)
-                    MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
-                    if len(blob_data) > MAX_IMAGE_SIZE:
-                        logger.warning(f"Image too large ({len(blob_data)} bytes), skipping")
-                        ToastNotification.show_toast(
-                            self, f"⚠️ 이미지가 너무 큽니다 (최대 5MB)",
-                            duration=2500, toast_type="warning"
-                        )
-                        return
-                    
-                    # v10.0: 이미지 중복 체크 (해시 기반) - v10.1: 모듈 레벨 import 사용
-                    img_hash = hashlib.md5(blob_data).hexdigest()
-                    if hasattr(self, '_last_image_hash') and self._last_image_hash == img_hash:
-                        logger.debug("Duplicate image skipped")
-                        return
-                    self._last_image_hash = img_hash
-                    
-                    if self.db.add_item("[이미지 캡처됨]", blob_data, "IMAGE"):
-                        self.load_data()
-                        self.update_status_bar()
+                self._process_image_clipboard(mime_data)
                 return
+            
             if mime_data.hasText():
-                raw_text = mime_data.text()
-                if not raw_text:
-                    return
-                
-                # 복사 규칙 적용 (원본 텍스트 기반)
-                text = self.apply_copy_rules(raw_text)
-                normalized_text = text.strip()
-                if not normalized_text:
-                    return
-                
-                tag = self.analyze_text(normalized_text)
-                item_id = self.db.add_item(text, None, tag)
-                if item_id:
-                    # v8.0: 클립보드 액션 자동화 실행
-                    try:
-                        # 성능 최적화: add_item이 반환한 ID 직접 사용 (get_items 호출 제거)
-                        action_results = self.action_manager.process(normalized_text, item_id)
-                        for action_name, result in action_results:
-                            if result and result.get("type") == "notify":
-                                ToastNotification.show_toast(
-                                    self, f"⚡ {action_name}: {result.get('message', '')}",
-                                    duration=3000, toast_type="info"
-                                )
-                            elif result and result.get("type") == "title":
-                                title = result.get("title")
-                                if title:
-                                    ToastNotification.show_toast(
-                                        self, f"🔗 {title[:50]}...",
-                                        duration=2500, toast_type="info"
-                                    )
-                    except Exception as action_err:
-                        logger.debug(f"Action processing error: {action_err}")
-                    
+                self._process_text_clipboard(mime_data)
+        except Exception as e:
+            logger.exception("Clipboard access error")
+
+    def _process_image_clipboard(self, mime_data):
+        """v10.5: 이미지 클립보드 처리 로직 분리"""
+        try:
+            image = self.clipboard.image()
+            if image.isNull():
+                return
+
+            ba = QByteArray()
+            buffer = QBuffer(ba)
+            buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+            image.save(buffer, "PNG")
+            blob_data = ba.data()
+            
+            # v10.2: 이미지 크기 제한 (5MB)
+            MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+            if len(blob_data) > MAX_IMAGE_SIZE:
+                logger.warning(f"Image too large ({len(blob_data)} bytes), skipping")
+                ToastNotification.show_toast(
+                    self, f"⚠️ 이미지가 너무 큽니다 (최대 5MB)",
+                    duration=2500, toast_type="warning"
+                )
+                return
+            
+            # v10.0: 이미지 중복 체크 (해시 기반)
+            img_hash = hashlib.md5(blob_data).hexdigest()
+            if hasattr(self, '_last_image_hash') and self._last_image_hash == img_hash:
+                logger.debug("Duplicate image skipped")
+                return
+            self._last_image_hash = img_hash
+            
+            if self.db.add_item("[이미지 캡처됨]", blob_data, "IMAGE"):
+                # v10.4: UI 업데이트 최적화 (보이는 경우에만)
+                if self.isVisible():
                     self.load_data()
                     self.update_status_bar()
+                else:
+                    self.is_data_dirty = True
         except Exception as e:
-            logger.debug(f"Clipboard access: {e}")
+            logger.exception("Image processing error")
+
+    def _process_text_clipboard(self, mime_data):
+        """v10.5: 텍스트 클립보드 처리 로직 분리"""
+        try:
+            raw_text = mime_data.text()
+            if not raw_text:
+                return
+            
+            # 복사 규칙 적용 (원본 텍스트 기반)
+            text = self.apply_copy_rules(raw_text)
+            normalized_text = text.strip()
+            if not normalized_text:
+                return
+            
+            tag = self.analyze_text(normalized_text)
+            item_id = self.db.add_item(text, None, tag)
+            if item_id:
+                # v8.0: 클립보드 액션 자동화 실행
+                self._process_actions(normalized_text, item_id)
+                
+                # v10.4: UI 업데이트 최적화
+                if self.isVisible():
+                    self.load_data()
+                    self.update_status_bar()
+                else:
+                    self.is_data_dirty = True
+        except Exception as e:
+            logger.exception("Text processing error")
+
+    def _process_actions(self, text, item_id):
+        """v10.5: 액션 처리 로직 분리"""
+        try:
+            # 성능 최적화: add_item이 반환한 ID 직접 사용 (get_items 호출 제거)
+            action_results = self.action_manager.process(text, item_id)
+            for action_name, result in action_results:
+                if result and result.get("type") == "notify":
+                    ToastNotification.show_toast(
+                        self, f"⚡ {action_name}: {result.get('message', '')}",
+                        duration=3000, toast_type="info"
+                    )
+                elif result and result.get("type") == "title":
+                    title = result.get("title")
+                    if title:
+                        ToastNotification.show_toast(
+                            self, f"🔗 {title[:50]}...",
+                            duration=2500, toast_type="info"
+                        )
+        except Exception as action_err:
+            logger.debug(f"Action processing error: {action_err}")
 
     def apply_copy_rules(self, text):
         """활성화된 복사 규칙 적용 - 캐싱으로 성능 최적화"""
@@ -4917,153 +5111,157 @@ class MainWindow(QMainWindow):
         return "TEXT"
 
     def load_data(self):
+        """데이터 로드 및 테이블 갱신 - 리팩토링된 버전"""
+        try:
+            items = self._get_display_items()
+            
+            # v10.4: 데이터 로드 완료로 플래그 리셋
+            self.is_data_dirty = False
+            
+            # v10.1: UI 업데이트 일괄 처리 (성능 최적화)
+            self.table.setUpdatesEnabled(False)
+            try:
+                self.table.setRowCount(0)
+                theme = THEMES.get(self.current_theme, THEMES["dark"])
+            
+                if not items:
+                    self._show_empty_state(theme)
+                    return
+                
+                self._populate_table(items, theme)
+                
+                # 상태바 업데이트
+                self.update_status_bar()
+            finally:
+                self.table.setUpdatesEnabled(True)
+        except Exception as e:
+            logger.exception("Data loading error")
+
+    def _get_display_items(self):
+        """표시할 항목 조회 및 정렬"""
         search_query = self.search_input.text()
         filter_type = self.filter_combo.currentText()
         
-        # 태그 필터 적용
+        # 1. DB 조회
         if self.current_tag_filter:
             items = self.db.get_items_by_tag(self.current_tag_filter)
-            # 추가 필터 적용
             if search_query:
                 items = [i for i in items if search_query.lower() in (i[1] or '').lower()]
-        # v10.0: 북마크 필터
         elif filter_type == "⭐ 북마크":
             items = self.db.get_bookmarked_items()
             if search_query:
                 items = [i for i in items if search_query.lower() in (i[1] or '').lower()]
         else:
             items = self.db.get_items(search_query, filter_type)
-        
-        # 정렬 적용 (고정 항목은 항상 상단)
+            
+        # 2. 정렬 (고정 항목은 항상 상단)
         if items and self.sort_column > 0:
             def get_sort_key(item):
                 pid, content, ptype, timestamp, pinned, use_count, pin_order = item
                 col = self.sort_column
-                if col == 1:  # 유형
-                    return (not pinned, ptype or "")
-                elif col == 2:  # 내용
-                    return (not pinned, (content or "").lower())
-                elif col == 3:  # 시간
-                    return (not pinned, timestamp or "")
-                elif col == 4:  # 사용
-                    return (not pinned, use_count or 0)
+                if col == 1: return (not pinned, ptype or "")
+                elif col == 2: return (not pinned, (content or "").lower())
+                elif col == 3: return (not pinned, timestamp or "")
+                elif col == 4: return (not pinned, use_count or 0)
                 return (not pinned, 0)
             
             reverse = self.sort_order == Qt.SortOrder.DescendingOrder
             items = sorted(items, key=get_sort_key, reverse=reverse)
+            
+        return items
+
+    def _show_empty_state(self, theme):
+        """빈 결과 상태 표시"""
+        search_query = self.search_input.text()
+        self.table.setRowCount(1)
         
-        # v10.1: UI 업데이트 일괄 처리 (성능 최적화)
-        self.table.setUpdatesEnabled(False)
-        try:
-            self.table.setRowCount(0)
+        if search_query:
+            empty_msg = f"🔍 '{search_query}'에 대한 검색 결과가 없습니다\n\n다른 검색어를 입력하거나 필터를 변경해보세요"
+        elif self.current_tag_filter:
+            empty_msg = f"🏷️ '{self.current_tag_filter}' 태그가 없습니다\n\n항목을 선택하고 마우스 오른쪽 버튼으로 태그를 추가하세요"
+        else:
+            empty_msg = "📋 클립보드 히스토리가 비어있습니다\n\n"
+            empty_msg += "💡 시작 방법:\n"
+            empty_msg += "• 텍스트나 이미지를 복사하면 자동 저장\n"
+            empty_msg += "• Ctrl+Shift+V: 클립보드 창 열기\n"
+            empty_msg += "• Alt+V: 미니 창 열기\n"
+            empty_msg += "• 더블클릭으로 항목 붙여넣기"
             
-            theme = THEMES.get(self.current_theme, THEMES["dark"])
+        empty_item = QTableWidgetItem(empty_msg)
+        empty_item.setForeground(QColor(theme["text_secondary"]))
+        empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+        self.table.setItem(0, 0, empty_item)
+        self.table.setSpan(0, 0, 1, 5)
+        self.table.setRowHeight(0, 150)
+
+    def _populate_table(self, items, theme):
+        """테이블 행 생성"""
+        today = datetime.date.today()
+        yesterday = today - datetime.timedelta(days=1)
         
-            # v10.1: 개선된 빈 결과 상태 표시 - 친화적인 온보딩 UI
-            if not items:
-                self.table.setRowCount(1)
-                if search_query:
-                    empty_msg = f"🔍 '{search_query}'에 대한 검색 결과가 없습니다\n\n다른 검색어를 입력하거나 필터를 변경해보세요"
-                elif self.current_tag_filter:
-                    empty_msg = f"🏷️ '{self.current_tag_filter}' 태그가 없습니다\n\n항목을 선택하고 마우스 오른쪽 버튼으로 태그를 추가하세요"
-                else:
-                    empty_msg = "📋 클립보드 히스토리가 비어있습니다\n\n"
-                    empty_msg += "💡 시작 방법:\n"
-                    empty_msg += "• 텍스트나 이미지를 복사하면 자동 저장\n"
-                    empty_msg += "• Ctrl+Shift+V: 클립보드 창 열기\n"
-                    empty_msg += "• Alt+V: 미니 창 열기\n"
-                    empty_msg += "• 더블클릭으로 항목 붙여넣기"
-                empty_item = QTableWidgetItem(empty_msg)
-                empty_item.setForeground(QColor(theme["text_secondary"]))
-                empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-                self.table.setItem(0, 0, empty_item)
-                self.table.setSpan(0, 0, 1, 5)
-                self.table.setRowHeight(0, 150)  # v10.1: 온보딩 UI를 위해 높이 증가
-                return
+        for row_idx, item_data in enumerate(items):
+            pid, content, ptype, timestamp, pinned, use_count, pin_order = item_data
+            self.table.insertRow(row_idx)
             
-            # 날짜 비교용
-            today = datetime.date.today()
-            yesterday = today - datetime.timedelta(days=1)
+            # 1. 고정 아이콘
+            pin_item = QTableWidgetItem("📌" if pinned else "")
+            pin_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            pin_item.setData(Qt.ItemDataRole.UserRole, pid)
+            if pinned:
+                pin_item.setBackground(QColor(theme["primary"]).lighter(170))
+            self.table.setItem(row_idx, 0, pin_item)
             
-            for row_idx, (pid, content, ptype, timestamp, pinned, use_count, pin_order) in enumerate(items):
-                self.table.insertRow(row_idx)
-                
-                # 고정 아이콘 (배경 강조)
-                pin_item = QTableWidgetItem("📌" if pinned else "")
-                pin_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                pin_item.setData(Qt.ItemDataRole.UserRole, pid)
-                if pinned:
-                    # 고정 항목은 미세한 배경색으로 구분
-                    pin_item.setBackground(QColor(theme["primary"]).lighter(170))
-                self.table.setItem(row_idx, 0, pin_item)
-                
-                # 타입 (색상 코드화) - 전역 상수 사용 (성능 최적화)
-                type_item = QTableWidgetItem(TYPE_ICONS.get(ptype, "📝"))
-                type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                type_item.setToolTip(ptype)
-                type_item.setData(Qt.ItemDataRole.UserRole + 1, ptype)  # 정렬용 원본 데이터
-                self.table.setItem(row_idx, 1, type_item)
-                
-                # 내용 + 툴팁
-                display = content.replace('\n', ' ').strip()
-                if len(display) > 45: 
-                    display = display[:45] + "..."
-                content_item = QTableWidgetItem(display)
-                # 툴팁에 전체 내용 표시 (최대 500자)
-                if ptype == "IMAGE":
-                    content_item.setToolTip("🖼️ 이미지 항목 - 더블클릭으로 미리보기")
-                else:
-                    tooltip_text = content[:500] if len(content) > 500 else content
-                    content_item.setToolTip(tooltip_text)
-                if ptype == "LINK":
-                    content_item.setForeground(QColor(theme["secondary"]))
-                elif ptype == "CODE":
-                    content_item.setForeground(QColor(theme["success"]))
-                elif ptype == "COLOR":
-                    content_item.setForeground(QColor(content) if content.startswith("#") else QColor(theme["warning"]))
-                content_item.setData(Qt.ItemDataRole.UserRole + 1, content)  # 정렬용 원본 데이터
-                self.table.setItem(row_idx, 2, content_item)
-                
-                # 시간 (개선된 형식)
-                try:
-                    dt = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
-                    if dt.date() == today:
-                        time_str = dt.strftime("%H:%M")  # 오늘: "14:30"
-                    elif dt.date() == yesterday:
-                        time_str = f"어제 {dt.hour}시"  # 어제: "어제 13시"
-                    else:
-                        time_str = f"{dt.month}/{dt.day} {dt.hour}시"  # 그 외: "12/25 13시"
-                except (ValueError, TypeError) as e:
-                    logger.debug(f"Timestamp parse error: {e}")
-                    time_str = timestamp
-                
-                time_item = QTableWidgetItem(time_str)
-                time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                time_item.setForeground(QColor(theme["text_secondary"]))
-                time_item.setData(Qt.ItemDataRole.UserRole + 1, timestamp)  # 정렬용 원본 타임스탬프
-                self.table.setItem(row_idx, 3, time_item)
-                
-                # 사용 횟수 (인기도 인디케이터)
-                if use_count and use_count >= 10:
-                    use_display = f"🔥 {use_count}"
-                elif use_count and use_count >= 5:
-                    use_display = f"⭐ {use_count}"
-                elif use_count:
-                    use_display = str(use_count)
-                else:
-                    use_display = "-"
-                use_item = QTableWidgetItem(use_display)
-                use_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                use_item.setForeground(QColor(theme["text_secondary"]))
-                use_item.setData(Qt.ItemDataRole.UserRole + 1, use_count or 0)  # 정렬용 원본 데이터
-                self.table.setItem(row_idx, 4, use_item)
+            # 2. 유형
+            type_item = QTableWidgetItem(TYPE_ICONS.get(ptype, "📝"))
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            type_item.setToolTip(ptype)
+            type_item.setData(Qt.ItemDataRole.UserRole + 1, ptype)
+            self.table.setItem(row_idx, 1, type_item)
             
-            # 상태바 업데이트 (for 루프 외부)
-            self.update_status_bar()
-        finally:
-            # v10.1: UI 업데이트 재개
-            self.table.setUpdatesEnabled(True)
+            # 3. 내용
+            display = content.replace('\n', ' ').strip()
+            if len(display) > 45: display = display[:45] + "..."
+            content_item = QTableWidgetItem(display)
+            
+            if ptype == "IMAGE":
+                content_item.setToolTip("🖼️ 이미지 항목 - 더블클릭으로 미리보기")
+            else:
+                content_item.setToolTip(content[:500] if len(content) > 500 else content)
+                
+            if ptype == "LINK": content_item.setForeground(QColor(theme["secondary"]))
+            elif ptype == "CODE": content_item.setForeground(QColor(theme["success"]))
+            elif ptype == "COLOR": content_item.setForeground(QColor(content) if content.startswith("#") else QColor(theme["warning"]))
+            
+            content_item.setData(Qt.ItemDataRole.UserRole + 1, content)
+            self.table.setItem(row_idx, 2, content_item)
+            
+            # 4. 시간
+            try:
+                dt = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+                if dt.date() == today: time_str = dt.strftime("%H:%M")
+                elif dt.date() == yesterday: time_str = f"어제 {dt.hour}시"
+                else: time_str = f"{dt.month}/{dt.day} {dt.hour}시"
+            except (ValueError, TypeError):
+                time_str = timestamp
+            
+            time_item = QTableWidgetItem(time_str)
+            time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            time_item.setForeground(QColor(theme["text_secondary"]))
+            time_item.setData(Qt.ItemDataRole.UserRole + 1, timestamp)
+            self.table.setItem(row_idx, 3, time_item)
+            
+            # 5. 사용 횟수
+            if use_count and use_count >= 10: use_display = f"🔥 {use_count}"
+            elif use_count and use_count >= 5: use_display = f"⭐ {use_count}"
+            elif use_count: use_display = str(use_count)
+            else: use_display = "-"
+            
+            use_item = QTableWidgetItem(use_display)
+            use_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            use_item.setForeground(QColor(theme["text_secondary"]))
+            use_item.setData(Qt.ItemDataRole.UserRole + 1, use_count or 0)
+            self.table.setItem(row_idx, 4, use_item)
 
 
     def on_selection_changed(self):
@@ -5471,8 +5669,25 @@ if __name__ == "__main__":
         font.setStyleHint(QFont.StyleHint.SansSerif)
         app.setFont(font)
 
-        window = MainWindow()
-        window.show()
+        font.setStyleHint(QFont.StyleHint.SansSerif)
+        app.setFont(font)
+
+        # v10.4: CLI 인자 처리
+        start_minimized = "--minimized" in sys.argv
+        
+        window = MainWindow(start_minimized=start_minimized)
+        
+        if start_minimized:
+            # 트레이 실행 알림
+            if window.tray_icon:
+                window.tray_icon.showMessage(
+                    "SmartClipboard Pro", 
+                    "백그라운드에서 실행 중입니다.", 
+                    QSystemTrayIcon.MessageIcon.Information, 
+                    2000
+                )
+        else:
+            window.show()
         
         # 정상 시작 시 이전 에러 로그 삭제
         error_log_path = os.path.join(APP_DIR, "debug_startup_error.log")
