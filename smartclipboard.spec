@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-SmartClipboard Pro v10.3 - PyInstaller Spec File
+SmartClipboard Pro v10.5 - PyInstaller Spec File
 경량화 및 최적화된 빌드 설정
 
 빌드 명령어:
@@ -14,7 +14,7 @@ SmartClipboard Pro v10.3 - PyInstaller Spec File
 # 기본 설정
 # ============================================
 APP_NAME = 'SmartClipboard'
-APP_VERSION = '10.3'
+APP_VERSION = '10.5'
 MAIN_SCRIPT = '클립모드 매니저.py'
 ICON_FILE = None  # 아이콘 파일 경로: 'app.ico'
 

@@ -1,5 +1,5 @@
 """
-SmartClipboard Pro v8.0
+SmartClipboard Pro v10.5
 고급 클립보드 매니저 - 확장 기능 버전
 
 주요 기능:
@@ -103,7 +103,7 @@ MAX_HISTORY = 100
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "10.3"
+VERSION = "10.5"
 
 # 기본 핫키 설정
 DEFAULT_HOTKEYS = {
@@ -146,27 +146,27 @@ UI_TEXTS = {
 }
 
 # --- 테마 정의 ---
-# v8.0: hover_bg, hover_text 추가로 호버 시 가독성 보장
+# v10.6: 새로운 색상 체계 - 더 세련되고 모던한 팔레트
 THEMES = {
     "dark": {
         "name": "🌙 다크 모드",
-        "background": "#1a1a2e",
-        "surface": "#16213e",
-        "surface_variant": "#0f3460",
-        "primary": "#e94560",
-        "primary_variant": "#ff6b6b",
-        "secondary": "#4ecdc4",
-        "text": "#eaeaea",
-        "text_secondary": "#a0a0a0",
-        "border": "#2a2a4a",
-        "success": "#4ade80",
+        "background": "#0f0f14",
+        "surface": "#1a1a24",
+        "surface_variant": "#252532",
+        "primary": "#6366f1",  # 인디고 퍼플
+        "primary_variant": "#818cf8",
+        "secondary": "#22d3ee",  # 시안
+        "text": "#f1f5f9",
+        "text_secondary": "#94a3b8",
+        "border": "#334155",
+        "success": "#34d399",
         "warning": "#fbbf24",
-        "error": "#ef4444",
-        "gradient_start": "#e94560",
-        "gradient_end": "#ff6b6b",
-        "glow": "rgba(233, 69, 96, 0.3)",
+        "error": "#f87171",
+        "gradient_start": "#6366f1",
+        "gradient_end": "#a855f7",
+        "glow": "rgba(99, 102, 241, 0.3)",
         # 호버 전용 색상
-        "hover_bg": "#2a3a5e",
+        "hover_bg": "#2d2d3d",
         "hover_text": "#ffffff",
         "selected_text": "#ffffff",
     },
@@ -175,90 +175,91 @@ THEMES = {
         "background": "#f8fafc",
         "surface": "#ffffff",
         "surface_variant": "#f1f5f9",
-        "primary": "#6366f1",
-        "primary_variant": "#818cf8",
-        "secondary": "#06b6d4",
-        "text": "#1e293b",
-        "text_secondary": "#64748b",
-        "border": "#e2e8f0",
-        "success": "#22c55e",
+        "primary": "#4f46e5",  # 딥 인디고
+        "primary_variant": "#6366f1",
+        "secondary": "#0891b2",  # 틸
+        "text": "#0f172a",
+        "text_secondary": "#475569",
+        "border": "#cbd5e1",
+        "success": "#10b981",
         "warning": "#f59e0b",
         "error": "#ef4444",
-        "gradient_start": "#6366f1",
-        "gradient_end": "#818cf8",
-        "glow": "rgba(99, 102, 241, 0.2)",
-        # 호버 전용 색상 - 라이트 모드에서 가독성 보장
-        "hover_bg": "#e0e7ff",
-        "hover_text": "#1e293b",
+        "gradient_start": "#4f46e5",
+        "gradient_end": "#7c3aed",
+        "glow": "rgba(79, 70, 229, 0.15)",
+        # 호버 전용 색상
+        "hover_bg": "#eef2ff",
+        "hover_text": "#1e1b4b",
         "selected_text": "#ffffff",
     },
     "ocean": {
         "name": "🌊 오션 모드",
-        "background": "#0d1f3c",
-        "surface": "#152642",
-        "surface_variant": "#1e3a5f",
-        "primary": "#00e5c7",
-        "primary_variant": "#00ffd9",
-        "secondary": "#ffb347",
-        "text": "#e8f0ff",
-        "text_secondary": "#a8c0d8",
-        "border": "#2a4a6d",
-        "success": "#4ade80",
+        "background": "#0c1929",
+        "surface": "#132337",
+        "surface_variant": "#1c3347",
+        "primary": "#0ea5e9",  # 스카이 블루
+        "primary_variant": "#38bdf8",
+        "secondary": "#f97316",  # 오렌지
+        "text": "#e0f2fe",
+        "text_secondary": "#7dd3fc",
+        "border": "#1e4059",
+        "success": "#34d399",
         "warning": "#fbbf24",
-        "error": "#ff6b6b",
-        "gradient_start": "#00e5c7",
-        "gradient_end": "#00ffd9",
-        "glow": "rgba(0, 229, 199, 0.25)",
-        # 호버 전용 색상 - 오션 모드 명도 개선
-        "hover_bg": "#2a4a6d",
+        "error": "#fb7185",
+        "gradient_start": "#0ea5e9",
+        "gradient_end": "#06b6d4",
+        "glow": "rgba(14, 165, 233, 0.25)",
+        # 호버 전용 색상
+        "hover_bg": "#1e4059",
         "hover_text": "#ffffff",
-        "selected_text": "#0d1f3c",
+        "selected_text": "#0c1929",
     },
     "purple": {
         "name": "💜 퍼플 모드",
-        "background": "#13111c",
-        "surface": "#1c1a29",
-        "surface_variant": "#2a2640",
-        "primary": "#a855f7",
-        "primary_variant": "#c084fc",
-        "secondary": "#f472b6",
-        "text": "#e8e8e8",
-        "text_secondary": "#9ca3af",
-        "border": "#3f3a5a",
-        "success": "#4ade80",
+        "background": "#0f0720",
+        "surface": "#1a1030",
+        "surface_variant": "#2a1a48",
+        "primary": "#c084fc",  # 라벤더
+        "primary_variant": "#e879f9",
+        "secondary": "#fb7185",  # 로즈
+        "text": "#f3e8ff",
+        "text_secondary": "#d8b4fe",
+        "border": "#3b2068",
+        "success": "#34d399",
         "warning": "#fbbf24",
-        "error": "#f87171",
-        "gradient_start": "#a855f7",
-        "gradient_end": "#f472b6",
-        "glow": "rgba(168, 85, 247, 0.3)",
+        "error": "#fb7185",
+        "gradient_start": "#c084fc",
+        "gradient_end": "#e879f9",
+        "glow": "rgba(192, 132, 252, 0.3)",
         # 호버 전용 색상
-        "hover_bg": "#3d3660",
+        "hover_bg": "#3b2068",
         "hover_text": "#ffffff",
         "selected_text": "#ffffff",
     },
     "midnight": {
         "name": "🌌 미드나잇",
-        "background": "#0f0f1a",
-        "surface": "#1a1a2e",
-        "surface_variant": "#252545",
-        "primary": "#00d9ff",
-        "primary_variant": "#00f5ff",
-        "secondary": "#ff6b9d",
-        "text": "#ffffff",
-        "text_secondary": "#b0b0c0",
-        "border": "#303050",
-        "success": "#00ff88",
-        "warning": "#ffcc00",
-        "error": "#ff4466",
-        "gradient_start": "#00d9ff",
-        "gradient_end": "#00f5ff",
-        "glow": "rgba(0, 217, 255, 0.25)",
+        "background": "#030712",
+        "surface": "#0f172a",
+        "surface_variant": "#1e293b",
+        "primary": "#38bdf8",  # 네온 스카이
+        "primary_variant": "#7dd3fc",
+        "secondary": "#f472b6",  # 핫 핑크
+        "text": "#f8fafc",
+        "text_secondary": "#cbd5e1",
+        "border": "#1e293b",
+        "success": "#4ade80",
+        "warning": "#facc15",
+        "error": "#f87171",
+        "gradient_start": "#38bdf8",
+        "gradient_end": "#a78bfa",
+        "glow": "rgba(56, 189, 248, 0.25)",
         # 호버 전용 색상
-        "hover_bg": "#353565",
+        "hover_bg": "#334155",
         "hover_text": "#ffffff",
-        "selected_text": "#0f0f1a",
+        "selected_text": "#030712",
     }
 }
+
 
 # v9.0: 글래스모피즘 및 애니메이션 상수
 GLASS_STYLES = {
@@ -308,6 +309,9 @@ class Worker(QRunnable):
 class ClipboardDB:
     def __init__(self):
         self.conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        # v10.6: WAL 모드 활성화 (동시성 및 성능 향상)
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self.lock = threading.Lock()
         self.add_count = 0  # v10.0: cleanup 최적화를 위한 카운터
         self.create_tables()
@@ -711,6 +715,13 @@ class ClipboardDB:
                 logger.info(f"오래된 항목 {diff}개 정리")
             else:
                 self.conn.commit()
+            
+            # v10.6: 주기적 VACUUM 실행 (50회 cleanup 마다)
+            self.add_count += 1
+            if self.add_count >= 50:
+                self.add_count = 0
+                self.conn.execute("VACUUM")
+                logger.info("Database VACUUM completed")
                 
         except sqlite3.Error as e:
             logger.error(f"DB Cleanup Error: {e}")
@@ -730,8 +741,13 @@ class ClipboardDB:
                 return
 
             import shutil
-            shutil.copy2(DB_FILE, backup_file)
-            logger.info(f"Database backup created: {backup_file}")
+            try:
+                shutil.copy2(DB_FILE, backup_file)
+                logger.info(f"Database backup created: {backup_file}")
+            except OSError as e:
+                # 디스크 공간 부족 등 OS 에러 처리
+                logger.error(f"Backup cleanup failed (Disk full?): {e}")
+                return
             
             # 오래된 백업 정리 (최근 7일 유지)
             backups = sorted([f for f in os.listdir(backup_dir) if f.endswith(".db")])
@@ -1275,22 +1291,39 @@ class ClipboardActionManager(QObject):  # v10.5: QObject 상속 (시그널 사�
         self.threadpool = QThreadPool.globalInstance()  # v10.5: 전역 스레드풀
     
     def reload_actions(self):
-        """액션 규칙 캐시 갱신"""
-        self.actions_cache = self.db.get_clipboard_actions()
+        """액션 규칙 캐시 갱신 - v10.6: 정규식 사전 컴파일 최적화"""
+        raw_actions = self.db.get_clipboard_actions()
+        self.actions_cache = []
+        for action in raw_actions:
+            aid, name, pattern, action_type, params_json, enabled, priority = action
+            if not pattern: continue
+            try:
+                # 패턴 미리 컴파일
+                compiled_pattern = re.compile(pattern)
+                self.actions_cache.append({
+                    "id": aid, "name": name, "pattern": pattern, 
+                    "compiled": compiled_pattern,
+                    "type": action_type, "params": params_json, 
+                    "enabled": enabled, "priority": priority
+                })
+            except re.error as e:
+                logger.warning(f"Invalid regex in action '{name}': {e}")
     
     def process(self, text, item_id=None):
         """텍스트에 매칭되는 액션 실행"""
         results = []
         for action in self.actions_cache:
-            aid, name, pattern, action_type, params_json, enabled, priority = action
-            if not enabled:
+            if not action["enabled"]:
                 continue
-            if not pattern:
-                logger.warning(f"Empty pattern in action '{name}' (id={aid}), skipping")
-                continue
+            
             try:
-                if re.search(pattern, text):
+                if action["compiled"].search(text):
+                    params_json = action["params"]
                     params = json.loads(params_json) if params_json else {}
+                    
+                    action_type = action["type"]
+                    name = action["name"]
+                    aid = action["id"]
                     
                     # v10.5: fetch_url_title은 비동기로 처리
                     if action_type == "fetch_title":
@@ -1300,6 +1333,8 @@ class ClipboardActionManager(QObject):  # v10.5: QObject 상속 (시그널 사�
                         result = self.execute_action(action_type, text, params, item_id)
                         if result:
                             results.append((name, result))
+            except Exception as e:
+                logger.warning(f"Action processing error '{action['name']}': {e}")
             except re.error as e:
                 logger.warning(f"Invalid regex in action '{name}': {e}")
         return results
@@ -2524,58 +2559,25 @@ class FloatingMiniWindow(QWidget):
         self.init_ui()
     
     def init_ui(self):
-        # 메인 컨테이너
-        container = QFrame(self)
-        container.setObjectName("MiniContainer")
-        container.setStyleSheet("""
-            QFrame#MiniContainer {
-                background-color: rgba(26, 26, 46, 0.95);
-                border-radius: 12px;
-                border: 1px solid #2a2a4a;
-            }
-            QLabel { color: #eaeaea; }
-            QListWidget {
-                background-color: transparent;
-                border: none;
-                color: #eaeaea;
-            }
-            QListWidget::item {
-                padding: 8px;
-                border-radius: 6px;
-                margin: 2px;
-            }
-            QListWidget::item:hover {
-                background-color: rgba(233, 69, 96, 0.3);
-            }
-            QListWidget::item:selected {
-                background-color: #e94560;
-            }
-            QPushButton {
-                background-color: #16213e;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-                color: #eaeaea;
-            }
-            QPushButton:hover {
-                background-color: #e94560;
-            }
-        """)
+        # v10.6: 메인 컨테이너 - 인스턴스 변수로 저장하여 테마 변경 시 업데이트 가능
+        self.container = QFrame(self)
+        self.container.setObjectName("MiniContainer")
+        self.apply_mini_theme()  # 테마 적용
         
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout = QVBoxLayout(self.container)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
         
         # 헤더
         header = QHBoxLayout()
-        title = QLabel("📋 빠른 클립보드")
-        title.setStyleSheet("font-weight: bold; font-size: 13px;")
-        btn_close = QPushButton("✕")
-        btn_close.setFixedSize(24, 24)
-        btn_close.clicked.connect(self.hide)
-        header.addWidget(title)
+        self.title_label = QLabel("📋 빠른 클립보드")
+        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setFixedSize(28, 28)
+        self.btn_close.clicked.connect(self.hide)
+        header.addWidget(self.title_label)
         header.addStretch()
-        header.addWidget(btn_close)
+        header.addWidget(self.btn_close)
         layout.addLayout(header)
         
         # 리스트
@@ -2586,20 +2588,75 @@ class FloatingMiniWindow(QWidget):
         
         # 버튼
         btn_layout = QHBoxLayout()
-        btn_refresh = QPushButton("🔄")
-        btn_refresh.setToolTip("새로고침")
-        btn_refresh.clicked.connect(self.load_items)
-        btn_main = QPushButton("📋 메인 창")
-        btn_main.clicked.connect(self.open_main_window)
-        btn_layout.addWidget(btn_refresh)
+        self.btn_refresh = QPushButton("🔄")
+        self.btn_refresh.setToolTip("새로고침")
+        self.btn_refresh.clicked.connect(self.load_items)
+        self.btn_main = QPushButton("📋 메인 창")
+        self.btn_main.clicked.connect(self.open_main_window)
+        btn_layout.addWidget(self.btn_refresh)
         btn_layout.addStretch()
-        btn_layout.addWidget(btn_main)
+        btn_layout.addWidget(self.btn_main)
         layout.addLayout(btn_layout)
         
         # 메인 레이아웃
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(container)
+        main_layout.addWidget(self.container)
+    
+    def apply_mini_theme(self):
+        """v10.6: 부모 윈도우의 테마와 연동하여 스타일 적용"""
+        # 부모에서 현재 테마 가져오기
+        if self.parent_window and hasattr(self.parent_window, 'current_theme'):
+            theme_name = self.parent_window.current_theme
+        else:
+            theme_name = "dark"
+        
+        theme = THEMES.get(theme_name, THEMES["dark"])
+        glass = GLASS_STYLES.get(theme_name, GLASS_STYLES["dark"])
+        
+        self.container.setStyleSheet(f"""
+            QFrame#MiniContainer {{
+                background-color: {glass["glass_bg"]};
+                border-radius: 14px;
+                border: 1px solid {theme["border"]};
+            }}
+            QLabel {{ 
+                color: {theme["text"]}; 
+                background: transparent;
+            }}
+            QListWidget {{
+                background-color: transparent;
+                border: none;
+                color: {theme["text"]};
+                font-size: 13px;
+            }}
+            QListWidget::item {{
+                padding: 10px 12px;
+                border-radius: 8px;
+                margin: 2px 4px;
+            }}
+            QListWidget::item:hover {{
+                background-color: {theme["hover_bg"]};
+                color: {theme["hover_text"]};
+            }}
+            QListWidget::item:selected {{
+                background-color: {theme["primary"]};
+                color: {theme["selected_text"]};
+            }}
+            QPushButton {{
+                background-color: {theme["surface_variant"]};
+                border: 1px solid {theme["border"]};
+                border-radius: 8px;
+                padding: 8px 14px;
+                color: {theme["text"]};
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {theme["primary"]};
+                border-color: {theme["primary"]};
+                color: white;
+            }}
+        """)
     
     def load_items(self):
         """최근 10개 항목 로드"""
@@ -3209,6 +3266,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.start_minimized = start_minimized
         self.is_data_dirty = True  # v10.4: Lazy loading flag
+        self.is_monitoring_paused = False  # v10.6: 모니터링 일시정지 플래그
         try:
             self.db = ClipboardDB()
             self.clipboard = QApplication.clipboard()
@@ -3697,11 +3755,13 @@ class MainWindow(QMainWindow):
         QTableWidget::item:hover:!selected {{
             background-color: {theme.get("hover_bg", theme["surface_variant"])};
             color: {theme.get("hover_text", theme["text"])};
-            border-left: 3px solid {theme["primary"]};
+            border-left: 4px solid {theme["primary"]};
+            padding-left: 8px;
         }}
         QTableWidget::item:focus {{
             outline: none;
-            border: 1px solid {theme["primary"]};
+            border: 2px solid {theme["primary"]};
+            border-radius: 4px;
         }}
         
         /* v9.0: 개선된 헤더 */
@@ -3741,7 +3801,7 @@ class MainWindow(QMainWindow):
             border-radius: 16px;
         }}
         
-        /* v10.1: 개선된 버튼 스타일 - 마이크로 인터랙션 강화 */
+        /* v10.6: 개선된 버튼 스타일 - 마이크로 인터랙션 및 일관성 강화 */
         QPushButton {{ 
             background-color: {theme["surface_variant"]}; 
             border: 2px solid {theme["border"]}; 
@@ -3751,6 +3811,7 @@ class MainWindow(QMainWindow):
             font-weight: 600;
             font-size: 13px;
             outline: none;
+            min-height: 20px;
         }}
         QPushButton:hover {{ 
             background-color: {theme["primary"]}; 
@@ -3883,20 +3944,24 @@ class MainWindow(QMainWindow):
             font-weight: 600;
         }}
         
-        /* v9.0: 슬림 스크롤바 */
+        /* v10.6: 울트라 슬림 스크롤바 - 부드러운 호버 효과 */
         QScrollBar:vertical {{
             background-color: transparent;
-            width: 8px;
-            border-radius: 4px;
+            width: 6px;
+            border-radius: 3px;
             margin: 4px 2px;
+        }}
+        QScrollBar:vertical:hover {{
+            width: 10px;
         }}
         QScrollBar::handle:vertical {{
             background-color: {theme["border"]};
-            border-radius: 4px;
+            border-radius: 3px;
             min-height: 40px;
         }}
         QScrollBar::handle:vertical:hover {{
             background-color: {theme["primary"]};
+            border-radius: 5px;
         }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0px;
@@ -3963,6 +4028,34 @@ class MainWindow(QMainWindow):
             background-color: {theme["primary"]};
             border-color: {theme["primary"]};
         }}
+        QCheckBox::indicator:hover {{
+            border-color: {theme["primary_variant"]};
+        }}
+        
+        /* v10.6: 도구 버튼 그룹 컨테이너 */
+        QFrame#ToolsGroup {{
+            background-color: {glass["glass_bg"]};
+            border: 1px solid {theme["border"]};
+            border-radius: 10px;
+            padding: 4px 8px;
+        }}
+        
+        /* v10.6: 필터 콤보박스 강조 */
+        QComboBox#FilterCombo {{
+            background-color: {theme["surface_variant"]};
+            font-weight: 600;
+            min-width: 130px;
+        }}
+        QComboBox#FilterCombo:hover {{
+            background-color: {theme["surface"]};
+            border-color: {theme["primary"]};
+        }}
+        
+        /* v10.6: 향상된 플레이스홀더 스타일 */
+        QLineEdit::placeholder {{
+            color: {theme["text_secondary"]};
+            font-style: italic;
+        }}
         """
         self.setStyleSheet(style)
         # Note: 단축키는 init_shortcuts()에서 등록됨 (중복 방지)
@@ -3971,7 +4064,7 @@ class MainWindow(QMainWindow):
         """드래그 앤 드롭 이벤트 처리 (고정 항목 순서 변경)"""
         if source == self.table.viewport() and event.type() == QEvent.Type.Drop:
             # 드롭 위치 확인
-            target_row = self.table.rowAt(event.position().y())
+            target_row = self.table.rowAt(int(event.position().y()))
             if target_row == -1:
                 return False
                 
@@ -4201,6 +4294,9 @@ class MainWindow(QMainWindow):
         self.apply_theme()
         if hasattr(self, 'tray_menu'):
             self.update_tray_theme()
+        # v10.6: 미니 창 테마 연동
+        if hasattr(self, 'mini_window') and self.mini_window:
+            self.mini_window.apply_mini_theme()
         self.load_data()  # 테마 변경 시 테이블 색상 반영
         self.statusBar().showMessage(f"✅ 테마 변경: {THEMES[theme_key]['name']}", 2000)
 
@@ -4417,6 +4513,7 @@ class MainWindow(QMainWindow):
         top_layout.setSpacing(12)
         
         self.filter_combo = QComboBox()
+        self.filter_combo.setObjectName("FilterCombo")  # v10.6: 스타일 연결용
         self.filter_combo.addItems(["전체", "📌 고정", "⭐ 북마크", "📝 텍스트", "🖼️ 이미지", "🔗 링크", "💻 코드", "🎨 색상"])
         self.filter_combo.setFixedWidth(150)
         self.filter_combo.setToolTip("유형별 필터")
@@ -4578,9 +4675,9 @@ class MainWindow(QMainWindow):
         
         detail_layout.addWidget(self.detail_stack)
 
-        # 하단 액션 버튼
+        # v10.6: 하단 액션 버튼 - 통일된 높이와 완성된 디자인
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
+        btn_layout.setSpacing(8)
         
         self.btn_copy = QPushButton("📄 복사")
         self.btn_copy.setMinimumHeight(44)
@@ -4599,7 +4696,7 @@ class MainWindow(QMainWindow):
         self.btn_pin.clicked.connect(self.toggle_pin)
         
         self.btn_del = QPushButton("🗑 삭제")
-        self.btn_del.setMinimumHeight(48)
+        self.btn_del.setMinimumHeight(44)
         self.btn_del.setObjectName("DeleteBtn")
         self.btn_del.setToolTip("항목 삭제 (Delete)")
         self.btn_del.clicked.connect(self.delete_item)
@@ -4647,6 +4744,10 @@ class MainWindow(QMainWindow):
         
         self.tray_privacy_action = QAction("🔒 프라이버시 모드", self, checkable=True)
         self.tray_privacy_action.triggered.connect(self.toggle_privacy_mode)
+
+        # v10.6: 모니터링 일시정지 액션
+        self.tray_pause_action = QAction("⏸ 모니터링 일시정지", self, checkable=True)
+        self.tray_pause_action.triggered.connect(self.toggle_monitoring_pause)
         
         quit_action = QAction("❌ 종료", self)
         quit_action.triggered.connect(self.quit_app)
@@ -4658,6 +4759,7 @@ class MainWindow(QMainWindow):
         self.tray_menu.addAction(show_action)
         self.tray_menu.addSeparator()
         self.tray_menu.addAction(self.tray_privacy_action)
+        self.tray_menu.addAction(self.tray_pause_action)
         self.tray_menu.addSeparator()
         self.tray_menu.addMenu(adv_menu)
         self.tray_menu.addSeparator()
@@ -4666,6 +4768,22 @@ class MainWindow(QMainWindow):
         self.tray_icon.setContextMenu(self.tray_menu)
         self.tray_icon.activated.connect(self.on_tray_activated)
         self.tray_icon.show()
+
+    def toggle_monitoring_pause(self):
+        """v10.6: 모니터링 일시정지 토글"""
+        self.is_monitoring_paused = not self.is_monitoring_paused
+        
+        # 액션 체크 상태 동기화
+        self.tray_pause_action.setChecked(self.is_monitoring_paused)
+        
+        if self.is_monitoring_paused:
+            self.show_toast("⏸ 모니터링 일시정지", "클립보드 수집이 잠시 중단됩니다.")
+            self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION} (일시정지됨)")
+        else:
+            self.show_toast("▶ 모니터링 재개", "클립보드 수집을 다시 시작합니다.")
+            self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION}")
+            
+        self.update_status_bar()
 
     def init_shortcuts(self):
         """앱 내 키보드 단축키 설정"""
@@ -4727,6 +4845,10 @@ class MainWindow(QMainWindow):
             f"📌 고정 {stats['pinned']}개",
             f"📅 오늘 {today_count}개"
         ]
+        
+        # 모니터링 일시정지 표시
+        if self.is_monitoring_paused:
+             status_parts.append("⏸ [일시정지됨]")
         
         # 현재 필터 상태
         current_filter = self.filter_combo.currentText() if hasattr(self, 'filter_combo') else "전체"
@@ -4956,6 +5078,10 @@ class MainWindow(QMainWindow):
         self._clipboard_debounce_timer.start(100)
 
     def process_clipboard(self):
+        # v10.6: 모니터링 일시정지 상태면 무시
+        if self.is_monitoring_paused:
+            return
+            
         try:
             mime_data = self.clipboard.mimeData()
             if mime_data.hasImage():
