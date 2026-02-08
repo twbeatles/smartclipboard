@@ -1,8 +1,8 @@
-# 📋 SmartClipboard Pro v10.5
+# 📋 SmartClipboard Pro v10.6
 
 > 고급 클립보드 매니저 - PyQt6 기반의 현대적이고 강력한 클립보드 관리 도구
 
-![Version](https://img.shields.io/badge/version-10.5-blue)
+![Version](https://img.shields.io/badge/version-10.6-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -148,6 +148,30 @@ pyinstaller smartclipboard.spec
 
 ---
 
+## 📝 v10.6 변경사항
+
+### 🔧 드래그앤드롭 수정
+- **고정 항목 순서 변경**: 드래그 시 데이터 손실 버그 수정
+- `DragDropMode` 변경으로 Qt 자동 행 삭제 방지
+- `eventFilter` 재설계 (DragEnter/DragMove/Drop 분리 처리)
+
+### 🛡️ DB 안정성 강화
+- `toggle_pin`: 새 고정 항목 `pin_order` 자동 초기화
+- `soft_delete`, `restore_item`: rollback 추가
+- `add_snippet`, `update_snippet`, `delete_snippet`: rollback/return 추가
+- `set_setting`: rollback 추가
+- `update_url_title`: URL 제목 캐시 저장 메서드 추가
+
+### 📁 Collections API 구현
+- `add_collection()`: 컴렉션 생성
+- `get_collections()`: 목록 조회
+- `update_collection()`: 수정
+- `delete_collection()`: 삭제 (항목 연결 해제)
+- `assign_to_collection()`: 항목 할당/해제
+- `get_items_by_collection()`: 컴렉션별 조회
+
+---
+
 ## 📝 v10.3 변경사항
 
 ### 🔲 미니 창 개선
@@ -222,10 +246,11 @@ pyinstaller smartclipboard.spec
 
 ```
 smartclipboard-main/
-├── 클립모드 매니저.py    # 메인 애플리케이션 (5,500+ lines)
+├── 클립모드 매니저.py    # 메인 애플리케이션 (6,000+ lines)
 ├── requirements.txt      # Python 의존성
 ├── smartclipboard.spec   # PyInstaller 빌드 설정
 ├── README.md             # 문서
+├── claude.md             # AI 가이드
 └── clipboard_history_v6.db  # SQLite 데이터베이스 (자동 생성)
 ```
 

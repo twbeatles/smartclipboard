@@ -1,5 +1,5 @@
 """
-SmartClipboard Pro v10.5
+SmartClipboard Pro v10.6
 고급 클립보드 매니저 - 확장 기능 버전
 
 주요 기능:
@@ -509,6 +509,8 @@ class ClipboardDB:
                 
                 if type_filter == "📌 고정":
                     sql += " AND pinned = 1"
+                elif type_filter == "⭐ 북마크":
+                    sql += " AND bookmark = 1"
                 elif type_filter in FILTER_TAG_MAP:  # v10.0: 상수 사용
                     sql += " AND type = ?"
                     params.append(FILTER_TAG_MAP[type_filter])
@@ -526,6 +528,19 @@ class ClipboardDB:
                 logger.exception("DB Get Error")
                 return []
 
+    def update_pin_order(self, item_id: int, order: int) -> bool:
+        """고정 항목의 순서를 업데이트"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET pin_order = ? WHERE id = ?", (order, item_id))
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Pin order update failed: {e}")
+                self.conn.rollback()
+                return False
+
     def toggle_pin(self, item_id):
         with self.lock:
             try:
@@ -534,7 +549,16 @@ class ClipboardDB:
                 current = cursor.fetchone()
                 if current:
                     new_status = 0 if current[0] else 1
-                    cursor.execute("UPDATE history SET pinned = ? WHERE id = ?", (new_status, item_id))
+                    if new_status == 1:
+                        # 새 고정 항목은 맨 아래에 추가 (최대 pin_order + 1)
+                        cursor.execute("SELECT COALESCE(MAX(pin_order), -1) + 1 FROM history WHERE pinned = 1")
+                        new_order = cursor.fetchone()[0]
+                        cursor.execute("UPDATE history SET pinned = ?, pin_order = ? WHERE id = ?", 
+                                       (new_status, new_order, item_id))
+                    else:
+                        # 고정 해제 시 pin_order 초기화
+                        cursor.execute("UPDATE history SET pinned = ?, pin_order = 0 WHERE id = ?", 
+                                       (new_status, item_id))
                     self.conn.commit()
                     return new_status
             except sqlite3.Error as e:
@@ -625,6 +649,7 @@ class ClipboardDB:
                 return True
             except sqlite3.Error as e:
                 logger.error(f"Snippet Add Error: {e}")
+                self.conn.rollback()
                 return False
 
     def get_snippets(self, category=""):
@@ -646,8 +671,11 @@ class ClipboardDB:
                 cursor = self.conn.cursor()
                 cursor.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
                 self.conn.commit()
+                return True
             except sqlite3.Error as e:
                 logger.error(f"Snippet Delete Error: {e}")
+                self.conn.rollback()
+                return False
     
     def update_snippet(self, snippet_id, name, content, shortcut="", category="일반"):
         """v10.2: 스니펫 수정"""
@@ -662,6 +690,7 @@ class ClipboardDB:
                 return True
             except sqlite3.Error as e:
                 logger.error(f"Snippet Update Error: {e}")
+                self.conn.rollback()
                 return False
 
     # --- 설정 메서드 ---
@@ -684,6 +713,7 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Setting Save Error: {e}")
+                self.conn.rollback()
 
     def cleanup(self):
         """오래된 항목 정리 - 이미지 제한 및 전체 제한 적용"""
@@ -800,6 +830,107 @@ class ClipboardDB:
                 logger.debug(f"Get all tags error: {e}")
                 return []
 
+    def update_url_title(self, item_id: int, title: str) -> bool:
+        """URL 제목을 캐시에 저장"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET url_title = ? WHERE id = ?", (title, item_id))
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"URL title update failed: {e}")
+                self.conn.rollback()
+                return False
+
+    # --- Collections 메서드 ---
+    def add_collection(self, name: str, icon: str = "📁", color: str = "#6366f1") -> int | bool:
+        """컬렉션 추가"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute(
+                    "INSERT INTO collections (name, icon, color, created_at) VALUES (?, ?, ?, ?)",
+                    (name, icon, color, created_at)
+                )
+                self.conn.commit()
+                return cursor.lastrowid
+            except sqlite3.Error as e:
+                logger.error(f"Collection Add Error: {e}")
+                self.conn.rollback()
+                return False
+
+    def get_collections(self) -> list:
+        """모든 컬렉션 조회"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id, name, icon, color, created_at FROM collections ORDER BY name")
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Collection Get Error: {e}")
+                return []
+
+    def update_collection(self, collection_id: int, name: str, icon: str = "📁", color: str = "#6366f1") -> bool:
+        """컬렉션 수정"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "UPDATE collections SET name = ?, icon = ?, color = ? WHERE id = ?",
+                    (name, icon, color, collection_id)
+                )
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Collection Update Error: {e}")
+                self.conn.rollback()
+                return False
+
+    def delete_collection(self, collection_id: int) -> bool:
+        """컬렉션 삭제 (항목의 collection_id는 NULL로 설정)"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                # 해당 컬렉션의 항목들 연결 해제
+                cursor.execute("UPDATE history SET collection_id = NULL WHERE collection_id = ?", (collection_id,))
+                cursor.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Collection Delete Error: {e}")
+                self.conn.rollback()
+                return False
+
+    def assign_to_collection(self, item_id: int, collection_id: int | None) -> bool:
+        """항목을 컬렉션에 할당 (None이면 해제)"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET collection_id = ? WHERE id = ?", (collection_id, item_id))
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Assign Collection Error: {e}")
+                self.conn.rollback()
+                return False
+
+    def get_items_by_collection(self, collection_id: int) -> list:
+        """컬렉션별 항목 조회"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE collection_id = ? ORDER BY pinned DESC, pin_order ASC, id DESC",
+                    (collection_id,)
+                )
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Get Items by Collection Error: {e}")
+                return []
+
+
     def get_items_by_tag(self, tag):
         with self.lock:
             try:
@@ -851,6 +982,7 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Rule Add Error: {e}")
+                self.conn.rollback()
     
     def toggle_copy_rule(self, rule_id, enabled):
         with self.lock:
@@ -860,6 +992,7 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Rule Toggle Error: {e}")
+                self.conn.rollback()
     
     def delete_copy_rule(self, rule_id):
         with self.lock:
@@ -869,17 +1002,8 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Rule Delete Error: {e}")
+                self.conn.rollback()
     
-    def update_pin_order(self, item_id, new_order):
-        """고정 항목 순서 업데이트"""
-        with self.lock:
-            try:
-                cursor = self.conn.cursor()
-                cursor.execute("UPDATE history SET pin_order = ? WHERE id = ?", (new_order, item_id))
-                self.conn.commit()
-            except sqlite3.Error as e:
-                logger.error(f"Pin Order Update Error: {e}")
-
     # --- v8.0: 보안 보관함 메서드 ---
     def add_vault_item(self, encrypted_content, label):
         with self.lock:
@@ -944,6 +1068,7 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Action Toggle Error: {e}")
+                self.conn.rollback()
     
     def delete_clipboard_action(self, action_id):
         with self.lock:
@@ -953,51 +1078,7 @@ class ClipboardDB:
                 self.conn.commit()
             except sqlite3.Error as e:
                 logger.error(f"Action Delete Error: {e}")
-    
-    # --- v8.0: URL 제목 캐시 ---
-    def update_url_title(self, item_id, title):
-        with self.lock:
-            try:
-                cursor = self.conn.cursor()
-                cursor.execute("UPDATE history SET url_title = ? WHERE id = ?", (title, item_id))
-                self.conn.commit()
-            except sqlite3.Error as e:
-                logger.error(f"URL Title Update Error: {e}")
-
-    # --- v10.0: 컬렉션 메서드 ---
-    def add_collection(self, name, icon="📁", color="#6366f1"):
-        with self.lock:
-            try:
-                cursor = self.conn.cursor()
-                created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cursor.execute("INSERT INTO collections (name, icon, color, created_at) VALUES (?, ?, ?, ?)",
-                               (name, icon, color, created_at))
-                self.conn.commit()
-                return cursor.lastrowid
-            except sqlite3.Error as e:
-                logger.error(f"Collection Add Error: {e}")
-                return None
-    
-    def get_collections(self):
-        with self.lock:
-            try:
-                cursor = self.conn.cursor()
-                cursor.execute("SELECT id, name, icon, color FROM collections ORDER BY name")
-                return cursor.fetchall()
-            except sqlite3.Error as e:
-                logger.error(f"Get Collections Error: {e}")
-                return []
-    
-    def delete_collection(self, collection_id):
-        with self.lock:
-            try:
-                cursor = self.conn.cursor()
-                # 컬렉션 내 항목들은 컬렉션 없음 상태로
-                cursor.execute("UPDATE history SET collection_id = NULL WHERE collection_id = ?", (collection_id,))
-                cursor.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
-                self.conn.commit()
-            except sqlite3.Error as e:
-                logger.error(f"Delete Collection Error: {e}")
+                self.conn.rollback()
     
     def move_to_collection(self, item_id, collection_id):
         with self.lock:
@@ -1005,21 +1086,11 @@ class ClipboardDB:
                 cursor = self.conn.cursor()
                 cursor.execute("UPDATE history SET collection_id = ? WHERE id = ?", (collection_id, item_id))
                 self.conn.commit()
+                return True
             except sqlite3.Error as e:
                 logger.error(f"Move to Collection Error: {e}")
-    
-    def get_items_by_collection(self, collection_id):
-        with self.lock:
-            try:
-                cursor = self.conn.cursor()
-                if collection_id is None:
-                    cursor.execute("SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE collection_id IS NULL ORDER BY pinned DESC, id DESC")
-                else:
-                    cursor.execute("SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE collection_id = ? ORDER BY pinned DESC, id DESC", (collection_id,))
-                return cursor.fetchall()
-            except sqlite3.Error as e:
-                logger.error(f"Get Items by Collection Error: {e}")
-                return []
+                self.conn.rollback()
+                return False
 
     # --- v10.0: 북마크 메서드 ---
     def toggle_bookmark(self, item_id):
@@ -1035,6 +1106,7 @@ class ClipboardDB:
                     return new_status
             except sqlite3.Error as e:
                 logger.error(f"Toggle Bookmark Error: {e}")
+                self.conn.rollback()
             return 0
     
     def get_bookmarked_items(self):
@@ -1086,6 +1158,7 @@ class ClipboardDB:
                     return True
             except sqlite3.Error as e:
                 logger.error(f"Soft Delete Error: {e}")
+                self.conn.rollback()
             return False
     
     def restore_item(self, deleted_id):
@@ -1104,6 +1177,7 @@ class ClipboardDB:
                     return True
             except sqlite3.Error as e:
                 logger.error(f"Restore Item Error: {e}")
+                self.conn.rollback()
             return False
     
     def get_deleted_items(self):
@@ -3332,7 +3406,9 @@ class MainWindow(QMainWindow):
             # v8.0: 보관함 자동 잠금 타이머
             self.vault_timer = QTimer(self)
             self.vault_timer.timeout.connect(self.check_vault_timeout)
-        # v10.2: 만료 항목 정리 타이머 (1시간마다)
+            self.vault_timer.start(60000)  # 1분마다 타임아웃 체크
+            
+            # v10.2: 만료 항목 정리 타이머 (1시간마다)
             self.cleanup_timer = QTimer(self)
             self.cleanup_timer.timeout.connect(self.run_periodic_cleanup)
             self.cleanup_timer.start(3600000)  # 1시간 = 3600000ms
@@ -3743,7 +3819,7 @@ class MainWindow(QMainWindow):
         }}
         /* v10.1: 개선된 테이블 항목 스타일 - 선택 시각화 강화 */
         QTableWidget::item {{
-            padding: 12px 10px;
+            padding: 14px 12px;
             border-bottom: 1px solid {theme["border"]};
             border-radius: 0px;
         }}
@@ -3751,6 +3827,8 @@ class MainWindow(QMainWindow):
             background-color: {theme["primary"]};
             color: {theme.get("selected_text", "#ffffff")};
             font-weight: 500;
+            border-left: 4px solid {theme.get("gradient_end", theme["primary_variant"])};
+            padding-left: 10px;
         }}
         QTableWidget::item:hover:!selected {{
             background-color: {theme.get("hover_bg", theme["surface_variant"])};
@@ -3872,6 +3950,36 @@ class MainWindow(QMainWindow):
         QPushButton#ToolBtn:pressed {{
             background-color: {theme["primary"]};
             border-color: {theme["primary"]};
+        }}
+        
+        /* v10.7: 퀵 액션 버튼 - 상단 바 전용 */
+        QPushButton#QuickBtn {{
+            background-color: {glass["glass_bg"]};
+            border: 1px solid {theme["border"]};
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            min-width: 70px;
+        }}
+        QPushButton#QuickBtn:hover {{
+            background-color: {theme["surface_variant"]};
+            border-color: {theme["primary"]};
+            color: {theme["primary"]};
+        }}
+        QPushButton#QuickBtn:pressed {{
+            background-color: {theme["primary"]};
+            color: white;
+            border-color: {theme["primary"]};
+        }}
+        
+        /* v10.7: 도구 버튼 그룹 컨테이너 */
+        QFrame#ToolsGroup {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 {theme["surface_variant"]}, stop:1 {theme["surface"]});
+            border: 1px solid {theme["border"]};
+            border-radius: 12px;
+            padding: 4px 8px;
         }}
         
         /* v9.0: 경고 삭제 버튼 */
@@ -4062,85 +4170,115 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, source, event):
         """드래그 앤 드롭 이벤트 처리 (고정 항목 순서 변경)"""
-        if source == self.table.viewport() and event.type() == QEvent.Type.Drop:
+        if source != self.table.viewport():
+            return super().eventFilter(source, event)
+        
+        # DragEnter: 드래그 시작 허용 여부
+        if event.type() == QEvent.Type.DragEnter:
+            if event.source() == self.table:
+                event.acceptProposedAction()
+                return True
+            return False
+        
+        # DragMove: 드래그 중
+        if event.type() == QEvent.Type.DragMove:
+            event.acceptProposedAction()
+            return True
+        
+        # Drop: 드래그 완료
+        if event.type() == QEvent.Type.Drop:
+            return self._handle_drop_event(event)
+        
+        return super().eventFilter(source, event)
+
+    def _handle_drop_event(self, event) -> bool:
+        """드롭 이벤트 처리 - 고정 항목끼리만 순서 변경 허용"""
+        try:
             # 드롭 위치 확인
             target_row = self.table.rowAt(int(event.position().y()))
             if target_row == -1:
-                return False
-                
+                event.ignore()
+                return True  # 이벤트 소비 (Qt 기본 동작 막기)
+            
             # 선택된 행 (드래그 중인 행)
             selected_rows = self.table.selectionModel().selectedRows()
             if not selected_rows:
-                return False
+                event.ignore()
+                return True
             source_row = selected_rows[0].row()
             
+            # 같은 위치면 무시
             if source_row == target_row:
-                return False
+                event.ignore()
+                return True
             
-            # 고정 항목끼리만 이동 가능
+            # 소스/타겟 항목 확인
             source_item = self.table.item(source_row, 0)
             target_item = self.table.item(target_row, 0)
             
-            # 📌 표시가 있는지 확인
+            if not source_item or not target_item:
+                event.ignore()
+                return True
+            
+            # 고정 항목 확인
             is_source_pinned = source_item.text() == "📌"
             is_target_pinned = target_item.text() == "📌"
             
-            if is_source_pinned and is_target_pinned:
-                # DB 업데이트 로직
-                source_pid = source_item.data(Qt.ItemDataRole.UserRole)
-                target_pid = target_item.data(Qt.ItemDataRole.UserRole)
-                
-                # 순서 swap 또는 재정렬
-                # 간단하게: source를 target 위치로 이동하고, 나머지를 밀어내는 방식
-                # 여기서는 간단히 두 항목의 pin_order를 교체하는 것이 아니라,
-                # 전체 핀 목록을 가져와서 재정렬하는 것이 안전함.
-                
-                # 현재 고정된 항목들의 ID 목록 가져오기 (화면 순서대로)
-                pinned_ids = []
-                for row in range(self.table.rowCount()):
-                    item = self.table.item(row, 0)
-                    if item.text() == "📌":
-                        pinned_ids.append(item.data(Qt.ItemDataRole.UserRole))
-                
-                if source_pid in pinned_ids:
-                    pinned_ids.remove(source_pid)
-                    # 타겟 위치 계산 (위로 드래그 vs 아래로 드래그)
-                    # row 인덱스 기준이므로 pinned_ids 내에서의 인덱스를 찾아야 함
-                    
-                    # 타겟 row가 pinned_ids에서 몇 번째인지 찾기
-                    target_idx = -1
-                    current_row = 0
-                    for pid in pinned_ids: # source가 빠진 상태
-                        # 원래 테이블에서의 row를 찾아야 정확하지만, 
-                        # 여기서는 화면상의 타겟 row가 몇번째 핀인지 추정
-                        pass
-                        
-                    # 간단한 방법: 화면상 타겟 row가 전체 핀 중 몇 번째인지 확인
-                    pin_count = 0
-                    insert_idx = 0
-                    for r in range(self.table.rowCount()):
-                        if r == target_row:
-                            insert_idx = pin_count
-                            break
-                        if r == source_row: 
-                            continue # 자기 자신은 건너뜀
-                        if self.table.item(r, 0).text() == "📌":
-                            pin_count += 1
-                            
-                    if source_row > target_row: # 아래에서 위로
-                        pinned_ids.insert(insert_idx, source_pid)
-                    else: # 위에서 아래로
-                        pinned_ids.insert(insert_idx + 1, source_pid)
-
-                    # DB 업데이트
-                    for idx, pid in enumerate(pinned_ids):
-                        self.db.update_pin_order(pid, idx)
-                    
-                    # 딜레이 후 리로드 (드롭 애니메이션 간섭 방지)
-                    QTimer.singleShot(50, self.load_data)
-                    return True # 이벤트 소비 (기본 동작 막기)
+            if not (is_source_pinned and is_target_pinned):
+                # 비고정 항목 드래그 시도 시 토스트 알림
+                self.statusBar().showMessage("📌 고정 항목끼리만 순서를 변경할 수 있습니다.", 2000)
+                event.ignore()
+                return True
             
-        return super().eventFilter(source, event)
+            # 고정 항목 순서 재정렬
+            source_pid = source_item.data(Qt.ItemDataRole.UserRole)
+            
+            # 현재 고정된 항목들의 ID 목록 (화면 순서)
+            pinned_ids = []
+            for row in range(self.table.rowCount()):
+                item = self.table.item(row, 0)
+                if item and item.text() == "📌":
+                    pid = item.data(Qt.ItemDataRole.UserRole)
+                    if pid != source_pid:  # 드래그 중인 항목 제외
+                        pinned_ids.append(pid)
+            
+            # 삽입 위치 계산
+            insert_idx = 0
+            for r in range(target_row):
+                item = self.table.item(r, 0)
+                if item and item.text() == "📌":
+                    pid = item.data(Qt.ItemDataRole.UserRole)
+                    if pid != source_pid:
+                        insert_idx += 1
+            
+            # 위에서 아래로 드래그 시 인덱스 조정
+            if source_row < target_row:
+                pinned_ids.insert(insert_idx, source_pid)
+            else:
+                pinned_ids.insert(insert_idx, source_pid)
+            
+            # DB 업데이트
+            success = True
+            for idx, pid in enumerate(pinned_ids):
+                if not self.db.update_pin_order(pid, idx):
+                    success = False
+                    break
+            
+            if success:
+                # 성공 시 UI 갱신 (딜레이로 드롭 애니메이션 방지)
+                QTimer.singleShot(50, self.load_data)
+                self.statusBar().showMessage("✅ 고정 항목 순서가 변경되었습니다.", 2000)
+            else:
+                self.statusBar().showMessage("⚠️ 순서 변경 중 오류가 발생했습니다.", 2000)
+            
+            event.accept()
+            return True  # 이벤트 소비
+            
+        except Exception as e:
+            logger.error(f"Drop event error: {e}")
+            event.ignore()
+            return True
+
 
     def init_menu(self):
         menubar = self.menuBar()
@@ -4506,7 +4644,44 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(14)
+        main_layout.setSpacing(12)
+
+        # v10.7: 상단 퀵 액션 바 (자주 사용하는 기능 빠른 접근)
+        quick_bar = QHBoxLayout()
+        quick_bar.setSpacing(8)
+        
+        btn_vault = QPushButton("🔒 보관함")
+        btn_vault.setObjectName("QuickBtn")
+        btn_vault.setToolTip("보안 보관함 열기")
+        btn_vault.clicked.connect(self.show_secure_vault)
+        
+        btn_snippets = QPushButton("📝 스니펫")
+        btn_snippets.setObjectName("QuickBtn")
+        btn_snippets.setToolTip("스니펫 관리")
+        btn_snippets.clicked.connect(self.show_snippet_manager)
+        
+        btn_trash = QPushButton("🗑️ 휴지통")
+        btn_trash.setObjectName("QuickBtn")
+        btn_trash.setToolTip("휴지통 열기")
+        btn_trash.clicked.connect(self.show_trash)
+        
+        btn_settings = QPushButton("⚙️ 설정")
+        btn_settings.setObjectName("QuickBtn")
+        btn_settings.setToolTip("설정 열기")
+        btn_settings.clicked.connect(self.show_settings)
+        
+        quick_bar.addWidget(btn_vault)
+        quick_bar.addWidget(btn_snippets)
+        quick_bar.addWidget(btn_trash)
+        quick_bar.addWidget(btn_settings)
+        quick_bar.addStretch()
+        
+        # 프라이버시 모드 인디케이터
+        self.privacy_indicator = QLabel("")
+        self.privacy_indicator.setStyleSheet("font-size: 12px; color: #fbbf24;")
+        quick_bar.addWidget(self.privacy_indicator)
+        
+        main_layout.addLayout(quick_bar)
 
         # v9.0: 상단 필터/검색 영역 (개선된 레이아웃)
         top_layout = QHBoxLayout()
@@ -4575,10 +4750,12 @@ class MainWindow(QMainWindow):
         header.sectionClicked.connect(self.on_header_clicked)
         
         # 드래그 앤 드롭 (고정 항목 재정렬용)
+        # DragDrop 모드: Qt 자동 행 삭제 방지, 커스텀 eventFilter에서 처리
         self.table.setDragEnabled(True)
         self.table.setAcceptDrops(True)
-        self.table.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.table.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.table.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.table.setDefaultDropAction(Qt.DropAction.CopyAction)
+        self.table.setDragDropOverwriteMode(False)
         self.table.viewport().installEventFilter(self)
 
         splitter.addWidget(self.table)
@@ -4722,10 +4899,13 @@ class MainWindow(QMainWindow):
             if res_type == "title":
                 title = result.get("title")
                 if title:
-                    self.clipboard.dataChanged.disconnect(self.on_clipboard_change)  # 일시적 연결 해제
+                    try:
+                        self.clipboard.dataChanged.disconnect(self.on_clipboard_change)  # 일시적 연결 해제
+                    except (TypeError, RuntimeError):
+                        pass  # 이미 연결 해제된 경우
                     self.show_toast("🔗 링크 제목 발견", f"{title}")
                     # UI 입력 중이 아닐 때만 데이터 다시 로드
-                    if not self.input_search.hasFocus():
+                    if not self.search_input.hasFocus():
                         self.load_data()
                     self.clipboard.dataChanged.connect(self.on_clipboard_change)
         except Exception as e:
@@ -4831,6 +5011,15 @@ class MainWindow(QMainWindow):
 
     def update_status_bar(self, selection_count=0):
         """상태바 업데이트 - 통계 및 선택 정보 표시"""
+        # v10.7: 프라이버시 인디케이터 업데이트
+        if hasattr(self, 'privacy_indicator'):
+            if self.is_privacy_mode:
+                self.privacy_indicator.setText("🔒 프라이버시")
+            elif self.is_monitoring_paused:
+                self.privacy_indicator.setText("⏸ 일시정지")
+            else:
+                self.privacy_indicator.setText("")
+        
         # 프라이버시 모드 표시
         if self.is_privacy_mode:
             self.statusBar().showMessage("🔒 프라이버시 모드 활성화됨 (클립보드 기록 중지)")
@@ -5718,7 +5907,7 @@ class MainWindow(QMainWindow):
         collection_menu = menu.addMenu("📁 컬렉션으로 이동")
         collections = self.db.get_collections()
         if collections:
-            for cid, cname, cicon, ccolor in collections:
+            for cid, cname, cicon, ccolor, _ in collections:  # created_at 무시
                 c_action = collection_menu.addAction(f"{cicon} {cname}")
                 c_action.triggered.connect(lambda checked, col_id=cid: self.move_to_collection(col_id))
             collection_menu.addSeparator()
@@ -5792,9 +5981,6 @@ if __name__ == "__main__":
         app.setQuitOnLastWindowClosed(False)
         
         font = QFont("Malgun Gothic", 10)
-        font.setStyleHint(QFont.StyleHint.SansSerif)
-        app.setFont(font)
-
         font.setStyleHint(QFont.StyleHint.SansSerif)
         app.setFont(font)
 
