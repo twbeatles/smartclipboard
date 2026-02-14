@@ -1,0 +1,52 @@
+# SmartClipboard repo ignore rules
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# --- OS / Editor ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# --- App local data (do not version) ---
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+debug_startup_error.log
+
+# Backups (contains user DB snapshots)
+backups/
+
+# --- Build artifacts ---
+build/
+dist/
+dist3/
+*.spec.bak
+
+# Bytecode caches that may appear inside build outputs
+build/**/localpycs/
+
+# Executables produced by PyInstaller
+*.exe
+
+# Keep tracked payload that the app needs at runtime:
+!smartclipboard_app/legacy_main_payload.marshal
+
