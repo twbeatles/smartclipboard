@@ -32,6 +32,9 @@ import csv
 import hashlib  # v10.1: 모듈 레벨 import로 이동 (성능 최적화)
 from urllib.parse import quote  # v10.3: URL 인코딩용
 
+from smartclipboard_core.search_query import parse_search_query
+from smartclipboard_core.backup_zip import export_history_zip, import_history_zip
+
 # 암호화 라이브러리 체크
 try:
     from cryptography.fernet import Fernet
@@ -68,7 +71,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer,
     QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent,
-    QObject, QRunnable, QThreadPool, pyqtSlot
+    QObject, QRunnable, QThreadPool, pyqtSlot, QUrl, QMimeData
 )
 from PyQt6.QtGui import (
     QColor, QFont, QIcon, QAction, QPixmap, QImage,
@@ -122,7 +125,8 @@ FILTER_TAG_MAP = {
     "🖼️ 이미지": "IMAGE",
     "🔗 링크": "LINK",
     "💻 코드": "CODE",
-    "🎨 색상": "COLOR"
+    "🎨 색상": "COLOR",
+    "📁 파일": "FILE",
 }
 
 # v10.0: cleanup 호출 간격 (매번 아닌 N회마다)
@@ -138,7 +142,7 @@ RE_HSL_COLOR = re.compile(r'^hsl\s*\(\s*\d+\s*,\s*\d+%?\s*,\s*\d+%?\s*\)$', re.I
 CODE_INDICATORS = frozenset(["def ", "class ", "function ", "const ", "let ", "var ", "{", "}", "=>", "import ", "from ", "#include", "public ", "private "])
 
 # v10.1: 타입 아이콘 상수 (UI 렌더링 최적화)
-TYPE_ICONS = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨"}
+TYPE_ICONS = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨", "FILE": "📁"}
 
 # v10.1: UI 텍스트 상수 (유지보수성 및 향후 다국어 지원 대비)
 UI_TEXTS = {
@@ -691,6 +695,99 @@ class ClipboardDB:
                 return item_id  # 삽입된 항목 ID 반환 (성능 최적화)
             except sqlite3.Error as e:
                 logger.exception("DB Add Error")
+                self.conn.rollback()
+                return False
+
+    def add_file_item(self, paths: list[str]) -> int | bool:
+        """Add a FILE history item from local file paths.
+
+        Stores:
+          - content: newline-joined paths (search/display)
+          - file_path: JSON list (structured retrieval)
+        """
+        paths = [p for p in (paths or []) if p]
+        if not paths:
+            return False
+
+        file_path_json = json.dumps(paths, ensure_ascii=False)
+        content = "\n".join(paths)
+
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id FROM history WHERE type = 'FILE' AND file_path = ? AND pinned = 0", (file_path_json,))
+                existing = cursor.fetchone()
+                if existing:
+                    cursor.execute("DELETE FROM history WHERE id = ?", (existing[0],))
+
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute(
+                    "INSERT INTO history (content, image_data, type, timestamp, file_path) VALUES (?, ?, ?, ?, ?)",
+                    (content, None, "FILE", timestamp, file_path_json),
+                )
+                self.conn.commit()
+
+                self.add_count += 1
+                if self.add_count >= CLEANUP_INTERVAL:
+                    self.cleanup()
+                    self.add_count = 0
+                return cursor.lastrowid
+            except sqlite3.Error:
+                logger.exception("DB Add FILE Error")
+                self.conn.rollback()
+                return False
+
+    def get_file_paths(self, item_id: int) -> list[str]:
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT file_path FROM history WHERE id=?", (item_id,))
+                row = cursor.fetchone()
+                if not row or not row[0]:
+                    return []
+                raw = row[0]
+                try:
+                    data = json.loads(raw)
+                    if isinstance(data, list):
+                        return [str(x) for x in data if x]
+                except Exception:
+                    pass
+                return [p for p in str(raw).splitlines() if p.strip()]
+            except sqlite3.Error as e:
+                logger.error(f"DB Get file paths Error: {e}")
+                return []
+
+    def update_item_content(
+        self,
+        item_id: int,
+        content: str,
+        type_tag: str | None = None,
+        file_paths: list[str] | None = None,
+    ) -> bool:
+        """Update an existing item in-place (timestamp preserved)."""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                if file_paths is not None:
+                    file_path_json = json.dumps([p for p in file_paths if p], ensure_ascii=False)
+                    content = "\n".join([p for p in file_paths if p]) if type_tag == "FILE" else content
+                    if type_tag is None:
+                        cursor.execute("UPDATE history SET content = ?, file_path = ? WHERE id = ?", (content, file_path_json, item_id))
+                    else:
+                        cursor.execute(
+                            "UPDATE history SET content = ?, type = ?, file_path = ? WHERE id = ?",
+                            (content, type_tag, file_path_json, item_id),
+                        )
+                else:
+                    if type_tag is None:
+                        cursor.execute("UPDATE history SET content = ? WHERE id = ?", (content, item_id))
+                    else:
+                        cursor.execute("UPDATE history SET content = ?, type = ? WHERE id = ?", (content, type_tag, item_id))
+
+                self.conn.commit()
+                return True
+            except sqlite3.Error:
+                logger.exception("DB Update content Error")
                 self.conn.rollback()
                 return False
 
@@ -1460,6 +1557,80 @@ class ClipboardDB:
                 return deleted
             except sqlite3.Error as e:
                 logger.error(f"Cleanup Expired Items Error: {e}")
+                return 0
+
+    def set_expires_at(self, item_id: int, expires_at: str | None) -> bool:
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET expires_at = ? WHERE id = ?", (expires_at, item_id))
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Set expires_at Error: {e}")
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                return False
+
+    def get_expires_at_map(self, item_ids: list[int]) -> dict[int, str]:
+        ids = [int(x) for x in (item_ids or []) if x is not None]
+        if not ids:
+            return {}
+        placeholders = ",".join(["?"] * len(ids))
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(f"SELECT id, expires_at FROM history WHERE id IN ({placeholders})", ids)
+                out: dict[int, str] = {}
+                for iid, exp in cursor.fetchall():
+                    if exp:
+                        out[int(iid)] = str(exp)
+                return out
+            except sqlite3.Error as e:
+                logger.debug(f"Get expires_at map Error: {e}")
+                return {}
+
+    def set_bookmarks(self, item_ids: list[int], value: int) -> int:
+        ids = [int(x) for x in (item_ids or []) if x is not None]
+        if not ids:
+            return 0
+        placeholders = ",".join(["?"] * len(ids))
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(f"UPDATE history SET bookmark = ? WHERE id IN ({placeholders})", [int(value)] + ids)
+                self.conn.commit()
+                return cursor.rowcount or 0
+            except sqlite3.Error as e:
+                logger.error(f"Set bookmarks Error: {e}")
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                return 0
+
+    def set_collection_many(self, item_ids: list[int], collection_id: int | None) -> int:
+        ids = [int(x) for x in (item_ids or []) if x is not None]
+        if not ids:
+            return 0
+        placeholders = ",".join(["?"] * len(ids))
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    f"UPDATE history SET collection_id = ? WHERE id IN ({placeholders})",
+                    [collection_id] + ids,
+                )
+                self.conn.commit()
+                return cursor.rowcount or 0
+            except sqlite3.Error as e:
+                logger.error(f"Set collection many Error: {e}")
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
                 return 0
 
     def close(self):
@@ -2544,10 +2715,12 @@ class ExportDialog(QDialog):
         self.format_json = QCheckBox("JSON (.json) - 전체 데이터")
         self.format_csv = QCheckBox("CSV (.csv) - 엑셀 호환")
         self.format_md = QCheckBox("Markdown (.md) - 문서용")
+        self.format_zip = QCheckBox("전체 백업 ZIP (.zip) - 이미지+메타 포함")
         self.format_json.setChecked(True)
         format_layout.addWidget(self.format_json)
         format_layout.addWidget(self.format_csv)
         format_layout.addWidget(self.format_md)
+        format_layout.addWidget(self.format_zip)
         layout.addWidget(format_group)
         
         # 필터
@@ -2596,7 +2769,17 @@ class ExportDialog(QDialog):
                 count = self.export_manager.export_markdown(path, filter_type)
                 if count >= 0:
                     exported_count += count
-        
+
+        if self.format_zip.isChecked():
+            path, _ = QFileDialog.getSaveFileName(self, "전체 백업 ZIP 저장", f"clipboard_backup_{datetime.date.today()}.zip", "Zip Files (*.zip)")
+            if path:
+                try:
+                    count = export_history_zip(self.export_manager.db, path)
+                    if count >= 0:
+                        exported_count += count
+                except Exception as e:
+                    logger.error(f"ZIP Export Error: {e}")
+
         if exported_count > 0:
             QMessageBox.information(self, "완료", f"✅ 내보내기가 완료되었습니다.")
             self.accept()
@@ -2643,7 +2826,12 @@ class ImportDialog(QDialog):
         layout.addLayout(btn_layout)
     
     def browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "파일 선택", "", "지원 파일 (*.json *.csv);;JSON (*.json);;CSV (*.csv)")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "파일 선택",
+            "",
+            "지원 파일 (*.json *.csv *.zip);;JSON (*.json);;CSV (*.csv);;Zip (*.zip)",
+        )
         if path:
             self.file_path.setText(path)
     
@@ -2657,6 +2845,12 @@ class ImportDialog(QDialog):
             count = self.export_manager.import_json(path)
         elif path.lower().endswith('.csv'):
             count = self.export_manager.import_csv(path)
+        elif path.lower().endswith('.zip'):
+            try:
+                count = import_history_zip(self.export_manager.db, path, conflict="skip")
+            except Exception as e:
+                logger.error(f"ZIP Import Error: {e}")
+                count = -1
         else:
             QMessageBox.warning(self, "경고", "지원하지 않는 파일 형식입니다.")
             return
@@ -3376,6 +3570,43 @@ class TagEditDialog(QDialog):
     
     def get_tags(self):
         return self.tag_input.text().strip()
+
+
+# --- v11: 항목 편집 다이얼로그 ---
+class EditItemDialog(QDialog):
+    def __init__(self, parent, text: str):
+        super().__init__(parent)
+        self.setWindowTitle("✏️ 항목 편집")
+        self.setMinimumSize(520, 420)
+        self._init_ui(text)
+
+    def _init_ui(self, text: str):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        self.editor = QTextEdit()
+        self.editor.setPlainText(text or "")
+        layout.addWidget(self.editor)
+
+        self.retype_checkbox = QCheckBox("유형 자동 재분석 (LINK/CODE/COLOR 등)")
+        self.retype_checkbox.setChecked(True)
+        layout.addWidget(self.retype_checkbox)
+
+        btn_layout = QHBoxLayout()
+        btn_cancel = QPushButton("취소")
+        btn_cancel.clicked.connect(self.reject)
+        btn_save = QPushButton("저장")
+        btn_save.clicked.connect(self.accept)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_cancel)
+        btn_layout.addWidget(btn_save)
+        layout.addLayout(btn_layout)
+
+    def get_text(self) -> str | None:
+        return self.editor.toPlainText()
+
+    def should_retype(self) -> bool:
+        return bool(self.retype_checkbox.isChecked())
 
 
 # --- 히스토리 통계 다이얼로그 ---
@@ -4908,7 +5139,7 @@ class MainWindow(QMainWindow):
         
         self.filter_combo = QComboBox()
         self.filter_combo.setObjectName("FilterCombo")  # v10.6: 스타일 연결용
-        self.filter_combo.addItems(["전체", "📌 고정", "⭐ 북마크", "📝 텍스트", "🖼️ 이미지", "🔗 링크", "💻 코드", "🎨 색상"])
+        self.filter_combo.addItems(["전체", "📌 고정", "⭐ 북마크", "📝 텍스트", "🖼️ 이미지", "🔗 링크", "💻 코드", "🎨 색상", "📁 파일"])
         self.filter_combo.setFixedWidth(150)
         self.filter_combo.setToolTip("유형별 필터")
         self.filter_combo.currentTextChanged.connect(self.load_data)
@@ -5503,17 +5734,53 @@ class MainWindow(QMainWindow):
         # v10.6: 모니터링 일시정지 상태면 무시
         if self.is_monitoring_paused:
             return
-            
+             
         try:
             mime_data = self.clipboard.mimeData()
+            # v11: file/folder clipboard capture (Explorer copy)
+            if mime_data.hasUrls():
+                local_paths = []
+                for u in mime_data.urls() or []:
+                    try:
+                        if u and u.isLocalFile():
+                            p = u.toLocalFile()
+                            if p:
+                                local_paths.append(p)
+                    except Exception:
+                        continue
+                if local_paths:
+                    self._process_file_clipboard(local_paths)
+                    return
+
             if mime_data.hasImage():
                 self._process_image_clipboard(mime_data)
                 return
-            
+             
             if mime_data.hasText():
                 self._process_text_clipboard(mime_data)
         except Exception as e:
             logger.exception("Clipboard access error")
+
+    def _process_file_clipboard(self, paths: list[str]):
+        """v11: 로컬 파일/폴더 경로 클립보드 처리."""
+        try:
+            # 중복 방지 (경로 목록 기준)
+            joined = "\0".join(paths)
+            fhash = hashlib.md5(joined.encode("utf-8", errors="ignore")).hexdigest()
+            if hasattr(self, "_last_file_hash") and self._last_file_hash == fhash:
+                logger.debug("Duplicate file list skipped")
+                return
+            self._last_file_hash = fhash
+
+            item_id = self.db.add_file_item(paths)
+            if item_id:
+                if self.isVisible():
+                    self.load_data()
+                    self.update_status_bar()
+                else:
+                    self.is_data_dirty = True
+        except Exception:
+            logger.exception("File clipboard processing error")
 
     def _process_image_clipboard(self, mime_data):
         """v10.5: 이미지 클립보드 처리 로직 분리"""
@@ -5703,11 +5970,49 @@ class MainWindow(QMainWindow):
 
     def _get_display_items(self):
         """표시할 항목 조회 및 정렬"""
-        search_query = self.search_input.text()
-        filter_type = self.filter_combo.currentText()
+        raw_query = self.search_input.text()
+        parsed = parse_search_query(raw_query)
 
-        bookmarked = filter_type == "⭐ 북마크"
+        search_query = parsed.query
+        filter_type = self.filter_combo.currentText()
         tag_filter = self.current_tag_filter
+        bookmarked = filter_type == "⭐ 북마크"
+        collection_id = None
+        limit = None
+
+        if parsed.tag:
+            tag_filter = parsed.tag
+
+        type_map = {
+            "text": "📝 텍스트",
+            "image": "🖼️ 이미지",
+            "link": "🔗 링크",
+            "code": "💻 코드",
+            "color": "🎨 색상",
+            "file": "📁 파일",
+            "all": "전체",
+        }
+        if parsed.type:
+            filter_type = type_map.get(parsed.type, filter_type)
+
+        if parsed.is_pinned:
+            filter_type = "📌 고정"
+        if parsed.is_bookmark:
+            filter_type = "⭐ 북마크"
+            bookmarked = True
+
+        if parsed.col:
+            try:
+                wanted = parsed.col.casefold()
+                for cid, cname, cicon, ccolor, _ in self.db.get_collections():
+                    if (cname or "").casefold() == wanted:
+                        collection_id = cid
+                        break
+            except Exception:
+                collection_id = None
+
+        if parsed.limit:
+            limit = int(parsed.limit)
 
         # 1. DB 조회 (FTS-backed unified search if available)
         if hasattr(self.db, "search_items"):
@@ -5716,6 +6021,8 @@ class MainWindow(QMainWindow):
                 type_filter=filter_type,
                 tag_filter=tag_filter,
                 bookmarked=bookmarked,
+                collection_id=collection_id,
+                limit=limit,
             )
         else:
             if tag_filter:
@@ -5774,6 +6081,13 @@ class MainWindow(QMainWindow):
         """테이블 행 생성"""
         today = datetime.date.today()
         yesterday = today - datetime.timedelta(days=1)
+
+        expiry_map = {}
+        try:
+            if hasattr(self.db, "get_expires_at_map"):
+                expiry_map = self.db.get_expires_at_map([row[0] for row in items])
+        except Exception:
+            expiry_map = {}
         
         for row_idx, item_data in enumerate(items):
             pid, content, ptype, timestamp, pinned, use_count, pin_order = item_data
@@ -5797,12 +6111,18 @@ class MainWindow(QMainWindow):
             # 3. 내용
             display = content.replace('\n', ' ').strip()
             if len(display) > 45: display = display[:45] + "..."
+            expires_at = expiry_map.get(pid)
+            if expires_at:
+                display = "⏱️ " + display
             content_item = QTableWidgetItem(display)
             
             if ptype == "IMAGE":
                 content_item.setToolTip("🖼️ 이미지 항목 - 더블클릭으로 미리보기")
             else:
-                content_item.setToolTip(content[:500] if len(content) > 500 else content)
+                tip = content[:500] if len(content) > 500 else content
+                if expires_at:
+                    tip = f"{tip}\n\n⏱️ 만료: {expires_at}"
+                content_item.setToolTip(tip)
                 
             if ptype == "LINK": content_item.setForeground(QColor(theme["secondary"]))
             elif ptype == "CODE": content_item.setForeground(QColor(theme["success"]))
@@ -5966,7 +6286,20 @@ class MainWindow(QMainWindow):
         if data:
             content, blob, ptype = data
             self.is_internal_copy = True
-            if ptype == "IMAGE" and blob:
+            if ptype == "FILE":
+                paths = []
+                try:
+                    paths = self.db.get_file_paths(pid)
+                except Exception:
+                    paths = []
+                if paths:
+                    mime = QMimeData()
+                    mime.setUrls([QUrl.fromLocalFile(p) for p in paths])
+                    mime.setText("\n".join(paths))
+                    self.clipboard.setMimeData(mime)
+                else:
+                    self.clipboard.setText(content)
+            elif ptype == "IMAGE" and blob:
                 pixmap = QPixmap()
                 pixmap.loadFromData(blob)
                 self.clipboard.setPixmap(pixmap)
@@ -6089,6 +6422,64 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("🚫 컬렉션에서 제거됨", 2000)
             self.load_data()
 
+    def _bulk_move_to_collection(self, collection_id):
+        ids = self.get_selected_ids()
+        if not ids:
+            return
+        try:
+            self.db.set_collection_many(ids, collection_id)
+        except Exception:
+            for pid in ids:
+                try:
+                    self.db.move_to_collection(pid, collection_id)
+                except Exception:
+                    pass
+        self.load_data()
+        self.update_status_bar()
+
+    def _set_item_expiry(self, item_id: int, minutes: int):
+        try:
+            dt = (datetime.datetime.now() + datetime.timedelta(minutes=int(minutes))).strftime("%Y-%m-%d %H:%M:%S")
+            self.db.set_expires_at(int(item_id), dt)
+            self.statusBar().showMessage("⏱️ 만료 시간이 설정되었습니다.", 2000)
+            self.load_data()
+        except Exception as e:
+            logger.debug(f"Set expiry failed: {e}")
+
+    def edit_item_content(self):
+        pid = self.get_selected_id()
+        if not pid:
+            return
+        data = self.db.get_content(pid)
+        if not data:
+            return
+        content, blob, ptype = data
+        if ptype in ["IMAGE", "FILE"]:
+            return
+
+        dialog = EditItemDialog(self, content or "")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_text = dialog.get_text()
+        if new_text is None:
+            return
+        new_text = new_text.rstrip("\n")
+        if not new_text.strip():
+            return
+
+        new_type = None
+        if dialog.should_retype():
+            try:
+                new_type = self.analyze_text(new_text.strip())
+            except Exception:
+                new_type = None
+
+        self.db.update_item_content(pid, new_text, type_tag=new_type)
+        self.statusBar().showMessage("✏️ 항목이 수정되었습니다.", 2000)
+        self.load_data()
+        self.on_selection_changed()
+
     def open_link(self):
         text = self.detail_text.toPlainText()
         if text: webbrowser.open(text)
@@ -6107,6 +6498,18 @@ class MainWindow(QMainWindow):
     def get_selected_id(self):
         rows = self.table.selectionModel().selectedRows()
         return self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole) if rows else None
+
+    def get_selected_ids(self) -> list[int]:
+        rows = self.table.selectionModel().selectedRows()
+        ids: list[int] = []
+        for r in rows:
+            try:
+                pid = self.table.item(r.row(), 0).data(Qt.ItemDataRole.UserRole)
+            except Exception:
+                pid = None
+            if pid:
+                ids.append(int(pid))
+        return ids
 
     def show_context_menu(self, pos):
         item = self.table.itemAt(pos)
@@ -6148,6 +6551,34 @@ class MainWindow(QMainWindow):
                 search_action.triggered.connect(lambda: webbrowser.open(f"https://www.google.com/search?q={url}"))
                 
                 menu.addSeparator()
+
+            if data and data[2] == "FILE":
+                paths = []
+                try:
+                    paths = self.db.get_file_paths(pid)
+                except Exception:
+                    paths = []
+
+                file_menu = menu.addMenu("📁 파일")
+                copy_paths = file_menu.addAction("📋 경로만 복사")
+                copy_paths.triggered.connect(lambda: self.clipboard.setText("\n".join(paths)))
+
+                open_folder = file_menu.addAction("📂 폴더 열기")
+
+                def _open_parent():
+                    if not paths:
+                        return
+                    p0 = paths[0]
+                    try:
+                        target = p0
+                        if os.path.isfile(p0):
+                            target = os.path.dirname(p0)
+                        os.startfile(target)
+                    except Exception as e:
+                        logger.debug(f"Open folder failed: {e}")
+
+                open_folder.triggered.connect(_open_parent)
+                menu.addSeparator()
         
         pin_action = menu.addAction("📌 고정/해제")
         pin_action.triggered.connect(self.toggle_pin)
@@ -6181,8 +6612,137 @@ class MainWindow(QMainWindow):
         # 다중 선택 시 병합 옵션
         selected_count = len(self.table.selectionModel().selectedRows())
         if selected_count >= 2:
+            bulk_menu = menu.addMenu("🧰 일괄 작업")
+
+            # Tags
+            tag_add = bulk_menu.addAction("🏷️ 태그 추가...")
+            tag_remove = bulk_menu.addAction("🏷️ 태그 제거...")
+
+            def _parse_tags(text: str) -> list[str]:
+                raw = (text or "").replace("，", ",")
+                return [t.strip() for t in raw.split(",") if t.strip()]
+
+            def _bulk_add_tags():
+                ids = self.get_selected_ids()
+                if not ids:
+                    return
+                text, ok = QInputDialog.getText(self, "🏷️ 태그 추가", "추가할 태그(쉼표로 구분):")
+                if not ok:
+                    return
+                add_tags = _parse_tags(text)
+                if not add_tags:
+                    return
+                for pid2 in ids:
+                    cur = self.db.get_item_tags(pid2) or ""
+                    existing = [t.strip() for t in cur.replace("，", ",").split(",") if t.strip()]
+                    seen = set(existing)
+                    for t in add_tags:
+                        if t not in seen:
+                            existing.append(t)
+                            seen.add(t)
+                    self.db.set_item_tags(pid2, ", ".join(existing))
+                self.load_data()
+                self.update_status_bar()
+
+            def _bulk_remove_tags():
+                ids = self.get_selected_ids()
+                if not ids:
+                    return
+                text, ok = QInputDialog.getText(self, "🏷️ 태그 제거", "제거할 태그(쉼표로 구분):")
+                if not ok:
+                    return
+                remove_tags = set(_parse_tags(text))
+                if not remove_tags:
+                    return
+                for pid2 in ids:
+                    cur = self.db.get_item_tags(pid2) or ""
+                    existing = [t.strip() for t in cur.replace("，", ",").split(",") if t.strip()]
+                    kept = [t for t in existing if t not in remove_tags]
+                    self.db.set_item_tags(pid2, ", ".join(kept))
+                self.load_data()
+                self.update_status_bar()
+
+            tag_add.triggered.connect(_bulk_add_tags)
+            tag_remove.triggered.connect(_bulk_remove_tags)
+
+            bulk_menu.addSeparator()
+
+            # Bookmark
+            bm_on = bulk_menu.addAction("⭐ 북마크 켜기")
+            bm_off = bulk_menu.addAction("⭐ 북마크 끄기")
+            bm_toggle = bulk_menu.addAction("⭐ 북마크 토글")
+
+            def _bulk_set_bm(value: int):
+                ids = self.get_selected_ids()
+                if not ids:
+                    return
+                try:
+                    self.db.set_bookmarks(ids, value)
+                except Exception:
+                    for pid2 in ids:
+                        if value:
+                            self.db.toggle_bookmark(pid2) if getattr(self.db, "toggle_bookmark", None) else None
+                        else:
+                            # best-effort: toggle until off is hard; ignore in fallback
+                            self.db.toggle_bookmark(pid2) if getattr(self.db, "toggle_bookmark", None) else None
+                self.load_data()
+                self.update_status_bar()
+
+            def _bulk_toggle_bm():
+                ids = self.get_selected_ids()
+                if not ids:
+                    return
+                placeholders = ",".join(["?"] * len(ids))
+                with self.db.lock:
+                    cur = self.db.conn.cursor()
+                    cur.execute(f"SELECT id, bookmark FROM history WHERE id IN ({placeholders})", ids)
+                    rows = cur.fetchall()
+                to_on = [int(i) for (i, b) in rows if not b]
+                to_off = [int(i) for (i, b) in rows if b]
+                if to_on:
+                    self.db.set_bookmarks(to_on, 1)
+                if to_off:
+                    self.db.set_bookmarks(to_off, 0)
+                self.load_data()
+                self.update_status_bar()
+
+            bm_on.triggered.connect(lambda: _bulk_set_bm(1))
+            bm_off.triggered.connect(lambda: _bulk_set_bm(0))
+            bm_toggle.triggered.connect(_bulk_toggle_bm)
+
+            bulk_menu.addSeparator()
+
+            # Collections
+            bulk_col_menu = bulk_menu.addMenu("📁 컬렉션으로 이동")
+            collections2 = self.db.get_collections()
+            if collections2:
+                for cid, cname, cicon, ccolor, _ in collections2:
+                    c_action = bulk_col_menu.addAction(f"{cicon} {cname}")
+                    c_action.triggered.connect(lambda checked, col_id=cid: self._bulk_move_to_collection(col_id))
+                bulk_col_menu.addSeparator()
+            remove_col2 = bulk_col_menu.addAction("🚫 컬렉션에서 제거")
+            remove_col2.triggered.connect(lambda: self._bulk_move_to_collection(None))
+
+            menu.addSeparator()
             merge_action = menu.addAction(f"🔗 {selected_count}개 병합")
             merge_action.triggered.connect(self.merge_selected)
+            menu.addSeparator()
+
+        # v11: single-item actions
+        if pid:
+            data = self.db.get_content(pid)
+            if data and data[2] not in ["IMAGE", "FILE"]:
+                edit_action = menu.addAction("✏️ 내용 편집...")
+                edit_action.triggered.connect(self.edit_item_content)
+                menu.addSeparator()
+
+            expiry_menu = menu.addMenu("⏱️ 만료 설정")
+            expiry_menu.addAction("30분").triggered.connect(lambda: self._set_item_expiry(pid, minutes=30))
+            expiry_menu.addAction("1시간").triggered.connect(lambda: self._set_item_expiry(pid, minutes=60))
+            expiry_menu.addAction("1일").triggered.connect(lambda: self._set_item_expiry(pid, minutes=60 * 24))
+            expiry_menu.addAction("7일").triggered.connect(lambda: self._set_item_expiry(pid, minutes=60 * 24 * 7))
+            clear_exp = menu.addAction("⏱️ 만료 해제")
+            clear_exp.triggered.connect(lambda: self.db.set_expires_at(pid, None))
             menu.addSeparator()
         
         delete_action = menu.addAction("🗑️ 삭제 (휴지통)")

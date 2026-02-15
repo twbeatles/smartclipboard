@@ -77,6 +77,9 @@ HIDDEN_IMPORTS = [
     "smartclipboard_app.ui.controllers.lifecycle_controller",
     "smartclipboard_app.managers.secure_vault",
     "smartclipboard_app.managers.export_import",
+    # v11 batch features (legacy payload imports these dynamically)
+    "smartclipboard_core.search_query",
+    "smartclipboard_core.backup_zip",
     "cryptography", "cryptography.fernet",
     "cryptography.hazmat.primitives.kdf.pbkdf2",
     "requests", "bs4", "qrcode", "PIL", "PIL.ImageQt",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+import json
 import sqlite3
 import threading
 from typing import Optional
@@ -30,6 +31,7 @@ FILTER_TAG_MAP = {
     "🔗 링크": "LINK",
     "💻 코드": "CODE",
     "🎨 색상": "COLOR",
+    "📁 파일": "FILE",
 }
 
 logger = logging.getLogger(__name__)
@@ -492,6 +494,101 @@ class ClipboardDB:
                 return True
             except sqlite3.Error as e:
                 logger.error(f"Pin order update failed: {e}")
+                self.conn.rollback()
+                return False
+
+    def add_file_item(self, paths: list[str]) -> int | bool:
+        """Add a FILE history item from local file paths.
+
+        We store:
+          - content: newline-joined paths (search/display)
+          - file_path: JSON list for structured retrieval
+        """
+        paths = [p for p in (paths or []) if p]
+        if not paths:
+            return False
+
+        file_path_json = json.dumps(paths, ensure_ascii=False)
+        content = "\n".join(paths)
+
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id FROM history WHERE type = 'FILE' AND file_path = ? AND pinned = 0", (file_path_json,))
+                existing = cursor.fetchone()
+                if existing:
+                    cursor.execute("DELETE FROM history WHERE id = ?", (existing[0],))
+
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute(
+                    "INSERT INTO history (content, image_data, type, timestamp, file_path) VALUES (?, ?, ?, ?, ?)",
+                    (content, None, "FILE", timestamp, file_path_json),
+                )
+                self.conn.commit()
+
+                self.add_count += 1
+                if self.add_count >= CLEANUP_INTERVAL:
+                    self.cleanup()
+                    self.add_count = 0
+                return cursor.lastrowid
+            except sqlite3.Error:
+                logger.exception("DB Add FILE Error")
+                self.conn.rollback()
+                return False
+
+    def get_file_paths(self, item_id: int) -> list[str]:
+        """Return structured file paths for a FILE item."""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT file_path FROM history WHERE id=?", (item_id,))
+                row = cursor.fetchone()
+                if not row or not row[0]:
+                    return []
+                raw = row[0]
+                try:
+                    data = json.loads(raw)
+                    if isinstance(data, list):
+                        return [str(x) for x in data if x]
+                except Exception:
+                    pass
+                # Backward compatibility: treat as newline-joined text.
+                return [p for p in str(raw).splitlines() if p.strip()]
+            except sqlite3.Error as e:
+                logger.error(f"DB Get file paths Error: {e}")
+                return []
+
+    def update_item_content(
+        self,
+        item_id: int,
+        content: str,
+        type_tag: str | None = None,
+        file_paths: list[str] | None = None,
+    ) -> bool:
+        """Update an existing item in-place (timestamp preserved)."""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                if file_paths is not None:
+                    file_path_json = json.dumps([p for p in file_paths if p], ensure_ascii=False)
+                    content = "\n".join([p for p in file_paths if p]) if type_tag == "FILE" else content
+                    if type_tag is None:
+                        cursor.execute("UPDATE history SET content = ?, file_path = ? WHERE id = ?", (content, file_path_json, item_id))
+                    else:
+                        cursor.execute(
+                            "UPDATE history SET content = ?, type = ?, file_path = ? WHERE id = ?",
+                            (content, type_tag, file_path_json, item_id),
+                        )
+                else:
+                    if type_tag is None:
+                        cursor.execute("UPDATE history SET content = ? WHERE id = ?", (content, item_id))
+                    else:
+                        cursor.execute("UPDATE history SET content = ?, type = ? WHERE id = ?", (content, type_tag, item_id))
+
+                self.conn.commit()
+                return True
+            except sqlite3.Error:
+                logger.exception("DB Update content Error")
                 self.conn.rollback()
                 return False
 
@@ -1241,6 +1338,80 @@ class ClipboardDB:
             except sqlite3.Error as e:
                 logger.error(f"Add Temp Item Error: {e}")
                 return None
+
+    def set_expires_at(self, item_id: int, expires_at: str | None) -> bool:
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE history SET expires_at = ? WHERE id = ?", (expires_at, item_id))
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Set expires_at Error: {e}")
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                return False
+
+    def get_expires_at_map(self, item_ids: list[int]) -> dict[int, str]:
+        ids = [int(x) for x in (item_ids or []) if x is not None]
+        if not ids:
+            return {}
+        placeholders = ",".join(["?"] * len(ids))
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(f"SELECT id, expires_at FROM history WHERE id IN ({placeholders})", ids)
+                out: dict[int, str] = {}
+                for iid, exp in cursor.fetchall():
+                    if exp:
+                        out[int(iid)] = str(exp)
+                return out
+            except sqlite3.Error as e:
+                logger.debug(f"Get expires_at map Error: {e}")
+                return {}
+
+    def set_bookmarks(self, item_ids: list[int], value: int) -> int:
+        ids = [int(x) for x in (item_ids or []) if x is not None]
+        if not ids:
+            return 0
+        placeholders = ",".join(["?"] * len(ids))
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(f"UPDATE history SET bookmark = ? WHERE id IN ({placeholders})", [int(value)] + ids)
+                self.conn.commit()
+                return cursor.rowcount or 0
+            except sqlite3.Error as e:
+                logger.error(f"Set bookmarks Error: {e}")
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                return 0
+
+    def set_collection_many(self, item_ids: list[int], collection_id: int | None) -> int:
+        ids = [int(x) for x in (item_ids or []) if x is not None]
+        if not ids:
+            return 0
+        placeholders = ",".join(["?"] * len(ids))
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    f"UPDATE history SET collection_id = ? WHERE id IN ({placeholders})",
+                    [collection_id] + ids,
+                )
+                self.conn.commit()
+                return cursor.rowcount or 0
+            except sqlite3.Error as e:
+                logger.error(f"Set collection many Error: {e}")
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                return 0
     
     def cleanup_expired_items(self):
         """만료된 임시 항목 삭제"""
