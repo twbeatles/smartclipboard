@@ -47,6 +47,8 @@ class ClipboardDB:
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.lock = threading.RLock()
         self.add_count = 0  # v10.0: cleanup 최적화를 위한 카운터
+        self.maintenance_count = 0  # low-cost periodic maintenance counter
+        self._fts_recovery_attempted = False
         self.create_tables()
 
     def create_tables(self):
@@ -185,14 +187,8 @@ class ClipboardDB:
             except sqlite3.OperationalError:
                 pass
             
-            # v10.1: 자주 사용되는 컬럼에 인덱스 추가 (쿼리 성능 최적화)
-            try:
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_pinned ON history(pinned)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_type ON history(type)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_bookmark ON history(bookmark)")
-            except sqlite3.OperationalError as e:
-                logger.debug(f"Index creation skipped: {e}")
+            # v10.1+: 런타임 인덱스 보장 (멱등)
+            self.ensure_runtime_indexes()
             
             self.conn.commit()
             logger.info("DB 테이블 초기화 완료 (v10.1)")
@@ -204,6 +200,38 @@ class ClipboardDB:
             logger.error(f"DB Init Error: {e}")
         except Exception as e:
             logger.error(f"DB Init Error (search index): {e}")
+
+    def ensure_runtime_indexes(self) -> bool:
+        """Ensure query-critical indexes exist (idempotent)."""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_pinned ON history(pinned)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_type ON history(type)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_bookmark ON history(bookmark)")
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_history_sort ON history(pinned DESC, pin_order ASC, id DESC)"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_history_collection_sort ON history(collection_id, pinned DESC, pin_order ASC, id DESC)"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_history_content_unpinned ON history(content) WHERE pinned = 0"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_history_file_path_unpinned ON history(file_path) "
+                    "WHERE type='FILE' AND pinned=0"
+                )
+                self.conn.commit()
+                return True
+            except sqlite3.OperationalError as e:
+                logger.debug(f"Index creation skipped: {e}")
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                return False
 
     def ensure_search_index(self) -> bool:
         """Ensure FTS5 table + triggers exist and are populated.
@@ -254,9 +282,16 @@ class ClipboardDB:
                     """
                 )
 
-                # Populate index (or refresh if we just created it).
+                # Populate index for existing rows on first creation.
                 if not exists:
-                    cursor.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
+                    cursor.execute("DELETE FROM history_fts")
+                    cursor.execute(
+                        """
+                        INSERT INTO history_fts(rowid, content, tags, note, url_title)
+                        SELECT id, COALESCE(content, ''), COALESCE(tags, ''), COALESCE(note, ''), COALESCE(url_title, '')
+                        FROM history
+                        """
+                    )
 
                 self.conn.commit()
                 return True
@@ -275,6 +310,20 @@ class ClipboardDB:
                 except Exception:
                     pass
                 return False
+
+    def maybe_recover_fts(self) -> bool:
+        """Try to recover missing/broken FTS index at most once per session."""
+        if self._fts_recovery_attempted:
+            return False
+        self._fts_recovery_attempted = True
+        try:
+            ok = self.ensure_search_index()
+            if ok:
+                logger.info("FTS recovery succeeded")
+            return ok
+        except Exception:
+            logger.exception("FTS recovery failed")
+            return False
 
     @staticmethod
     def _tokenize_search_query(query: str) -> list[str]:
@@ -327,11 +376,31 @@ class ClipboardDB:
                 return self.get_bookmarked_items()
             if collection_id is not None:
                 return self.get_items_by_collection(collection_id)
-            return self.get_items("", type_filter)
+            return self.get_items("", type_filter, limit=limit)
 
         # Prefer FTS if initialized.
         match_expr = self._build_fts_match(q)
+        has_fts = False
         if match_expr:
+            with self.lock:
+                try:
+                    cursor = self.conn.cursor()
+                    cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_fts'")
+                    has_fts = cursor.fetchone() is not None
+                except sqlite3.Error as e:
+                    self._last_search_error = str(e)
+            if not has_fts:
+                self._last_search_fallback = True
+                self._last_search_error = self._last_search_error or "history_fts missing"
+                if self.maybe_recover_fts():
+                    with self.lock:
+                        try:
+                            cursor = self.conn.cursor()
+                            cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_fts'")
+                            has_fts = cursor.fetchone() is not None
+                        except sqlite3.Error as e:
+                            self._last_search_error = str(e)
+        if match_expr and has_fts:
             with self.lock:
                 try:
                     cursor = self.conn.cursor()
@@ -382,6 +451,8 @@ class ClipboardDB:
                     self._last_search_fallback = True
                     self._last_search_error = str(e)
                     logger.debug(f"FTS search failed, falling back to LIKE: {e}")
+                    if "no such table" in str(e).lower():
+                        self.maybe_recover_fts()
 
         # Fallback: LIKE across key fields.
         with self.lock:
@@ -452,7 +523,7 @@ class ClipboardDB:
                 self.conn.rollback()
                 return False
 
-    def get_items(self, search_query: str = "", type_filter: str = "전체") -> list:
+    def get_items(self, search_query: str = "", type_filter: str = "전체", limit: int | None = None) -> list:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
@@ -478,6 +549,9 @@ class ClipboardDB:
                         params.append(legacy_map[type_filter])
 
                 sql += " ORDER BY pinned DESC, pin_order ASC, id DESC"
+                if limit is not None:
+                    sql += " LIMIT ?"
+                    params.append(int(limit))
                 cursor.execute(sql, params)
                 return cursor.fetchall()
             except sqlite3.Error as e:
@@ -837,12 +911,14 @@ class ClipboardDB:
                 else:
                     self.conn.commit()
 
-                # v10.6: 주기적 VACUUM 실행 (50회 cleanup 마다)
-                self.add_count += 1
-                if self.add_count >= 50:
-                    self.add_count = 0
-                    self.conn.execute("VACUUM")
-                    logger.info("Database VACUUM completed")
+                # Low-cost periodic maintenance instead of blocking VACUUM.
+                self.maintenance_count += 1
+                if self.maintenance_count >= 50:
+                    self.maintenance_count = 0
+                    try:
+                        cursor.execute("PRAGMA optimize")
+                    except sqlite3.Error as optimize_err:
+                        logger.debug(f"PRAGMA optimize skipped: {optimize_err}")
             except sqlite3.Error as e:
                 logger.error(f"DB Cleanup Error: {e}")
 

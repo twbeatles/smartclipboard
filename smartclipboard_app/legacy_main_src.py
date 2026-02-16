@@ -71,7 +71,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer,
     QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent,
-    QObject, QRunnable, QThreadPool, pyqtSlot, QUrl, QMimeData
+    QObject, QSignalBlocker, QRunnable, QThreadPool, pyqtSlot, QUrl, QMimeData
 )
 from PyQt6.QtGui import (
     QColor, QFont, QIcon, QAction, QPixmap, QImage,
@@ -323,6 +323,8 @@ class ClipboardDB:
         # Some operations call other DB methods; use a re-entrant lock to avoid deadlocks.
         self.lock = threading.RLock()
         self.add_count = 0  # v10.0: cleanup 최적화를 위한 카운터
+        self.maintenance_count = 0  # low-cost periodic maintenance counter
+        self._fts_recovery_attempted = False
         self.create_tables()
 
     def create_tables(self):
@@ -461,14 +463,8 @@ class ClipboardDB:
             except sqlite3.OperationalError:
                 pass
             
-            # v10.1: 자주 사용되는 컬럼에 인덱스 추가 (쿼리 성능 최적화)
-            try:
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_pinned ON history(pinned)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_type ON history(type)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_bookmark ON history(bookmark)")
-            except sqlite3.OperationalError as e:
-                logger.debug(f"Index creation skipped: {e}")
+            # v10.1+: 런타임 인덱스 보장 (멱등)
+            self.ensure_runtime_indexes()
             
             self.conn.commit()
             logger.info("DB 테이블 초기화 완료 (v10.1)")
@@ -479,6 +475,38 @@ class ClipboardDB:
             logger.error(f"DB Init Error: {e}")
         except Exception as e:
             logger.error(f"DB Init Error (search index): {e}")
+
+    def ensure_runtime_indexes(self):
+        """Ensure query-critical indexes exist (idempotent)."""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_pinned ON history(pinned)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_type ON history(type)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_bookmark ON history(bookmark)")
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_history_sort ON history(pinned DESC, pin_order ASC, id DESC)"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_history_collection_sort ON history(collection_id, pinned DESC, pin_order ASC, id DESC)"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_history_content_unpinned ON history(content) WHERE pinned = 0"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_history_file_path_unpinned ON history(file_path) "
+                    "WHERE type='FILE' AND pinned=0"
+                )
+                self.conn.commit()
+                return True
+            except sqlite3.OperationalError as e:
+                logger.debug(f"Index creation skipped: {e}")
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                return False
 
     def ensure_search_index(self):
         """Ensure FTS5 table + triggers exist and are populated.
@@ -528,7 +556,14 @@ class ClipboardDB:
                 )
 
                 if not exists:
-                    cursor.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
+                    cursor.execute("DELETE FROM history_fts")
+                    cursor.execute(
+                        """
+                        INSERT INTO history_fts(rowid, content, tags, note, url_title)
+                        SELECT id, COALESCE(content, ''), COALESCE(tags, ''), COALESCE(note, ''), COALESCE(url_title, '')
+                        FROM history
+                        """
+                    )
 
                 self.conn.commit()
                 return True
@@ -546,6 +581,20 @@ class ClipboardDB:
                 except Exception:
                     pass
                 return False
+
+    def maybe_recover_fts(self):
+        """Try to recover missing/broken FTS index at most once per session."""
+        if self._fts_recovery_attempted:
+            return False
+        self._fts_recovery_attempted = True
+        try:
+            ok = self.ensure_search_index()
+            if ok:
+                logger.info("FTS recovery succeeded")
+            return ok
+        except Exception:
+            logger.exception("FTS recovery failed")
+            return False
 
     @staticmethod
     def _tokenize_search_query(query: str):
@@ -580,10 +629,31 @@ class ClipboardDB:
                 return self.get_bookmarked_items()
             if collection_id is not None:
                 return self.get_items_by_collection(collection_id)
-            return self.get_items("", type_filter)
+            return self.get_items("", type_filter, limit=limit)
 
         match_expr = self._build_fts_match(q)
+        has_fts = False
         if match_expr:
+            with self.lock:
+                try:
+                    cursor = self.conn.cursor()
+                    cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_fts'")
+                    has_fts = cursor.fetchone() is not None
+                except sqlite3.Error as e:
+                    self._last_search_error = str(e)
+            if not has_fts:
+                self._last_search_fallback = True
+                self._last_search_error = self._last_search_error or "history_fts missing"
+                if self.maybe_recover_fts():
+                    with self.lock:
+                        try:
+                            cursor = self.conn.cursor()
+                            cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_fts'")
+                            has_fts = cursor.fetchone() is not None
+                        except sqlite3.Error as e:
+                            self._last_search_error = str(e)
+
+        if match_expr and has_fts:
             with self.lock:
                 try:
                     cursor = self.conn.cursor()
@@ -629,6 +699,8 @@ class ClipboardDB:
                     self._last_search_fallback = True
                     self._last_search_error = str(e)
                     logger.debug(f"FTS search failed, falling back to LIKE: {e}")
+                    if "no such table" in str(e).lower():
+                        self.maybe_recover_fts()
 
         with self.lock:
             cursor = self.conn.cursor()
@@ -791,7 +863,7 @@ class ClipboardDB:
                 self.conn.rollback()
                 return False
 
-    def get_items(self, search_query: str = "", type_filter: str = "전체") -> list:
+    def get_items(self, search_query: str = "", type_filter: str = "전체", limit: int | None = None) -> list:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
@@ -817,6 +889,9 @@ class ClipboardDB:
                         params.append(legacy_map[type_filter])
 
                 sql += " ORDER BY pinned DESC, pin_order ASC, id DESC"
+                if limit is not None:
+                    sql += " LIMIT ?"
+                    params.append(int(limit))
                 cursor.execute(sql, params)
                 return cursor.fetchall()
             except sqlite3.Error as e:
@@ -1012,44 +1087,49 @@ class ClipboardDB:
 
     def cleanup(self):
         """오래된 항목 정리 - 이미지 제한 및 전체 제한 적용"""
-        try:
-            cursor = self.conn.cursor()
-            
-            # v10.5: 이미지 항목 별도 제한 (최대 20개)
-            MAX_IMAGE_HISTORY = 20
-            cursor.execute("SELECT COUNT(*) FROM history WHERE type='IMAGE' AND pinned=0")
-            img_count = cursor.fetchone()[0]
-            if img_count > MAX_IMAGE_HISTORY:
-                diff = img_count - MAX_IMAGE_HISTORY
-                # 오래된 이미지 삭제
-                cursor.execute(f"DELETE FROM history WHERE id IN (SELECT id FROM history WHERE type='IMAGE' AND pinned=0 ORDER BY id ASC LIMIT {diff})")
-                logger.info(f"오래된 이미지 {diff}개 정리됨")
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
 
-            # 전체 히스토리 제한
-            cursor.execute("SELECT COUNT(*) FROM history WHERE pinned = 0")
-            result = cursor.fetchone()
-            if not result:
-                self.conn.commit()
-                return
-            
-            count = result[0]
-            if count > MAX_HISTORY:
-                diff = count - MAX_HISTORY
-                cursor.execute(f"DELETE FROM history WHERE id IN (SELECT id FROM history WHERE pinned = 0 ORDER BY id ASC LIMIT {diff})")
-                self.conn.commit()
-                logger.info(f"오래된 항목 {diff}개 정리")
-            else:
-                self.conn.commit()
-            
-            # v10.6: 주기적 VACUUM 실행 (50회 cleanup 마다)
-            self.add_count += 1
-            if self.add_count >= 50:
-                self.add_count = 0
-                self.conn.execute("VACUUM")
-                logger.info("Database VACUUM completed")
-                
-        except sqlite3.Error as e:
-            logger.error(f"DB Cleanup Error: {e}")
+                # v10.5: 이미지 항목 별도 제한 (최대 20개)
+                max_image_history = 20
+                cursor.execute("SELECT COUNT(*) FROM history WHERE type='IMAGE' AND pinned=0")
+                img_count = cursor.fetchone()[0]
+                if img_count > max_image_history:
+                    diff = img_count - max_image_history
+                    cursor.execute(
+                        f"DELETE FROM history WHERE id IN (SELECT id FROM history WHERE type='IMAGE' AND pinned=0 ORDER BY id ASC LIMIT {diff})"
+                    )
+                    logger.info(f"오래된 이미지 {diff}개 정리됨")
+
+                # 전체 히스토리 제한
+                cursor.execute("SELECT COUNT(*) FROM history WHERE pinned = 0")
+                result = cursor.fetchone()
+                if not result:
+                    self.conn.commit()
+                    return
+
+                count = result[0]
+                if count > MAX_HISTORY:
+                    diff = count - MAX_HISTORY
+                    cursor.execute(
+                        f"DELETE FROM history WHERE id IN (SELECT id FROM history WHERE pinned = 0 ORDER BY id ASC LIMIT {diff})"
+                    )
+                    self.conn.commit()
+                    logger.info(f"오래된 항목 {diff}개 정리")
+                else:
+                    self.conn.commit()
+
+                # Low-cost periodic maintenance instead of blocking VACUUM.
+                self.maintenance_count += 1
+                if self.maintenance_count >= 50:
+                    self.maintenance_count = 0
+                    try:
+                        cursor.execute("PRAGMA optimize")
+                    except sqlite3.Error as optimize_err:
+                        logger.debug(f"PRAGMA optimize skipped: {optimize_err}")
+            except sqlite3.Error as e:
+                logger.error(f"DB Cleanup Error: {e}")
 
     def backup_db(self, target_path=None, force: bool = False):
         """WAL-safe online backup. If target_path is None, performs daily backup."""
@@ -3824,9 +3904,17 @@ class MainWindow(QMainWindow):
             # v10.0: 복사 규칙 캐싱 (성능 최적화)
             self._rules_cache = None
             self._rules_cache_dirty = True
+            self._rules_invalid_logged = set()
             
-            # v10.3: 클립보드 디바운스 타이머 (중복 호출 방지)
-            self._clipboard_debounce_timer = None
+            # v10.8: 타이머/백그라운드 작업 상태
+            self._clipboard_debounce_timer = QTimer(self)
+            self._clipboard_debounce_timer.setSingleShot(True)
+            self._clipboard_debounce_timer.timeout.connect(self.process_clipboard)
+            self._load_data_timer = QTimer(self)
+            self._load_data_timer.setSingleShot(True)
+            self._load_data_timer.timeout.connect(self._flush_requested_load_data)
+            self._pending_reload_reason = ""
+            self._maintenance_running = False
             
             self.apply_theme()
             self.init_menu()
@@ -3849,7 +3937,7 @@ class MainWindow(QMainWindow):
             
             # v10.4: Lazy loading - started minimized면 로드 지연
             if not self.start_minimized:
-                self.load_data()
+                self.request_load_data("startup", delay_ms=0)
             
             self.update_status_bar()
             
@@ -3863,8 +3951,8 @@ class MainWindow(QMainWindow):
             self.cleanup_timer.timeout.connect(self.run_periodic_cleanup)
             self.cleanup_timer.start(3600000)  # 1시간 = 3600000ms
             
-            # v10.5: 시작 시 백업 실행
-            QTimer.singleShot(3000, self.db.backup_db)
+            # v10.8: 시작 시 유지보수 작업을 백그라운드로 실행
+            QTimer.singleShot(3000, lambda: self._run_maintenance_async("startup_backup", include_backup=True, refresh_ui=False))
             
             # v10.2: 등록된 핫키 추적 (안전한 해제를 위해)
             self._registered_hotkeys = []
@@ -3947,7 +4035,7 @@ class MainWindow(QMainWindow):
     def _paste_last_item_slot(self):
         """마지막 항목 즉시 붙여넣기 (메인 스레드에서 실행되는 슬롯)"""
         try:
-            items = self.db.get_items("", "전체")
+            items = self.db.get_items("", "전체", limit=1)
             if items:
                 pid, content, ptype, *_ = items[0]
                 data = self.db.get_content(pid)
@@ -3969,25 +4057,70 @@ class MainWindow(QMainWindow):
         """보관함 자동 잠금 체크"""
         if self.vault_manager.check_timeout():
             logger.info("Vault auto-locked due to inactivity")
+
+    def request_load_data(self, reason: str = "", delay_ms: int = 30):
+        """Coalesce frequent load requests to keep UI responsive."""
+        self._pending_reload_reason = reason or self._pending_reload_reason
+        if delay_ms <= 0:
+            if self._load_data_timer.isActive():
+                self._load_data_timer.stop()
+            self._flush_requested_load_data()
+            return
+        self._load_data_timer.start(max(1, int(delay_ms)))
+
+    def _flush_requested_load_data(self):
+        reason = self._pending_reload_reason
+        self._pending_reload_reason = ""
+        if reason:
+            logger.debug(f"load_data requested: reason={reason}")
+        self.load_data()
+
+    def _run_maintenance_job(self, include_backup: bool = False):
+        started = time.perf_counter()
+        backup_ok = None
+        if include_backup:
+            backup_ok = self.db.backup_db()
+        expired_count = self.db.cleanup_expired_items()
+        self.db.cleanup_expired_trash()
+        self.db.cleanup()
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        return {"expired_count": int(expired_count or 0), "backup_ok": backup_ok, "elapsed_ms": elapsed_ms}
+
+    def _on_maintenance_result(self, reason: str, result: dict, refresh_ui: bool):
+        expired_count = int((result or {}).get("expired_count") or 0)
+        elapsed_ms = float((result or {}).get("elapsed_ms") or 0.0)
+        logger.debug(f"maintenance_ms={elapsed_ms:.2f} reason={reason} expired={expired_count}")
+        if expired_count > 0:
+            logger.info(f"주기적 정리: 만료 항목 {expired_count}개 삭제됨")
+            if refresh_ui:
+                self.request_load_data("maintenance_expired", delay_ms=30)
+
+    def _on_maintenance_error(self, reason: str, error_tuple):
+        logger.debug(f"Periodic cleanup error: reason={reason}, error={error_tuple}")
+
+    def _run_maintenance_async(self, reason: str, include_backup: bool = False, refresh_ui: bool = True):
+        if self._maintenance_running:
+            logger.debug(f"Maintenance skipped (already running): reason={reason}")
+            return
+        self._maintenance_running = True
+        try:
+            worker = Worker(self._run_maintenance_job, include_backup)
+            worker.signals.result.connect(lambda res, r=reason, ui=refresh_ui: self._on_maintenance_result(r, res, ui))
+            worker.signals.error.connect(lambda err, r=reason: self._on_maintenance_error(r, err))
+            worker.signals.finished.connect(lambda: setattr(self, "_maintenance_running", False))
+            QThreadPool.globalInstance().start(worker)
+        except Exception:
+            self._maintenance_running = False
+            logger.exception(f"Failed to start maintenance worker: reason={reason}")
     
     def run_periodic_cleanup(self):
         """v10.2: 주기적 정리 작업 실행 (만료된 임시 항목 및 휴지통 정리)"""
-        try:
-            expired_count = self.db.cleanup_expired_items()
-            self.db.cleanup_expired_trash()
-            # v10.5: 이미지 캐시 정리
-            # v10.5: 이미지 및 오래된 항목 정리
-            self.db.cleanup()
-            if expired_count > 0:
-                logger.info(f"주기적 정리: 만료 항목 {expired_count}개 삭제됨")
-                self.load_data()  # UI 갱신
-        except Exception as e:
-            logger.debug(f"Periodic cleanup error: {e}")
+        self._run_maintenance_async("periodic_cleanup", include_backup=False, refresh_ui=True)
 
     # v10.4: 화면 표시 시 데이터 갱신 (Lazy Loading)
     def showEvent(self, event):
         if self.is_data_dirty:
-            self.load_data()
+            self.request_load_data("show_event", delay_ms=0)
         super().showEvent(event)
 
     def restore_window_state(self):
@@ -5363,7 +5496,7 @@ class MainWindow(QMainWindow):
                     self.show_toast("🔗 링크 제목 발견", f"{title}")
                     # UI 입력 중이 아닐 때만 데이터 다시 로드
                     if not self.search_input.hasFocus():
-                        self.load_data()
+                        self.request_load_data("action_completed", delay_ms=30)
                     self.clipboard.dataChanged.connect(self.on_clipboard_change)
         except Exception as e:
             logger.error(f"Action Handler Error: {e}")
@@ -5718,16 +5851,10 @@ class MainWindow(QMainWindow):
         if self.is_privacy_mode or self.is_internal_copy:
             self.is_internal_copy = False # 내부 복사 플래그는 한 번 사용 후 초기화
             return
-        
-        # v10.3: 이전 대기 중인 타이머 취소 (중복 호출 방지)
-        if self._clipboard_debounce_timer is not None:
+
+        # v10.8: 타이머 인스턴스 재사용 (중복 생성/삭제 제거)
+        if self._clipboard_debounce_timer.isActive():
             self._clipboard_debounce_timer.stop()
-            self._clipboard_debounce_timer.deleteLater()
-        
-        # 새 타이머 생성
-        self._clipboard_debounce_timer = QTimer(self)
-        self._clipboard_debounce_timer.setSingleShot(True)
-        self._clipboard_debounce_timer.timeout.connect(self.process_clipboard)
         self._clipboard_debounce_timer.start(100)
 
     def process_clipboard(self):
@@ -5775,7 +5902,7 @@ class MainWindow(QMainWindow):
             item_id = self.db.add_file_item(paths)
             if item_id:
                 if self.isVisible():
-                    self.load_data()
+                    self.request_load_data("file_clipboard", delay_ms=30)
                     self.update_status_bar()
                 else:
                     self.is_data_dirty = True
@@ -5815,7 +5942,7 @@ class MainWindow(QMainWindow):
             if self.db.add_item("[이미지 캡처됨]", blob_data, "IMAGE"):
                 # v10.4: UI 업데이트 최적화 (보이는 경우에만)
                 if self.isVisible():
-                    self.load_data()
+                    self.request_load_data("image_clipboard", delay_ms=30)
                     self.update_status_bar()
                 else:
                     self.is_data_dirty = True
@@ -5843,7 +5970,7 @@ class MainWindow(QMainWindow):
                 
                 # v10.4: UI 업데이트 최적화
                 if self.isVisible():
-                    self.load_data()
+                    self.request_load_data("text_clipboard", delay_ms=30)
                     self.update_status_bar()
                 else:
                     self.is_data_dirty = True
@@ -5873,38 +6000,55 @@ class MainWindow(QMainWindow):
 
     def apply_copy_rules(self, text):
         """활성화된 복사 규칙 적용 - 캐싱으로 성능 최적화"""
-        # v10.0: 캐싱으로 DB I/O 최소화
+        # v10.8: 캐시 리프레시 시 정규식을 사전 컴파일해 반복 비용을 줄임
         if self._rules_cache_dirty or self._rules_cache is None:
-            self._rules_cache = self.db.get_copy_rules()
+            compiled_rules = []
+            raw_rules = self.db.get_copy_rules()
+            invalid_ids = set()
+            for rid, name, pattern, action, replacement, enabled, priority in raw_rules:
+                if not enabled:
+                    continue
+                if not pattern:
+                    logger.warning(f"Empty pattern in copy rule '{name}' (id={rid}), skipping")
+                    continue
+                try:
+                    compiled = re.compile(pattern)
+                    compiled_rules.append((rid, name, compiled, action, replacement or "", priority))
+                except re.error as e:
+                    invalid_ids.add(rid)
+                    if rid not in self._rules_invalid_logged:
+                        logger.warning(f"Invalid regex in rule '{name}' (id={rid}): {e}")
+                        self._rules_invalid_logged.add(rid)
+
+            # 규칙이 수정/정상화되면 재로그 가능하도록 이전 invalid 집합과 동기화
+            self._rules_invalid_logged.intersection_update(invalid_ids)
+            self._rules_cache = compiled_rules
             self._rules_cache_dirty = False
             logger.debug("Copy rules cache refreshed")
-        
-        for rule in self._rules_cache:
-            rid, name, pattern, action, replacement, enabled, priority = rule
-            if not enabled:
+
+        applied_count = 0
+        for rid, name, compiled, action, replacement, priority in self._rules_cache:
+            if not compiled.search(text):
                 continue
-            if not pattern:
-                logger.warning(f"Empty pattern in copy rule '{name}' (id={rid}), skipping")
-                continue
-            try:
-                if re.search(pattern, text):
-                    if action == "trim":
-                        text = text.strip()
-                    elif action == "lowercase":
-                        text = text.lower()
-                    elif action == "uppercase":
-                        text = text.upper()
-                    elif action == "remove_newlines":
-                        text = text.replace('\n', ' ').replace('\r', '')
-                    elif action == "custom_replace":
-                        text = re.sub(pattern, replacement or "", text)
-                    logger.debug(f"Rule '{name}' applied")
-            except re.error as e:
-                logger.warning(f"Invalid regex in rule '{name}': {e}")
+            if action == "trim":
+                text = text.strip()
+            elif action == "lowercase":
+                text = text.lower()
+            elif action == "uppercase":
+                text = text.upper()
+            elif action == "remove_newlines":
+                text = text.replace('\n', ' ').replace('\r', '')
+            elif action == "custom_replace":
+                text = compiled.sub(replacement, text)
+            applied_count += 1
+            logger.debug(f"Rule '{name}' applied")
+
+        logger.debug(f"rules_applied_count={applied_count}")
         return text
     
     def invalidate_rules_cache(self):
         """v10.0: 규칙 캐시 무효화 (규칙 변경 시 호출)"""
+        self._rules_cache = None
         self._rules_cache_dirty = True
         logger.debug("Copy rules cache invalidated")
 
@@ -5927,7 +6071,9 @@ class MainWindow(QMainWindow):
 
     def load_data(self):
         """데이터 로드 및 테이블 갱신 - 리팩토링된 버전"""
+        started = time.perf_counter()
         try:
+            selected_id = self.get_selected_id()
             items = self._get_display_items()
             self._last_display_count = len(items)
             self._last_search_query = self.search_input.text() if hasattr(self, "search_input") else ""
@@ -5942,25 +6088,41 @@ class MainWindow(QMainWindow):
             
             # v10.4: 데이터 로드 완료로 플래그 리셋
             self.is_data_dirty = False
-            
-            # v10.1: UI 업데이트 일괄 처리 (성능 최적화)
+
+            sorting_was_enabled = self.table.isSortingEnabled()
+            self.table.setSortingEnabled(False)
             self.table.setUpdatesEnabled(False)
             try:
+                blocker = QSignalBlocker(self.table)
+                self.table.clearSpans()
                 self.table.setRowCount(0)
                 theme = THEMES.get(self.current_theme, THEMES["dark"])
             
                 if not items:
                     self._show_empty_state(theme)
-                    return
-                
-                self._populate_table(items, theme)
-                
-                # 상태바 업데이트
-                self.update_status_bar()
+                else:
+                    self._populate_table(items, theme)
+                del blocker
             finally:
+                self.table.setSortingEnabled(sorting_was_enabled)
                 self.table.setUpdatesEnabled(True)
+
+            if items and selected_id:
+                self._restore_selection_by_id(selected_id)
+            self.update_status_bar()
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            logger.debug(f"load_data_ms={elapsed_ms:.2f} rows={len(items)}")
         except Exception as e:
             logger.exception("Data loading error")
+
+    def _restore_selection_by_id(self, item_id):
+        for row in range(self.table.rowCount()):
+            pin_item = self.table.item(row, 0)
+            if pin_item and pin_item.data(Qt.ItemDataRole.UserRole) == item_id:
+                self.table.setCurrentCell(row, 2)
+                self.table.selectRow(row)
+                return True
+        return False
 
     def on_search_text_changed(self, text):
         # Reset fallback notification on clear, so we can notify again later if needed.
@@ -5970,6 +6132,7 @@ class MainWindow(QMainWindow):
 
     def _get_display_items(self):
         """표시할 항목 조회 및 정렬"""
+        query_started = time.perf_counter()
         raw_query = self.search_input.text()
         parsed = parse_search_query(raw_query)
 
@@ -6049,7 +6212,9 @@ class MainWindow(QMainWindow):
             
             reverse = self.sort_order == Qt.SortOrder.DescendingOrder
             items = sorted(items, key=get_sort_key, reverse=reverse)
-            
+        
+        query_ms = (time.perf_counter() - query_started) * 1000.0
+        logger.debug(f"query_ms={query_ms:.2f} rows={len(items)}")
         return items
 
     def _show_empty_state(self, theme):
@@ -6088,10 +6253,11 @@ class MainWindow(QMainWindow):
                 expiry_map = self.db.get_expires_at_map([row[0] for row in items])
         except Exception:
             expiry_map = {}
-        
+
+        self.table.setRowCount(len(items))
         for row_idx, item_data in enumerate(items):
             pid, content, ptype, timestamp, pinned, use_count, pin_order = item_data
-            self.table.insertRow(row_idx)
+            content_text = content or ""
             
             # 1. 고정 아이콘
             pin_item = QTableWidgetItem("📌" if pinned else "")
@@ -6109,7 +6275,7 @@ class MainWindow(QMainWindow):
             self.table.setItem(row_idx, 1, type_item)
             
             # 3. 내용
-            display = content.replace('\n', ' ').strip()
+            display = content_text.replace('\n', ' ').strip()
             if len(display) > 45: display = display[:45] + "..."
             expires_at = expiry_map.get(pid)
             if expires_at:
@@ -6119,16 +6285,16 @@ class MainWindow(QMainWindow):
             if ptype == "IMAGE":
                 content_item.setToolTip("🖼️ 이미지 항목 - 더블클릭으로 미리보기")
             else:
-                tip = content[:500] if len(content) > 500 else content
+                tip = content_text[:500] if len(content_text) > 500 else content_text
                 if expires_at:
                     tip = f"{tip}\n\n⏱️ 만료: {expires_at}"
                 content_item.setToolTip(tip)
                 
             if ptype == "LINK": content_item.setForeground(QColor(theme["secondary"]))
             elif ptype == "CODE": content_item.setForeground(QColor(theme["success"]))
-            elif ptype == "COLOR": content_item.setForeground(QColor(content) if content.startswith("#") else QColor(theme["warning"]))
+            elif ptype == "COLOR": content_item.setForeground(QColor(content_text) if content_text.startswith("#") else QColor(theme["warning"]))
             
-            content_item.setData(Qt.ItemDataRole.UserRole + 1, content)
+            content_item.setData(Qt.ItemDataRole.UserRole + 1, content_text)
             self.table.setItem(row_idx, 2, content_item)
             
             # 4. 시간

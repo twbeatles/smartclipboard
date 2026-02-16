@@ -48,7 +48,20 @@ class V11DatabaseFeatureTests(unittest.TestCase):
         by_col = {row[0] for row in self.db.get_items_by_collection(col)}
         self.assertEqual(by_col, {a, b})
 
+    def test_runtime_indexes_are_idempotent(self):
+        self.assertTrue(self.db.ensure_runtime_indexes())
+        self.assertTrue(self.db.ensure_runtime_indexes())
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("PRAGMA index_list('history')")
+            names = {row[1] for row in cursor.fetchall()}
+
+        self.assertIn("idx_history_sort", names)
+        self.assertIn("idx_history_collection_sort", names)
+        self.assertIn("idx_history_content_unpinned", names)
+        self.assertIn("idx_history_file_path_unpinned", names)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-

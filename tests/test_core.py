@@ -179,6 +179,45 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertIn(normal_first, [row[0] for row in items[3:]])
         self.assertIn(normal_last, [row[0] for row in items[3:]])
 
+    def test_get_items_limit_applies_after_ordering(self):
+        ids = []
+        for i in range(6):
+            item_id = self.db.add_item(f"limit-{i}", None, "TEXT")
+            ids.append(item_id)
+
+        self.db.toggle_pin(ids[1])
+        self.db.toggle_pin(ids[3])
+        self.db.update_pin_orders([ids[3], ids[1]])
+
+        rows = self.db.get_items("", "전체", limit=3)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([r[0] for r in rows[:2]], [ids[3], ids[1]])
+
+    def test_text_and_file_dedupe_keep_single_unpinned_row(self):
+        first = self.db.add_item("dedupe-text", None, "TEXT")
+        second = self.db.add_item("dedupe-text", None, "TEXT")
+        self.assertTrue(first)
+        self.assertTrue(second)
+        self.assertNotEqual(first, second)
+
+        file_first = self.db.add_file_item([r"C:\tmp\a.txt", r"C:\tmp\b.txt"])
+        file_second = self.db.add_file_item([r"C:\tmp\a.txt", r"C:\tmp\b.txt"])
+        self.assertTrue(file_first)
+        self.assertTrue(file_second)
+        self.assertNotEqual(file_first, file_second)
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM history WHERE type='TEXT' AND content='dedupe-text' AND pinned=0")
+            text_count = cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT COUNT(*) FROM history WHERE type='FILE' AND file_path=? AND pinned=0",
+                ('["C:\\\\tmp\\\\a.txt", "C:\\\\tmp\\\\b.txt"]',),
+            )
+            file_count = cursor.fetchone()[0]
+        self.assertEqual(text_count, 1)
+        self.assertEqual(file_count, 1)
+
 
 class CoreDatabaseSearchTests(unittest.TestCase):
     def setUp(self):
@@ -224,6 +263,39 @@ class CoreDatabaseSearchTests(unittest.TestCase):
         items = self.db.search_items("pinned")
         self.assertEqual([row[0] for row in items[:2]], [pinned_b, pinned_a])
         self.assertNotIn(normal, [row[0] for row in items])
+
+    def test_search_falls_back_when_fts_missing_and_recovery_disabled(self):
+        row_id = self.db.add_item("fallback-alpha", None, "TEXT")
+        self.assertTrue(row_id)
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS history_fts")
+            cursor.execute("DROP TRIGGER IF EXISTS history_ai")
+            cursor.execute("DROP TRIGGER IF EXISTS history_ad")
+            cursor.execute("DROP TRIGGER IF EXISTS history_au")
+            self.db.conn.commit()
+
+        self.db.maybe_recover_fts = lambda: False  # force LIKE fallback path
+        rows = self.db.search_items("alpha")
+        self.assertIn(row_id, [r[0] for r in rows])
+        self.assertTrue(getattr(self.db, "_last_search_fallback", False))
+
+    def test_search_recovers_fts_once_when_missing(self):
+        row_id = self.db.add_item("recover keyword", None, "TEXT")
+        self.assertTrue(row_id)
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS history_fts")
+            cursor.execute("DROP TRIGGER IF EXISTS history_ai")
+            cursor.execute("DROP TRIGGER IF EXISTS history_ad")
+            cursor.execute("DROP TRIGGER IF EXISTS history_au")
+            self.db.conn.commit()
+
+        rows = self.db.search_items("recover")
+        self.assertIn(row_id, [r[0] for r in rows])
+        self.assertTrue(getattr(self.db, "_fts_recovery_attempted", False))
 
 
 if __name__ == "__main__":
