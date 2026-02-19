@@ -297,6 +297,41 @@ class CoreDatabaseSearchTests(unittest.TestCase):
         self.assertIn(row_id, [r[0] for r in rows])
         self.assertTrue(getattr(self.db, "_fts_recovery_attempted", False))
 
+    def test_empty_query_applies_tag_and_type_filter_together(self):
+        text_id = self.db.add_item("text-tagged", None, "TEXT")
+        link_id = self.db.add_item("link-tagged", None, "LINK")
+        self.db.set_item_tags(text_id, "alpha")
+        self.db.set_item_tags(link_id, "alpha")
+
+        rows = self.db.search_items("", type_filter="📝 텍스트", tag_filter="alpha")
+        self.assertEqual([r[0] for r in rows], [text_id])
+
+    def test_empty_query_applies_tag_filter_with_limit(self):
+        ids = []
+        for i in range(3):
+            item_id = self.db.add_item(f"tag-limit-{i}", None, "TEXT")
+            self.db.set_item_tags(item_id, "beta")
+            ids.append(item_id)
+
+        rows = self.db.search_items("", type_filter="전체", tag_filter="beta", limit=2)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual([r[0] for r in rows], [ids[2], ids[1]])
+
+    def test_empty_query_applies_bookmark_filter_with_limit(self):
+        ids = [self.db.add_item(f"bm-{i}", None, "TEXT") for i in range(3)]
+        self.db.toggle_bookmark(ids[0])
+        self.db.toggle_bookmark(ids[1])
+        self.db.toggle_bookmark(ids[2])
+
+        rows = self.db.search_items("", type_filter="⭐ 북마크", bookmarked=True, limit=2)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual([r[0] for r in rows], [ids[2], ids[1]])
+
+    def test_collection_id_minus_one_returns_empty(self):
+        self.db.add_item("x", None, "TEXT")
+        rows = self.db.search_items("", collection_id=-1)
+        self.assertEqual(rows, [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

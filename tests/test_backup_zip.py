@@ -63,7 +63,31 @@ class BackupZipTests(unittest.TestCase):
         finally:
             other_dir.cleanup()
 
+    def test_import_rolls_back_entire_transaction_on_broken_image_ref(self):
+        zip_path = os.path.join(self.tmpdir.name, "broken_backup.zip")
+        manifest = {
+            "collections": [],
+            "history": [
+                {"type": "TEXT", "content": "ok-1", "image_ref": None},
+                {"type": "IMAGE", "content": "", "image_ref": "images/missing.png"},
+            ],
+        }
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False).encode("utf-8"))
+
+        with self.assertRaises(KeyError):
+            import_history_zip(self.db, zip_path, conflict="skip")
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM history")
+            history_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM collections")
+            collection_count = cursor.fetchone()[0]
+
+        self.assertEqual(history_count, 0)
+        self.assertEqual(collection_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-

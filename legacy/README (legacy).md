@@ -306,3 +306,20 @@ MIT License
   <b>Made with ❤️ by MySmartTools</b><br>
   <sub>© 2025-2026</sub>
 </div>
+
+---
+
+## 🛠️ 최신 안정성 업데이트 메모 (2026-02-19)
+
+이 문서는 레거시 기준 설명을 유지하며, 아래 항목은 최신 코드 반영 상태를 보완한 메모입니다.
+
+- 로더 동작:
+  - `smartclipboard_app/legacy_main.py`는 기본적으로 payload를 우선 로드
+  - 단, 개발/테스트(비-frozen) 환경에서는 payload 누락 시 `legacy_main_src.py` 자동 폴백
+- 검색:
+  - 빈 검색어에서도 `tag/type/bookmark/collection/limit` 복합 필터가 일관되게 적용
+  - `col:<없는컬렉션>`은 0건 반환
+- ZIP import:
+  - 단일 트랜잭션 처리로 중간 실패 시 전체 롤백(부분 반영 방지)
+- 회귀 테스트:
+  - 위 안정성 항목을 검증하는 테스트 케이스가 `tests/`에 추가됨

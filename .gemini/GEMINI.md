@@ -8,6 +8,7 @@
 - 레거시 런타임:
   - `smartclipboard_app/legacy_main.py`는 로더
   - `smartclipboard_app/legacy_main_payload.marshal`을 실행해 기존 동작을 복원
+  - 비-frozen 개발/테스트 환경에서는 payload 부재 시 `legacy_main_src.py` 자동 폴백
 
 ## 작업 원칙
 
@@ -41,3 +42,13 @@ pyinstaller smartclipboard.spec
 ## 향후 리팩토링 전제
 
 본격적인 코드 분할 리팩토링(클래스/메서드 단위 이동)을 재개하려면 `legacy_main.py` 원본 소스 복원이 선행되어야 합니다.
+
+## 최신 안정성 업데이트 (2026-02-19)
+
+- 검색:
+  - `smartclipboard_core/database.py::search_items()`에서 빈 쿼리 + 복합 필터 조합(`tag/type/bookmark/collection/limit`) 적용 일관성 강화
+  - `col:<name>`에서 미존재 컬렉션은 0건 반환 정책 고정
+- 가져오기:
+  - `smartclipboard_core/backup_zip.py::import_history_zip()` 단일 트랜잭션 처리(오류 시 전체 롤백)
+- 테스트:
+  - `tests/test_core.py`, `tests/test_backup_zip.py`, `tests/test_symbol_inventory.py` 회귀 케이스 추가

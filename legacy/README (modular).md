@@ -69,3 +69,16 @@ pyinstaller smartclipboard.spec
 
 - 현재 `legacy_main`이 marshal payload 로더이므로, `smartclipboard_app/legacy_main.py` 소스만으로는 클래스/시그널 구조를 직접 추적하기 어렵습니다.
 - 구조 리팩토링을 재개하려면 신뢰 가능한 원본 `legacy_main.py` 소스 복원이 선행되어야 합니다.
+
+## 최신 안정성 업데이트 메모 (2026-02-19)
+
+- 로더:
+  - `smartclipboard_app/legacy_main.py`는 payload 우선 로드
+  - 개발/테스트(비-frozen) 환경에서는 payload 부재 시 `legacy_main_src.py` 자동 폴백
+- 검색:
+  - 빈 쿼리에서도 `tag/type/bookmark/collection/limit` 복합 필터가 모두 반영되도록 보강
+  - `col:<name>` 미매칭 시 전체 검색 폴백이 아닌 0건 반환
+- 가져오기:
+  - `smartclipboard_core/backup_zip.py`의 ZIP import는 단일 트랜잭션 처리(오류 시 전체 롤백)
+- 테스트:
+  - `tests/test_core.py`, `tests/test_backup_zip.py`, `tests/test_symbol_inventory.py`에 회귀 케이스 추가

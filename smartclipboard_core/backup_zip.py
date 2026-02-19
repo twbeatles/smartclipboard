@@ -116,83 +116,89 @@ def import_history_zip(db, zip_path: str, conflict: str = "skip") -> int:
         except Exception:
             pass
 
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+    db_lock = getattr(db, "lock", _DummyLock())
+    with db_lock:
+        cur = db.conn.cursor()
+        cur.execute("BEGIN")
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
 
-        # Collection mapping: old_id -> new_id
-        col_map = _import_collections(db, manifest.get("collections") or [])
+                # Collection mapping: old_id -> new_id
+                col_map = _import_collections(db, manifest.get("collections") or [], commit=False)
 
-        # Precompute existing image hashes to skip duplicates.
-        existing_image_md5 = _load_existing_image_md5(db)
+                # Precompute existing image hashes to skip duplicates.
+                existing_image_md5 = _load_existing_image_md5(db)
 
-        imported = 0
-        imported_pinned: list[tuple[int, int]] = []  # (new_id, pin_order)
+                imported = 0
+                imported_pinned: list[tuple[int, int]] = []  # (new_id, pin_order)
 
-        for h in manifest.get("history") or []:
-            ptype = (h.get("type") or "TEXT").strip().upper()
-            content = h.get("content") or ""
-            file_path = h.get("file_path") or ""
-            image_ref = h.get("image_ref")
+                for h in manifest.get("history") or []:
+                    ptype = (h.get("type") or "TEXT").strip().upper()
+                    content = h.get("content") or ""
+                    file_path = h.get("file_path") or ""
+                    image_ref = h.get("image_ref")
 
-            if _should_skip_existing(db, ptype, content, file_path, image_ref, zf, existing_image_md5):
-                continue
+                    if _should_skip_existing(db, ptype, content, file_path, image_ref, zf, existing_image_md5):
+                        continue
 
-            image_data = None
-            if image_ref:
-                image_data = zf.read(image_ref)
-                existing_image_md5.add(hashlib.md5(image_data).hexdigest())
+                    image_data = None
+                    if image_ref:
+                        image_data = zf.read(image_ref)
+                        existing_image_md5.add(hashlib.md5(image_data).hexdigest())
 
-            timestamp = h.get("timestamp") or _now_ts()
-            pinned = 1 if h.get("pinned") else 0
-            use_count = _safe_int(h.get("use_count"))
-            pin_order = _safe_int(h.get("pin_order"))
-            tags = h.get("tags") or ""
-            note = h.get("note") or ""
-            bookmark = 1 if h.get("bookmark") else 0
-            url_title = h.get("url_title") or ""
-            expires_at = h.get("expires_at")
+                    timestamp = h.get("timestamp") or _now_ts()
+                    pinned = 1 if h.get("pinned") else 0
+                    use_count = _safe_int(h.get("use_count"))
+                    pin_order = _safe_int(h.get("pin_order"))
+                    tags = h.get("tags") or ""
+                    note = h.get("note") or ""
+                    bookmark = 1 if h.get("bookmark") else 0
+                    url_title = h.get("url_title") or ""
+                    expires_at = h.get("expires_at")
 
-            old_col = h.get("collection_old_id")
-            new_col = col_map.get(old_col) if old_col is not None else None
+                    old_col = h.get("collection_old_id")
+                    new_col = col_map.get(old_col) if old_col is not None else None
 
-            with getattr(db, "lock", _DummyLock()):
-                cur = db.conn.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO history
-                    (content, image_data, type, timestamp, pinned, use_count, tags, pin_order, file_path, url_title, collection_id, note, bookmark, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        content,
-                        image_data,
-                        ptype,
-                        timestamp,
-                        pinned,
-                        use_count,
-                        tags,
-                        pin_order,
-                        file_path,
-                        url_title,
-                        new_col,
-                        note,
-                        bookmark,
-                        expires_at,
-                    ),
-                )
-                new_id = cur.lastrowid
-                db.conn.commit()
+                    cur.execute(
+                        """
+                        INSERT INTO history
+                        (content, image_data, type, timestamp, pinned, use_count, tags, pin_order, file_path, url_title, collection_id, note, bookmark, expires_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            content,
+                            image_data,
+                            ptype,
+                            timestamp,
+                            pinned,
+                            use_count,
+                            tags,
+                            pin_order,
+                            file_path,
+                            url_title,
+                            new_col,
+                            note,
+                            bookmark,
+                            expires_at,
+                        ),
+                    )
+                    new_id = cur.lastrowid
 
-            if pinned:
-                imported_pinned.append((new_id, pin_order))
-            imported += 1
+                    if pinned:
+                        imported_pinned.append((new_id, pin_order))
+                    imported += 1
 
-        # Normalize imported pinned ordering after insert, preserving existing pinned items.
-        if imported_pinned:
-            imported_pinned.sort(key=lambda t: t[1])
-            _append_pin_orders(db, [nid for (nid, _po) in imported_pinned])
+                # Normalize imported pinned ordering after insert, preserving existing pinned items.
+                if imported_pinned:
+                    imported_pinned.sort(key=lambda t: t[1])
+                    _append_pin_orders(db, [nid for (nid, _po) in imported_pinned], commit=False)
 
-        return imported
+            db.conn.commit()
+            return imported
+        except Exception:
+            db.conn.rollback()
+            raise
 
 
 class _DummyLock:
@@ -226,7 +232,7 @@ def _history_columns(cur) -> list[str]:
     return [c for c in desired if c in existing]
 
 
-def _import_collections(db, collections: list[dict]) -> dict[int, int]:
+def _import_collections(db, collections: list[dict], commit: bool = True) -> dict[int, int]:
     with getattr(db, "lock", _DummyLock()):
         cur = db.conn.cursor()
         cur.execute("SELECT id, name FROM collections")
@@ -252,7 +258,8 @@ def _import_collections(db, collections: list[dict]) -> dict[int, int]:
             new_id = cur.lastrowid
             existing[key] = new_id
             out[int(old_id)] = new_id
-        db.conn.commit()
+        if commit:
+            db.conn.commit()
         return out
 
 
@@ -289,7 +296,7 @@ def _should_skip_existing(db, ptype: str, content: str, file_path: str, image_re
         return cur.fetchone() is not None
 
 
-def _append_pin_orders(db, ordered_ids: list[int]) -> None:
+def _append_pin_orders(db, ordered_ids: list[int], commit: bool = True) -> None:
     if not ordered_ids:
         return
     with getattr(db, "lock", _DummyLock()):
@@ -298,5 +305,5 @@ def _append_pin_orders(db, ordered_ids: list[int]) -> None:
         start = _safe_int(cur.fetchone()[0], -1) + 1
         for idx, hid in enumerate(ordered_ids):
             cur.execute("UPDATE history SET pin_order=? WHERE id=?", (start + idx, hid))
-        db.conn.commit()
-
+        if commit:
+            db.conn.commit()

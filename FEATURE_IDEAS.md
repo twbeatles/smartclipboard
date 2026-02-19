@@ -27,6 +27,26 @@
   - `ClipboardActionManager.process()`가 규칙 매칭 후 동기 액션/URL 타이틀 비동기 fetch 실행
   - 별도의 “복사 규칙(copy_rules)”도 존재 (`apply_copy_rules()`)
 
+## 2.1) 구현 반영 상태 업데이트 (2026-02-19)
+
+아래는 본 백로그 작성 이후 반영된 항목/정책입니다.  
+기존 아이디어 섹션은 삭제하지 않고, 후속 계획 비교를 위해 그대로 유지합니다.
+
+- 반영 완료:
+  - 파일(Explorer) 복사 히스토리 캡처: `mime_data.hasUrls()` 경로 처리 + `FILE` 타입 저장
+  - 검색 쿼리 문법 파서(`tag:`, `type:`, `col:`, `is:`, `limit:`) 적용
+  - `col:<name>` 미존재 컬렉션 정책: 전체 검색 폴백이 아닌 0건 반환
+  - ZIP import 원자성: 단일 트랜잭션 + 오류 시 전체 롤백
+
+- 안정성 보강:
+  - 개발/테스트 환경에서 payload 부재 시 `legacy_main_src.py` 자동 폴백
+  - 빈 검색어에서도 복합 필터(`tag/type/bookmark/collection/limit`) 일관 적용
+
+- 테스트 보강:
+  - `tests/test_core.py`: 빈 쿼리+복합 필터 경계 케이스
+  - `tests/test_backup_zip.py`: 깨진 ZIP 참조 시 전체 롤백 검증
+  - `tests/test_symbol_inventory.py`: ENV 미설정 facade import 회귀 검증
+
 ## 3) 기능 아이디어 (난이도/효과 기준)
 표기:
 - 난이도: S(1~2일), M(3~10일), L(2주+)

@@ -1,6 +1,7 @@
 import importlib.util
 import inspect
 import json
+import os
 import pathlib
 import unittest
 
@@ -71,6 +72,19 @@ class SymbolInventoryTests(unittest.TestCase):
         params = list(inspect.signature(method).parameters.values())
         has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
         self.assertTrue(has_varargs, "use_snippet should accept extra signal args")
+
+    def test_facade_import_succeeds_without_legacy_impl_env(self):
+        facade_path = pathlib.Path("클립모드 매니저.py")
+        prev = os.environ.pop("SMARTCLIPBOARD_LEGACY_IMPL", None)
+        try:
+            spec = importlib.util.spec_from_file_location("smartclipboard_facade_no_env", facade_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        finally:
+            if prev is not None:
+                os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = prev
+
+        self.assertTrue(callable(module.run))
 
 
 if __name__ == "__main__":

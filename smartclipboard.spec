@@ -15,7 +15,12 @@ ICON_FILE = None
 LEGACY_PAYLOAD = Path("smartclipboard_app/legacy_main_payload.marshal")
 
 if not LEGACY_PAYLOAD.exists():
-    raise FileNotFoundError(f"Required legacy payload not found: {LEGACY_PAYLOAD}")
+    raise FileNotFoundError(
+        "Required legacy payload not found: "
+        f"{LEGACY_PAYLOAD}\n"
+        "Run: python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py "
+        "--out smartclipboard_app/legacy_main_payload.marshal --smoke-import"
+    )
 
 EXCLUDES = [
     "pytest", "unittest", "test", "tests", "setuptools", "pip", "wheel",

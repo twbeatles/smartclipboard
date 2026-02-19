@@ -173,6 +173,36 @@ pyinstaller smartclipboard.spec
 
 ---
 
+## 📝 v10.7 안정성 핫픽스 (2026-02-19)
+
+### 🧱 런타임 로더 안정성
+- `smartclipboard_app/legacy_main.py` 로더 개선:
+  - 개발/테스트(비-frozen) 환경에서 `legacy_main_payload.marshal`이 없으면 자동으로 `legacy_main_src.py`로 폴백
+  - 배포 EXE(frozen)에서는 기존처럼 payload 필수 정책 유지
+- 효과: 기본 환경(ENV 미설정)에서도 import/테스트 실패 위험 감소
+
+### 🔍 검색 일관성 강화
+- `search_items()` 필터 경로 정리:
+  - 빈 검색어에서도 `tag/type/bookmark/collection/limit` 조합 필터가 일관되게 적용
+  - FTS/LIKE 경로의 공통 필터 규칙 정렬
+- 고급 검색 토큰 `col:<name>`에서 컬렉션 미존재 시 **0건 반환** 정책 고정
+
+### 📦 가져오기 원자성 보장
+- ZIP import 트랜잭션 처리 개선:
+  - 항목별 커밋 제거, 전체 작업 단일 트랜잭션 처리
+  - 중간 오류 시 전체 롤백 후 예외 재전파
+- 효과: 부분 반영(partial commit) 방지
+
+### ✅ 테스트 보강
+- `tests/test_core.py`:
+  - 빈 쿼리 + 복합 필터/limit/collection 경계 케이스 추가
+- `tests/test_backup_zip.py`:
+  - 손상된 ZIP 입력 시 전체 롤백 검증 추가
+- `tests/test_symbol_inventory.py`:
+  - ENV 미설정 상태 facade import 회귀 테스트 추가
+
+---
+
 ## 📝 v10.3 변경사항
 
 ### 🔲 미니 창 개선
@@ -253,6 +283,34 @@ smartclipboard-main/
 ├── README.md             # 문서
 ├── claude.md             # AI 가이드
 └── clipboard_history_v6.db  # SQLite 데이터베이스 (자동 생성)
+```
+
+### 🔧 현재 저장소 실제 구조(모듈화 진행 상태)
+
+아래는 현재 코드베이스 기준의 모듈 구조 요약입니다.
+
+```text
+smartclipboard-main/
+├── 클립모드 매니저.py                  # 호환 파사드 엔트리
+├── smartclipboard.spec
+├── smartclipboard_app/
+│   ├── bootstrap.py
+│   ├── legacy_main.py                  # payload 로더(+dev/src fallback)
+│   ├── legacy_main_src.py              # 복원된 레거시 소스(분석/리팩토링용)
+│   ├── managers/
+│   └── ui/
+│       ├── main_window.py
+│       ├── controllers/
+│       ├── dialogs/
+│       └── widgets/
+├── smartclipboard_core/
+│   ├── database.py
+│   ├── actions.py
+│   ├── worker.py
+│   ├── backup_zip.py
+│   └── search_query.py
+├── scripts/
+└── tests/
 ```
 
 ---

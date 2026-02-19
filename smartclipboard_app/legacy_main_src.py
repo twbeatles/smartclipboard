@@ -6167,12 +6167,17 @@ class MainWindow(QMainWindow):
         if parsed.col:
             try:
                 wanted = parsed.col.casefold()
+                matched_collection = False
                 for cid, cname, cicon, ccolor, _ in self.db.get_collections():
                     if (cname or "").casefold() == wanted:
                         collection_id = cid
+                        matched_collection = True
                         break
+                if not matched_collection:
+                    # Explicitly force no results when col: token does not match.
+                    collection_id = -1
             except Exception:
-                collection_id = None
+                collection_id = -1
 
         if parsed.limit:
             limit = int(parsed.limit)

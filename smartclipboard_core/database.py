@@ -362,26 +362,49 @@ class ClipboardDB:
         """
         q = (query or "").strip()
         normalized_tag = (tag_filter or "").replace("，", ",").strip().strip(",") if tag_filter else ""
+        legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
 
         # Expose last search state for UI messaging without breaking call sites.
         self._last_search_used_fts = False
         self._last_search_fallback = False
         self._last_search_error = None
 
-        # No query: preserve existing behavior (including existing filters).
-        if not q:
+        def _append_common_filters(sql: str, params: list[object], col_prefix: str = "") -> tuple[str, list[object]]:
+            tag_col = f"{col_prefix}tags"
+            bookmark_col = f"{col_prefix}bookmark"
+            pinned_col = f"{col_prefix}pinned"
+            type_col = f"{col_prefix}type"
+            collection_col = f"{col_prefix}collection_id"
+
             if normalized_tag:
-                return self.get_items_by_tag(normalized_tag)
+                sql += (
+                    f" AND {tag_col} IS NOT NULL AND {tag_col} != '' AND instr("
+                    f" ',' || REPLACE(REPLACE(REPLACE({tag_col}, '，', ','), ', ', ','), ' ,', ',') || ',',"
+                    " ',' || ? || ','"
+                    " ) > 0"
+                )
+                params.append(normalized_tag)
+
             if bookmarked or type_filter == "⭐ 북마크":
-                return self.get_bookmarked_items()
+                sql += f" AND {bookmark_col} = 1"
+            elif type_filter == "📌 고정":
+                sql += f" AND {pinned_col} = 1"
+            elif type_filter in FILTER_TAG_MAP:
+                sql += f" AND {type_col} = ?"
+                params.append(FILTER_TAG_MAP[type_filter])
+            elif type_filter != "전체" and type_filter in legacy_map:
+                sql += f" AND {type_col} = ?"
+                params.append(legacy_map[type_filter])
+
             if collection_id is not None:
-                return self.get_items_by_collection(collection_id)
-            return self.get_items("", type_filter, limit=limit)
+                sql += f" AND {collection_col} = ?"
+                params.append(collection_id)
+            return sql, params
 
         # Prefer FTS if initialized.
         match_expr = self._build_fts_match(q)
         has_fts = False
-        if match_expr:
+        if q and match_expr:
             with self.lock:
                 try:
                     cursor = self.conn.cursor()
@@ -400,7 +423,7 @@ class ClipboardDB:
                             has_fts = cursor.fetchone() is not None
                         except sqlite3.Error as e:
                             self._last_search_error = str(e)
-        if match_expr and has_fts:
+        if q and match_expr and has_fts:
             with self.lock:
                 try:
                     cursor = self.conn.cursor()
@@ -411,32 +434,7 @@ class ClipboardDB:
                         "WHERE history_fts MATCH ?"
                     )
                     params: list[object] = [match_expr]
-
-                    if normalized_tag:
-                        sql += (
-                            " AND h.tags IS NOT NULL AND h.tags != '' AND instr("
-                            " ',' || REPLACE(REPLACE(REPLACE(h.tags, '，', ','), ', ', ','), ' ,', ',') || ',',"
-                            " ',' || ? || ','"
-                            " ) > 0"
-                        )
-                        params.append(normalized_tag)
-
-                    if bookmarked or type_filter == "⭐ 북마크":
-                        sql += " AND h.bookmark = 1"
-                    elif type_filter == "📌 고정":
-                        sql += " AND h.pinned = 1"
-                    elif type_filter in FILTER_TAG_MAP:
-                        sql += " AND h.type = ?"
-                        params.append(FILTER_TAG_MAP[type_filter])
-                    elif type_filter != "전체":
-                        legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
-                        if type_filter in legacy_map:
-                            sql += " AND h.type = ?"
-                            params.append(legacy_map[type_filter])
-
-                    if collection_id is not None:
-                        sql += " AND h.collection_id = ?"
-                        params.append(collection_id)
+                    sql, params = _append_common_filters(sql, params, col_prefix="h.")
 
                     sql += " ORDER BY h.pinned DESC, h.pin_order ASC, bm25(history_fts) ASC, h.id DESC"
                     if limit is not None:
@@ -457,33 +455,15 @@ class ClipboardDB:
         # Fallback: LIKE across key fields.
         with self.lock:
             cursor = self.conn.cursor()
-            like = f"%{q}%"
-            sql = (
-                "SELECT id, content, type, timestamp, pinned, use_count, pin_order "
-                "FROM history WHERE (content LIKE ? OR tags LIKE ? OR note LIKE ? OR url_title LIKE ?)"
-            )
-            params2: list[object] = [like, like, like, like]
+            sql = "SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE 1=1"
+            params2: list[object] = []
 
-            if normalized_tag:
-                sql += (
-                    " AND tags IS NOT NULL AND tags != '' AND instr("
-                    " ',' || REPLACE(REPLACE(REPLACE(tags, '，', ','), ', ', ','), ' ,', ',') || ',',"
-                    " ',' || ? || ','"
-                    " ) > 0"
-                )
-                params2.append(normalized_tag)
+            if q:
+                like = f"%{q}%"
+                sql += " AND (content LIKE ? OR tags LIKE ? OR note LIKE ? OR url_title LIKE ?)"
+                params2.extend([like, like, like, like])
 
-            if bookmarked or type_filter == "⭐ 북마크":
-                sql += " AND bookmark = 1"
-            elif type_filter == "📌 고정":
-                sql += " AND pinned = 1"
-            elif type_filter in FILTER_TAG_MAP:
-                sql += " AND type = ?"
-                params2.append(FILTER_TAG_MAP[type_filter])
-
-            if collection_id is not None:
-                sql += " AND collection_id = ?"
-                params2.append(collection_id)
+            sql, params2 = _append_common_filters(sql, params2)
 
             sql += " ORDER BY pinned DESC, pin_order ASC, id DESC"
             if limit is not None:

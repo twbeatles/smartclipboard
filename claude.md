@@ -8,6 +8,7 @@
 - 레거시 런타임:
   - `smartclipboard_app/legacy_main.py`는 **marshal payload 로더**
   - 실제 본문은 `smartclipboard_app/legacy_main_payload.marshal`
+  - 개발/테스트(비-frozen) 환경에서 payload가 없으면 `legacy_main_src.py`로 자동 폴백
 
 ## 2. 작업 우선순위
 
@@ -20,6 +21,7 @@
 - `legacy_main_payload.marshal`은 텍스트 diff/리뷰가 어려운 바이너리 payload입니다.
 - `legacy_main.py`를 소스 본문 파일로 가정하고 리팩토링하면 안 됩니다.
 - UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`을 재생성한 뒤 빌드해야 합니다.
+- 비-frozen 소스 실행/테스트는 payload가 없어도 동작할 수 있으나, EXE 빌드/배포 검증에서는 payload 존재를 반드시 확인해야 합니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
   - `scripts/refactor_signal_snapshot.py`
@@ -46,3 +48,15 @@ pyinstaller smartclipboard.spec
 
 장기적으로 구조 분할 리팩토링을 지속하려면 `legacy_main.py` 원본 소스 복원이 필요합니다.  
 복원 전에는 로더/payload 호환성을 깨지 않는 변경만 수행합니다.
+
+## 7. 최신 안정성 반영 메모 (2026-02-19)
+
+- `smartclipboard_core/database.py`
+  - `search_items()` 필터 일관성 개선: 빈 쿼리에서도 `tag/type/bookmark/collection/limit` 동시 적용
+  - FTS/LIKE 공통 필터 규칙 정렬
+- `smartclipboard_app/legacy_main_src.py`
+  - `col:<name>` 미존재 컬렉션은 명시적으로 0건 반환
+- `smartclipboard_core/backup_zip.py`
+  - ZIP import 단일 트랜잭션 처리(실패 시 전체 롤백, partial commit 방지)
+- 테스트 보강:
+  - `tests/test_core.py`, `tests/test_backup_zip.py`, `tests/test_symbol_inventory.py`
