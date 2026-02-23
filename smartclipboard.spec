@@ -41,7 +41,7 @@ EXCLUDES = [
     "PyQt6.Qt3DInput", "PyQt6.Qt3DLogic", "PyQt6.Qt3DRender",
     "tkinter", "tcl", "tk", "_tkinter", "xmlrpc", "pydoc", "doctest",
     "distutils", "lib2to3", "multiprocessing", "asyncio", "concurrent",
-    "curses", "ensurepip", "email", "http.server", "socketserver",
+    "curses", "ensurepip", "http.server", "socketserver",
     "ftplib", "imaplib", "poplib", "smtplib", "telnetlib",
     "turtle", "turtledemo", "pydoc_data", "idlelib",
 ]

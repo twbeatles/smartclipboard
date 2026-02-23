@@ -3874,7 +3874,8 @@ class MainWindow(QMainWindow):
         try:
             self.db = ClipboardDB()
             self.clipboard = QApplication.clipboard()
-            self.clipboard.dataChanged.connect(self.on_clipboard_change)
+            self._clipboard_monitor_connected = False
+            self._set_clipboard_monitor_enabled(True)
             self.is_internal_copy = False
             self.is_privacy_mode = False  # 프라이버시 모드 (모니터링 중지)
             
@@ -3964,6 +3965,42 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"MainWindow Init Error: {e}", exc_info=True)
             raise e
+
+    def _set_clipboard_monitor_enabled(self, enabled: bool):
+        """클립보드 dataChanged 시그널 연결 상태를 안전하게 제어."""
+        if not hasattr(self, "clipboard") or self.clipboard is None:
+            return
+
+        connected = bool(getattr(self, "_clipboard_monitor_connected", False))
+        if enabled:
+            if connected:
+                return
+            try:
+                self.clipboard.dataChanged.connect(self.on_clipboard_change)
+            except (TypeError, RuntimeError):
+                # 이미 연결된 상태일 수 있음(중복 connect 시도 등)
+                pass
+            self._clipboard_monitor_connected = True
+            return
+
+        if not connected:
+            return
+        try:
+            self.clipboard.dataChanged.disconnect(self.on_clipboard_change)
+        except (TypeError, RuntimeError):
+            pass
+        self._clipboard_monitor_connected = False
+
+    def _mark_internal_copy(self, clear_after_ms: int = 400):
+        """내부 복사 플래그를 설정하고, 신호 누락 시 자동 해제한다."""
+        self.is_internal_copy = True
+        if not hasattr(self, "_internal_copy_guard_timer"):
+            self._internal_copy_guard_timer = QTimer(self)
+            self._internal_copy_guard_timer.setSingleShot(True)
+            self._internal_copy_guard_timer.timeout.connect(
+                lambda: setattr(self, "is_internal_copy", False)
+            )
+        self._internal_copy_guard_timer.start(max(50, int(clear_after_ms)))
     
     def register_hotkeys(self):
         """v10.2: 커스텀 핫키 등록 - 개선된 버전 (앱 전용 핫키만 관리)"""
@@ -4041,7 +4078,7 @@ class MainWindow(QMainWindow):
                 data = self.db.get_content(pid)
                 if data:
                     content, blob, ptype = data
-                    self.is_internal_copy = True
+                    self._mark_internal_copy()
                     if ptype == "IMAGE" and blob:
                         pixmap = QPixmap()
                         pixmap.loadFromData(blob)
@@ -5157,7 +5194,7 @@ class MainWindow(QMainWindow):
         
         if contents:
             merged = separator.join(contents)
-            self.is_internal_copy = True
+            self._mark_internal_copy()
             self.clipboard.setText(merged)
             self.statusBar().showMessage(f"✅ {len(contents)}개 항목 병합 완료", 2000)
 
@@ -5489,15 +5526,10 @@ class MainWindow(QMainWindow):
             if res_type == "title":
                 title = result.get("title")
                 if title:
-                    try:
-                        self.clipboard.dataChanged.disconnect(self.on_clipboard_change)  # 일시적 연결 해제
-                    except (TypeError, RuntimeError):
-                        pass  # 이미 연결 해제된 경우
                     self.show_toast("🔗 링크 제목 발견", f"{title}")
                     # UI 입력 중이 아닐 때만 데이터 다시 로드
                     if not self.search_input.hasFocus():
                         self.request_load_data("action_completed", delay_ms=30)
-                    self.clipboard.dataChanged.connect(self.on_clipboard_change)
         except Exception as e:
             logger.error(f"Action Handler Error: {e}")
 
@@ -5727,9 +5759,9 @@ class MainWindow(QMainWindow):
     def reset_clipboard_monitor(self):
         """v10.5: 클립보드 모니터링 강제 재시작"""
         try:
-            self.clipboard.dataChanged.disconnect(self.on_clipboard_change)
+            self._set_clipboard_monitor_enabled(False)
             # 잠시 대기 후 재연결
-            QTimer.singleShot(500, lambda: self.clipboard.dataChanged.connect(self.on_clipboard_change))
+            QTimer.singleShot(500, lambda: self._set_clipboard_monitor_enabled(True))
             self.statusBar().showMessage("✅ 클립보드 모니터 재시작됨", 2000)
             logger.info("Clipboard monitor restarted manually")
         except Exception as e:
@@ -5850,6 +5882,9 @@ class MainWindow(QMainWindow):
         # 프라이버시 모드나 내부 복사면 무시
         if self.is_privacy_mode or self.is_internal_copy:
             self.is_internal_copy = False # 내부 복사 플래그는 한 번 사용 후 초기화
+            guard_timer = getattr(self, "_internal_copy_guard_timer", None)
+            if guard_timer and guard_timer.isActive():
+                guard_timer.stop()
             return
 
         # v10.8: 타이머 인스턴스 재사용 (중복 생성/삭제 제거)
@@ -6443,7 +6478,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("❌ 유효한 JSON이 아닙니다", 2000)
                 return
         
-        self.is_internal_copy = True
+        self._mark_internal_copy()
         self.clipboard.setText(new_text)
         self.detail_text.setPlainText(new_text)
         
@@ -6456,7 +6491,7 @@ class MainWindow(QMainWindow):
         data = self.db.get_content(pid)
         if data:
             content, blob, ptype = data
-            self.is_internal_copy = True
+            self._mark_internal_copy()
             if ptype == "FILE":
                 paths = []
                 try:
