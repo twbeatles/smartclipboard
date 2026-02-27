@@ -23,19 +23,27 @@
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
   - `scripts/refactor_signal_snapshot.py`
-  - 현재 로더 구조에서는 결과가 소스 본문 기준 검증과 다를 수 있습니다.
+  - payload 반영 동기화 검증: `tests/test_payload_sync.py`
+  - 현재 로더 구조에서는 로더 기반 결과와 소스 본문 기준 결과가 다를 수 있으므로 `legacy_main_src.py` 기준으로 확인합니다.
 
 ## 4. 필수 검증
 
 ```powershell
-python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
+python scripts/preflight_local.py
+```
+
+또는 단계별 실행:
+
+```powershell
+python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
+python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_app/legacy_main_src.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
 python -m unittest discover -s tests -v
 ```
 
 ## 5. 빌드
 
 ```powershell
-pyinstaller smartclipboard.spec
+pyinstaller --clean smartclipboard.spec
 ```
 
 빌드 결과:

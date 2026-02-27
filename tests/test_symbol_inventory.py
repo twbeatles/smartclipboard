@@ -8,10 +8,10 @@ from scripts.refactor_symbol_inventory import build_inventory
 
 
 class SymbolInventoryTests(unittest.TestCase):
-    def test_legacy_main_matches_baseline_inventory(self):
+    def test_legacy_main_src_matches_baseline_inventory(self):
         baseline_path = pathlib.Path("tests/baseline/symbol_inventory_v10_6.json")
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-        current = build_inventory("smartclipboard_app/legacy_main.py")
+        current = build_inventory("smartclipboard_app/legacy_main_src.py")
         self.assertEqual(current, baseline)
 
     def test_entrypoint_and_export_compatibility(self):

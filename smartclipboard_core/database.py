@@ -45,6 +45,7 @@ class ClipboardDB:
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.lock = threading.RLock()
         self.add_count = 0  # v10.0: cleanup 최적화를 위한 카운터
+        self.cleanup_count = 0  # VACUUM 실행 주기 카운터
         self.create_tables()
 
     def create_tables(self):
@@ -157,10 +158,33 @@ class ClipboardDB:
                     content TEXT,
                     image_data BLOB,
                     type TEXT,
+                    original_timestamp TEXT,
+                    tags TEXT DEFAULT '',
+                    note TEXT DEFAULT '',
+                    bookmark INTEGER DEFAULT 0,
+                    collection_id INTEGER DEFAULT NULL,
+                    pinned INTEGER DEFAULT 0,
+                    pin_order INTEGER DEFAULT 0,
+                    use_count INTEGER DEFAULT 0,
                     deleted_at TEXT,
                     expires_at TEXT
                 )
             """)
+            # 비파괴 마이그레이션: 기존 deleted_history 확장
+            for col_sql in (
+                "ALTER TABLE deleted_history ADD COLUMN original_timestamp TEXT",
+                "ALTER TABLE deleted_history ADD COLUMN tags TEXT DEFAULT ''",
+                "ALTER TABLE deleted_history ADD COLUMN note TEXT DEFAULT ''",
+                "ALTER TABLE deleted_history ADD COLUMN bookmark INTEGER DEFAULT 0",
+                "ALTER TABLE deleted_history ADD COLUMN collection_id INTEGER DEFAULT NULL",
+                "ALTER TABLE deleted_history ADD COLUMN pinned INTEGER DEFAULT 0",
+                "ALTER TABLE deleted_history ADD COLUMN pin_order INTEGER DEFAULT 0",
+                "ALTER TABLE deleted_history ADD COLUMN use_count INTEGER DEFAULT 0",
+            ):
+                try:
+                    cursor.execute(col_sql)
+                except sqlite3.OperationalError:
+                    pass
             
             # v10.0: collection_id 컬럼 추가
             try:
@@ -304,6 +328,7 @@ class ClipboardDB:
         bookmarked: bool = False,
         collection_id: int | None = None,
         limit: int | None = None,
+        uncategorized: bool = False,
     ) -> list:
         """Unified search with FTS5 when available; falls back to LIKE safely.
 
@@ -325,6 +350,8 @@ class ClipboardDB:
                 return self.get_bookmarked_items()
             if collection_id is not None:
                 return self.get_items_by_collection(collection_id)
+            if uncategorized:
+                return self.get_items_uncategorized()
             return self.get_items("", type_filter)
 
         # Prefer FTS if initialized.
@@ -366,6 +393,8 @@ class ClipboardDB:
                     if collection_id is not None:
                         sql += " AND h.collection_id = ?"
                         params.append(collection_id)
+                    elif uncategorized:
+                        sql += " AND h.collection_id IS NULL"
 
                     sql += " ORDER BY h.pinned DESC, h.pin_order ASC, bm25(history_fts) ASC, h.id DESC"
                     if limit is not None:
@@ -411,6 +440,8 @@ class ClipboardDB:
             if collection_id is not None:
                 sql += " AND collection_id = ?"
                 params2.append(collection_id)
+            elif uncategorized:
+                sql += " AND collection_id IS NULL"
 
             sql += " ORDER BY pinned DESC, pin_order ASC, id DESC"
             if limit is not None:
@@ -741,9 +772,9 @@ class ClipboardDB:
                     self.conn.commit()
 
                 # v10.6: 주기적 VACUUM 실행 (50회 cleanup 마다)
-                self.add_count += 1
-                if self.add_count >= 50:
-                    self.add_count = 0
+                self.cleanup_count += 1
+                if self.cleanup_count >= 50:
+                    self.cleanup_count = 0
                     self.conn.execute("VACUUM")
                     logger.info("Database VACUUM completed")
             except sqlite3.Error as e:
@@ -927,6 +958,20 @@ class ClipboardDB:
                 return cursor.fetchall()
             except sqlite3.Error as e:
                 logger.error(f"Get Items by Collection Error: {e}")
+                return []
+
+    def get_items_uncategorized(self) -> list:
+        """컬렉션이 없는(미분류) 항목 조회"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "SELECT id, content, type, timestamp, pinned, use_count, pin_order "
+                    "FROM history WHERE collection_id IS NULL ORDER BY pinned DESC, pin_order ASC, id DESC"
+                )
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Get Uncategorized Items Error: {e}")
                 return []
 
 
@@ -1155,19 +1200,72 @@ class ClipboardDB:
                 logger.error(f"Get Note Error: {e}")
                 return ""
 
+    def set_item_metadata(self, item_id: int, **metadata) -> bool:
+        """항목 메타데이터를 키-값 형태로 일괄 업데이트."""
+        allowed = {
+            "tags",
+            "note",
+            "bookmark",
+            "collection_id",
+            "pinned",
+            "pin_order",
+            "use_count",
+            "timestamp",
+        }
+        updates = {k: v for k, v in metadata.items() if k in allowed}
+        if not updates:
+            return True
+
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cols = ", ".join(f"{k} = ?" for k in updates.keys())
+                params = list(updates.values())
+                params.append(item_id)
+                cursor.execute(f"UPDATE history SET {cols} WHERE id = ?", params)
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Set Metadata Error: {e}")
+                self.conn.rollback()
+                return False
+
     # --- v10.0: 휴지통 (실행취소) 메서드 ---
     def soft_delete(self, item_id):
         """항목을 휴지통으로 이동 (7일 후 영구 삭제)"""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT content, image_data, type FROM history WHERE id = ?", (item_id,))
+                cursor.execute(
+                    "SELECT content, image_data, type, timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count "
+                    "FROM history WHERE id = ?",
+                    (item_id,),
+                )
                 item = cursor.fetchone()
                 if item:
                     deleted_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     expires_at = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-                    cursor.execute("INSERT INTO deleted_history (original_id, content, image_data, type, deleted_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-                                   (item_id, item[0], item[1], item[2], deleted_at, expires_at))
+                    cursor.execute(
+                        "INSERT INTO deleted_history "
+                        "(original_id, content, image_data, type, original_timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count, deleted_at, expires_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            item_id,
+                            item[0],
+                            item[1],
+                            item[2],
+                            item[3],
+                            item[4] or "",
+                            item[5] or "",
+                            item[6] or 0,
+                            item[7],
+                            item[8] or 0,
+                            item[9] or 0,
+                            item[10] or 0,
+                            deleted_at,
+                            expires_at,
+                        ),
+                    )
                     cursor.execute("DELETE FROM history WHERE id = ?", (item_id,))
                     self.conn.commit()
                     return True
@@ -1181,12 +1279,31 @@ class ClipboardDB:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT content, image_data, type FROM deleted_history WHERE id = ?", (deleted_id,))
+                cursor.execute(
+                    "SELECT content, image_data, type, original_timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count "
+                    "FROM deleted_history WHERE id = ?",
+                    (deleted_id,),
+                )
                 item = cursor.fetchone()
                 if item:
-                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    cursor.execute("INSERT INTO history (content, image_data, type, timestamp) VALUES (?, ?, ?, ?)",
-                                   (item[0], item[1], item[2], timestamp))
+                    timestamp = item[3] or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    cursor.execute(
+                        "INSERT INTO history (content, image_data, type, timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            item[0],
+                            item[1],
+                            item[2],
+                            timestamp,
+                            item[4] or "",
+                            item[5] or "",
+                            item[6] or 0,
+                            item[7],
+                            item[8] or 0,
+                            item[9] or 0,
+                            item[10] or 0,
+                        ),
+                    )
                     cursor.execute("DELETE FROM deleted_history WHERE id = ?", (deleted_id,))
                     self.conn.commit()
                     return True

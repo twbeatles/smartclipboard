@@ -15,10 +15,12 @@ Windows용 PyQt6 기반 클립보드 매니저입니다.
 
 - 클립보드 히스토리 저장/검색
 - 고정, 북마크, 태그, 컬렉션
+- 상단 컬렉션 필터(전체/미분류/개별 컬렉션)
 - 보안 보관함(AES)
 - 클립보드 액션 자동화
 - 스니펫/휴지통/미니 윈도우
 - JSON/CSV/Markdown 내보내기
+- JSON 마이그레이션 모드(메타데이터 포함) 내보내기/가져오기
 
 ## 프로젝트 구조
 
@@ -49,14 +51,21 @@ python "클립모드 매니저.py"
 ## 테스트
 
 ```powershell
-python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
+python scripts/preflight_local.py
+```
+
+또는 단계별 실행:
+
+```powershell
+python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
+python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_app/legacy_main_src.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
 python -m unittest discover -s tests -v
 ```
 
 ## 빌드
 
 ```powershell
-pyinstaller smartclipboard.spec
+pyinstaller --clean smartclipboard.spec
 ```
 
 결과물:

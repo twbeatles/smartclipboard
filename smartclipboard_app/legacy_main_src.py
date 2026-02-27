@@ -62,12 +62,12 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTableWidget, QTableWidgetItem, QPushButton, QTextEdit,
     QLabel, QHeaderView, QAbstractItemView, QMessageBox, QSplitter,
     QSystemTrayIcon, QMenu, QSizePolicy, QStyle, QStackedWidget,
-    QFileDialog, QComboBox, QDialog, QFormLayout, QSpinBox,
+    QFileDialog, QComboBox, QDialog, QFormLayout, QSpinBox, QDateEdit,
     QCheckBox, QTabWidget, QGroupBox, QFrame, QInputDialog
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer,
-    QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent,
+    QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent, QDate,
     QObject, QRunnable, QThreadPool, pyqtSlot
 )
 from PyQt6.QtGui import (
@@ -107,7 +107,7 @@ MAX_HISTORY = 100
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "10.5"
+VERSION = "10.6"
 
 # 기본 핫키 설정
 DEFAULT_HOTKEYS = {
@@ -319,6 +319,7 @@ class ClipboardDB:
         # Some operations call other DB methods; use a re-entrant lock to avoid deadlocks.
         self.lock = threading.RLock()
         self.add_count = 0  # v10.0: cleanup 최적화를 위한 카운터
+        self.cleanup_count = 0  # VACUUM 실행 주기 카운터
         self.create_tables()
 
     def create_tables(self):
@@ -431,10 +432,33 @@ class ClipboardDB:
                     content TEXT,
                     image_data BLOB,
                     type TEXT,
+                    original_timestamp TEXT,
+                    tags TEXT DEFAULT '',
+                    note TEXT DEFAULT '',
+                    bookmark INTEGER DEFAULT 0,
+                    collection_id INTEGER DEFAULT NULL,
+                    pinned INTEGER DEFAULT 0,
+                    pin_order INTEGER DEFAULT 0,
+                    use_count INTEGER DEFAULT 0,
                     deleted_at TEXT,
                     expires_at TEXT
                 )
             """)
+            # 비파괴 마이그레이션: 기존 deleted_history 확장
+            for col_sql in (
+                "ALTER TABLE deleted_history ADD COLUMN original_timestamp TEXT",
+                "ALTER TABLE deleted_history ADD COLUMN tags TEXT DEFAULT ''",
+                "ALTER TABLE deleted_history ADD COLUMN note TEXT DEFAULT ''",
+                "ALTER TABLE deleted_history ADD COLUMN bookmark INTEGER DEFAULT 0",
+                "ALTER TABLE deleted_history ADD COLUMN collection_id INTEGER DEFAULT NULL",
+                "ALTER TABLE deleted_history ADD COLUMN pinned INTEGER DEFAULT 0",
+                "ALTER TABLE deleted_history ADD COLUMN pin_order INTEGER DEFAULT 0",
+                "ALTER TABLE deleted_history ADD COLUMN use_count INTEGER DEFAULT 0",
+            ):
+                try:
+                    cursor.execute(col_sql)
+                except sqlite3.OperationalError:
+                    pass
             
             # v10.0: collection_id 컬럼 추가
             try:
@@ -560,7 +584,16 @@ class ClipboardDB:
             parts.append(f"{t}*" if len(t) > 1 else t)
         return " ".join(parts)
 
-    def search_items(self, query: str, type_filter: str = "전체", tag_filter=None, bookmarked: bool = False, collection_id=None, limit=None):
+    def search_items(
+        self,
+        query: str,
+        type_filter: str = "전체",
+        tag_filter=None,
+        bookmarked: bool = False,
+        collection_id=None,
+        limit=None,
+        uncategorized: bool = False,
+    ):
         """Unified search with FTS5 when available; falls back to LIKE safely."""
         q = (query or "").strip()
         normalized_tag = (tag_filter or "").replace("，", ",").strip().strip(",") if tag_filter else ""
@@ -576,6 +609,8 @@ class ClipboardDB:
                 return self.get_bookmarked_items()
             if collection_id is not None:
                 return self.get_items_by_collection(collection_id)
+            if uncategorized:
+                return self.get_items_uncategorized()
             return self.get_items("", type_filter)
 
         match_expr = self._build_fts_match(q)
@@ -611,6 +646,8 @@ class ClipboardDB:
                     if collection_id is not None:
                         sql += " AND h.collection_id = ?"
                         params.append(collection_id)
+                    elif uncategorized:
+                        sql += " AND h.collection_id IS NULL"
 
                     sql += " ORDER BY h.pinned DESC, h.pin_order ASC, bm25(history_fts) ASC, h.id DESC"
                     if limit is not None:
@@ -655,6 +692,8 @@ class ClipboardDB:
             if collection_id is not None:
                 sql += " AND collection_id = ?"
                 params2.append(collection_id)
+            elif uncategorized:
+                sql += " AND collection_id IS NULL"
 
             sql += " ORDER BY pinned DESC, pin_order ASC, id DESC"
             if limit is not None:
@@ -736,6 +775,32 @@ class ClipboardDB:
                 return True
             except sqlite3.Error as e:
                 logger.error(f"Pin order update failed: {e}")
+                self.conn.rollback()
+                return False
+
+    def update_pin_orders(self, ordered_ids: list[int]) -> bool:
+        """고정 항목 순서를 원자적으로 업데이트"""
+        if not ordered_ids:
+            return True
+        if len(ordered_ids) != len(set(ordered_ids)):
+            logger.error("Pin order update failed: duplicate ids")
+            return False
+
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("BEGIN")
+                for order, item_id in enumerate(ordered_ids):
+                    cursor.execute(
+                        "UPDATE history SET pin_order = ? WHERE id = ? AND pinned = 1",
+                        (order, item_id),
+                    )
+                    if cursor.rowcount != 1:
+                        raise sqlite3.Error(f"Invalid pinned item id: {item_id}")
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Pin orders bulk update failed: {e}")
                 self.conn.rollback()
                 return False
 
@@ -945,9 +1010,9 @@ class ClipboardDB:
                 self.conn.commit()
             
             # v10.6: 주기적 VACUUM 실행 (50회 cleanup 마다)
-            self.add_count += 1
-            if self.add_count >= 50:
-                self.add_count = 0
+            self.cleanup_count += 1
+            if self.cleanup_count >= 50:
+                self.cleanup_count = 0
                 self.conn.execute("VACUUM")
                 logger.info("Database VACUUM completed")
                 
@@ -1131,6 +1196,20 @@ class ClipboardDB:
                 return cursor.fetchall()
             except sqlite3.Error as e:
                 logger.error(f"Get Items by Collection Error: {e}")
+                return []
+
+    def get_items_uncategorized(self) -> list:
+        """컬렉션이 없는(미분류) 항목 조회"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "SELECT id, content, type, timestamp, pinned, use_count, pin_order "
+                    "FROM history WHERE collection_id IS NULL ORDER BY pinned DESC, pin_order ASC, id DESC"
+                )
+                return cursor.fetchall()
+            except sqlite3.Error as e:
+                logger.error(f"Get Uncategorized Items Error: {e}")
                 return []
 
 
@@ -1359,19 +1438,72 @@ class ClipboardDB:
                 logger.error(f"Get Note Error: {e}")
                 return ""
 
+    def set_item_metadata(self, item_id: int, **metadata):
+        """항목 메타데이터를 키-값 형태로 일괄 업데이트."""
+        allowed = {
+            "tags",
+            "note",
+            "bookmark",
+            "collection_id",
+            "pinned",
+            "pin_order",
+            "use_count",
+            "timestamp",
+        }
+        updates = {k: v for k, v in metadata.items() if k in allowed}
+        if not updates:
+            return True
+
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cols = ", ".join(f"{k} = ?" for k in updates.keys())
+                params = list(updates.values())
+                params.append(item_id)
+                cursor.execute(f"UPDATE history SET {cols} WHERE id = ?", params)
+                self.conn.commit()
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"Set Metadata Error: {e}")
+                self.conn.rollback()
+                return False
+
     # --- v10.0: 휴지통 (실행취소) 메서드 ---
     def soft_delete(self, item_id):
         """항목을 휴지통으로 이동 (7일 후 영구 삭제)"""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT content, image_data, type FROM history WHERE id = ?", (item_id,))
+                cursor.execute(
+                    "SELECT content, image_data, type, timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count "
+                    "FROM history WHERE id = ?",
+                    (item_id,),
+                )
                 item = cursor.fetchone()
                 if item:
                     deleted_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     expires_at = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-                    cursor.execute("INSERT INTO deleted_history (original_id, content, image_data, type, deleted_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-                                   (item_id, item[0], item[1], item[2], deleted_at, expires_at))
+                    cursor.execute(
+                        "INSERT INTO deleted_history "
+                        "(original_id, content, image_data, type, original_timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count, deleted_at, expires_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            item_id,
+                            item[0],
+                            item[1],
+                            item[2],
+                            item[3],
+                            item[4] or "",
+                            item[5] or "",
+                            item[6] or 0,
+                            item[7],
+                            item[8] or 0,
+                            item[9] or 0,
+                            item[10] or 0,
+                            deleted_at,
+                            expires_at,
+                        ),
+                    )
                     cursor.execute("DELETE FROM history WHERE id = ?", (item_id,))
                     self.conn.commit()
                     return True
@@ -1385,12 +1517,31 @@ class ClipboardDB:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT content, image_data, type FROM deleted_history WHERE id = ?", (deleted_id,))
+                cursor.execute(
+                    "SELECT content, image_data, type, original_timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count "
+                    "FROM deleted_history WHERE id = ?",
+                    (deleted_id,),
+                )
                 item = cursor.fetchone()
                 if item:
-                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    cursor.execute("INSERT INTO history (content, image_data, type, timestamp) VALUES (?, ?, ?, ?)",
-                                   (item[0], item[1], item[2], timestamp))
+                    timestamp = item[3] or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    cursor.execute(
+                        "INSERT INTO history (content, image_data, type, timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            item[0],
+                            item[1],
+                            item[2],
+                            timestamp,
+                            item[4] or "",
+                            item[5] or "",
+                            item[6] or 0,
+                            item[7],
+                            item[8] or 0,
+                            item[9] or 0,
+                            item[10] or 0,
+                        ),
+                    )
                     cursor.execute("DELETE FROM deleted_history WHERE id = ?", (deleted_id,))
                     self.conn.commit()
                     return True
@@ -1719,14 +1870,15 @@ class ExportImportManager:
     def __init__(self, db):
         self.db = db
     
-    def export_json(self, path, filter_type="all", date_from=None):
-        """JSON으로 내보내기 - v10.3: date_from 필터링 구현"""
+    def export_json(self, path, filter_type="all", date_from=None, include_metadata=False):
+        """JSON으로 내보내기 - 날짜 필터/메타데이터 포함 모드 지원"""
         try:
             items = self.db.get_items("", "전체")
             export_data = {
                 "app": "SmartClipboard Pro",
                 "version": VERSION,
                 "exported_at": datetime.datetime.now().isoformat(),
+                "migration_mode": bool(include_metadata),
                 "items": []
             }
             for item in items:
@@ -1743,13 +1895,42 @@ class ExportImportManager:
                             continue
                     except (ValueError, IndexError):
                         pass  # 날짜 파싱 실패 시 포함
-                export_data["items"].append({
+                payload = {
                     "content": content,
                     "type": ptype,
                     "timestamp": timestamp,
                     "pinned": bool(pinned),
-                    "use_count": use_count
-                })
+                    "use_count": use_count,
+                    "pin_order": pin_order,
+                }
+
+                if include_metadata:
+                    try:
+                        with self.db.lock:
+                            cursor = self.db.conn.cursor()
+                            cursor.execute(
+                                "SELECT tags, note, bookmark, collection_id, pinned, pin_order, use_count, timestamp "
+                                "FROM history WHERE id = ?",
+                                (pid,),
+                            )
+                            meta = cursor.fetchone()
+                        if meta:
+                            payload.update(
+                                {
+                                    "tags": meta[0] or "",
+                                    "note": meta[1] or "",
+                                    "bookmark": int(meta[2] or 0),
+                                    "collection_id": meta[3],
+                                    "pinned": bool(meta[4] or 0),
+                                    "pin_order": int(meta[5] or 0),
+                                    "use_count": int(meta[6] or 0),
+                                    "timestamp": meta[7] or timestamp,
+                                }
+                            )
+                    except Exception as meta_exc:
+                        logger.debug(f"Export metadata fetch skipped for id={pid}: {meta_exc}")
+
+                export_data["items"].append(payload)
             
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(export_data, f, ensure_ascii=False, indent=2)
@@ -1828,8 +2009,15 @@ class ExportImportManager:
                 if ptype not in VALID_TYPES:
                     ptype = "TEXT"
                 if content:
-                    self.db.add_item(content, None, ptype)
-                    imported += 1
+                    item_id = self.db.add_item(content, None, ptype)
+                    if item_id:
+                        imported += 1
+                        metadata = {}
+                        for key in ("tags", "note", "bookmark", "collection_id", "pinned", "pin_order", "use_count", "timestamp"):
+                            if key in item:
+                                metadata[key] = item.get(key)
+                        if metadata and hasattr(self.db, "set_item_metadata"):
+                            self.db.set_item_metadata(item_id, **metadata)
             return imported
         except Exception as e:
             logger.error(f"JSON Import Error: {e}")
@@ -2548,6 +2736,9 @@ class ExportDialog(QDialog):
         format_layout.addWidget(self.format_json)
         format_layout.addWidget(self.format_csv)
         format_layout.addWidget(self.format_md)
+        self.json_migration_mode = QCheckBox("JSON 마이그레이션 모드 (태그/메모/북마크/컬렉션 포함)")
+        self.json_migration_mode.setToolTip("JSON 내보내기에 메타데이터를 포함합니다.")
+        format_layout.addWidget(self.json_migration_mode)
         layout.addWidget(format_group)
         
         # 필터
@@ -2556,6 +2747,14 @@ class ExportDialog(QDialog):
         self.type_combo = QComboBox()
         self.type_combo.addItems(["전체", "텍스트만", "링크만", "코드만"])
         filter_layout.addRow("유형:", self.type_combo)
+        self.date_filter_enabled = QCheckBox("시작일 이후 항목만 내보내기 (JSON)")
+        self.date_from_input = QDateEdit()
+        self.date_from_input.setDate(QDate.currentDate())
+        self.date_from_input.setCalendarPopup(True)
+        self.date_from_input.setEnabled(False)
+        self.date_filter_enabled.toggled.connect(self.date_from_input.setEnabled)
+        filter_layout.addRow(self.date_filter_enabled)
+        filter_layout.addRow("시작일:", self.date_from_input)
         layout.addWidget(filter_group)
         
         # 버튼
@@ -2573,13 +2772,19 @@ class ExportDialog(QDialog):
         """내보내기 실행"""
         type_map = {"전체": "all", "텍스트만": "TEXT", "링크만": "LINK", "코드만": "CODE"}
         filter_type = type_map.get(self.type_combo.currentText(), "all")
+        date_from = self.date_from_input.date().toPyDate() if self.date_filter_enabled.isChecked() else None
         
         exported_count = 0
         
         if self.format_json.isChecked():
             path, _ = QFileDialog.getSaveFileName(self, "JSON 저장", f"clipboard_export_{datetime.date.today()}.json", "JSON Files (*.json)")
             if path:
-                count = self.export_manager.export_json(path, filter_type)
+                count = self.export_manager.export_json(
+                    path,
+                    filter_type,
+                    date_from=date_from,
+                    include_metadata=self.json_migration_mode.isChecked(),
+                )
                 if count >= 0:
                     exported_count += count
         
@@ -3095,7 +3300,15 @@ class HotkeySettingsDialog(QDialog):
             "paste_last": self.input_paste.text().strip().lower()
         }
         self.db.set_setting("hotkeys", json.dumps(hotkeys))
-        QMessageBox.information(self, "저장 완료", "핫키 설정이 저장되었습니다.\n변경사항은 프로그램 재시작 후 적용됩니다.")
+        if self.parent() and hasattr(self.parent(), "register_hotkeys"):
+            try:
+                self.parent().register_hotkeys()
+            except Exception as e:
+                logger.warning(f"Hotkey apply error: {e}")
+                QMessageBox.warning(self, "부분 적용", f"설정은 저장되었지만 즉시 적용에 실패했습니다.\n{e}")
+                self.accept()
+                return
+        QMessageBox.information(self, "저장 완료", "핫키 설정이 저장되었고 즉시 적용되었습니다.")
         self.accept()
 
 
@@ -3255,7 +3468,7 @@ class SnippetManagerDialog(QDialog):
             return self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
         return None
     
-    def use_snippet(self):
+    def use_snippet(self, *_args):
         sid = self.get_selected_id()
         if not sid:
             return
@@ -3267,7 +3480,8 @@ class SnippetManagerDialog(QDialog):
                 content = self.process_template(content)
                 clipboard = QApplication.clipboard()
                 clipboard.setText(content)
-                self.parent_window.statusBar().showMessage("✅ 스니펫이 클립보드에 복사되었습니다.", 2000)
+                if self.parent_window and hasattr(self.parent_window, "statusBar"):
+                    self.parent_window.statusBar().showMessage("✅ 스니펫이 클립보드에 복사되었습니다.", 2000)
                 self.close()
                 break
     
@@ -3587,6 +3801,7 @@ class MainWindow(QMainWindow):
             # v10.5: 기본값 변경 - 항상 위 해제
             self.always_on_top = False
             self.current_tag_filter = None  # 태그 필터
+            self.current_collection_filter = "__all__"  # 컬렉션 필터
             self.sort_column = 3  # 기본 정렬: 시간 컨럼
             self.sort_order = Qt.SortOrder.DescendingOrder  # 기본: 내림차순
             
@@ -3632,8 +3847,11 @@ class MainWindow(QMainWindow):
             self.cleanup_timer.timeout.connect(self.run_periodic_cleanup)
             self.cleanup_timer.start(3600000)  # 1시간 = 3600000ms
             
-            # v10.5: 시작 시 백업 실행
-            QTimer.singleShot(3000, self.db.backup_db)
+            # v10.7: 일일 자동 백업 (실행 중 날짜 변경 포함)
+            self.backup_timer = QTimer(self)
+            self.backup_timer.timeout.connect(self.run_daily_backup_if_needed)
+            self.backup_timer.start(3600000)  # 1시간마다 확인
+            QTimer.singleShot(3000, self.run_daily_backup_if_needed)
             
             # v10.2: 등록된 핫키 추적 (안전한 해제를 위해)
             self._registered_hotkeys = []
@@ -3753,6 +3971,19 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.debug(f"Periodic cleanup error: {e}")
 
+    def run_daily_backup_if_needed(self):
+        """하루 1회 자동 백업 실행 (앱 재시작 없이 날짜 변경 대응)."""
+        try:
+            today = datetime.date.today().strftime("%Y%m%d")
+            last_backup = self.db.get_setting("last_auto_backup_date", "")
+            if last_backup == today:
+                return
+            if self.db.backup_db():
+                self.db.set_setting("last_auto_backup_date", today)
+                logger.info(f"Daily backup completed: {today}")
+        except Exception as e:
+            logger.warning(f"Daily backup check failed: {e}")
+
     # v10.4: 화면 표시 시 데이터 갱신 (Lazy Loading)
     def showEvent(self, event):
         if self.is_data_dirty:
@@ -3821,6 +4052,9 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'cleanup_timer') and self.cleanup_timer.isActive():
                 self.cleanup_timer.stop()
                 logger.debug("정리 타이머 중지됨")
+            if hasattr(self, 'backup_timer') and self.backup_timer.isActive():
+                self.backup_timer.stop()
+                logger.debug("백업 타이머 중지됨")
             
             # 3. 플로팅 미니 창 닫기
             if hasattr(self, 'mini_window') and self.mini_window:
@@ -3872,9 +4106,10 @@ class MainWindow(QMainWindow):
         file_name, _ = QFileDialog.getSaveFileName(self, "데이터 백업", f"backup_{datetime.date.today()}.db", "SQLite DB Files (*.db);;All Files (*)")
         if file_name:
             try:
-                import shutil
-                shutil.copy2(DB_FILE, file_name)
-                QMessageBox.information(self, "백업 완료", f"데이터가 성공적으로 백업되었습니다:\n{file_name}")
+                if self.db.backup_db(target_path=file_name, force=True):
+                    QMessageBox.information(self, "백업 완료", f"데이터가 성공적으로 백업되었습니다:\n{file_name}")
+                else:
+                    QMessageBox.critical(self, "백업 오류", "백업 파일 생성에 실패했습니다.")
             except Exception as e:
                 QMessageBox.critical(self, "백업 오류", f"백업 중 오류가 발생했습니다:\n{e}")
 
@@ -4477,11 +4712,7 @@ class MainWindow(QMainWindow):
                 pinned_ids.insert(insert_idx, source_pid)
             
             # DB 업데이트
-            success = True
-            for idx, pid in enumerate(pinned_ids):
-                if not self.db.update_pin_order(pid, idx):
-                    success = False
-                    break
+            success = self.db.update_pin_orders(pinned_ids)
             
             if success:
                 # 성공 시 UI 갱신 (딜레이로 드롭 애니메이션 방지)
@@ -4832,6 +5063,34 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"🏷️ '{tag}' 태그 필터 적용", 2000)
         self.load_data()
 
+    def refresh_collection_filter_options(self):
+        """컬렉션 필터 콤보 항목 갱신."""
+        if not hasattr(self, "collection_filter_combo"):
+            return
+        current = getattr(self, "current_collection_filter", "__all__")
+        self.collection_filter_combo.blockSignals(True)
+        try:
+            self.collection_filter_combo.clear()
+            self.collection_filter_combo.addItem("📂 전체 컬렉션", "__all__")
+            self.collection_filter_combo.addItem("🧺 미분류", "__uncategorized__")
+            for cid, cname, cicon, _ccolor, _created_at in self.db.get_collections():
+                self.collection_filter_combo.addItem(f"{cicon} {cname}", cid)
+
+            idx = self.collection_filter_combo.findData(current)
+            if idx < 0:
+                idx = 0
+                current = "__all__"
+            self.current_collection_filter = current
+            self.collection_filter_combo.setCurrentIndex(idx)
+        finally:
+            self.collection_filter_combo.blockSignals(False)
+
+    def on_collection_filter_changed(self, _index):
+        if not hasattr(self, "collection_filter_combo"):
+            return
+        self.current_collection_filter = self.collection_filter_combo.currentData()
+        self.load_data()
+
     def on_header_clicked(self, section):
         """헤더 클릭 시 정렬 토글"""
         # 📌(0) 컬럼은 정렬 비활성화
@@ -4912,6 +5171,12 @@ class MainWindow(QMainWindow):
         self.filter_combo.setFixedWidth(150)
         self.filter_combo.setToolTip("유형별 필터")
         self.filter_combo.currentTextChanged.connect(self.load_data)
+
+        self.collection_filter_combo = QComboBox()
+        self.collection_filter_combo.setObjectName("FilterCombo")
+        self.collection_filter_combo.setFixedWidth(180)
+        self.collection_filter_combo.setToolTip("컬렉션 필터")
+        self.collection_filter_combo.currentIndexChanged.connect(self.on_collection_filter_changed)
         
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 검색어 입력... (Ctrl+F)")
@@ -4934,9 +5199,11 @@ class MainWindow(QMainWindow):
         self.btn_tag_filter.clicked.connect(self.show_tag_filter_menu)
         
         top_layout.addWidget(self.filter_combo)
+        top_layout.addWidget(self.collection_filter_combo)
         top_layout.addWidget(self.search_input, 1)  # stretch factor 1
         top_layout.addWidget(self.btn_tag_filter)
         main_layout.addLayout(top_layout)
+        self.refresh_collection_filter_options()
 
         # 메인 스플리터
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -5269,6 +5536,14 @@ class MainWindow(QMainWindow):
         current_filter = self.filter_combo.currentText() if hasattr(self, 'filter_combo') else "전체"
         if current_filter != "전체":
             status_parts.append(f"🔍 {current_filter}")
+        collection_filter = getattr(self, "current_collection_filter", "__all__")
+        if collection_filter == "__uncategorized__":
+            status_parts.append("📁 미분류")
+        elif isinstance(collection_filter, int):
+            if hasattr(self, "collection_filter_combo"):
+                label = self.collection_filter_combo.currentText()
+                if label:
+                    status_parts.append(f"📁 {label}")
 
         # 검색 결과 수
         search_query = self.search_input.text() if hasattr(self, "search_input") else ""
@@ -5705,9 +5980,12 @@ class MainWindow(QMainWindow):
         """표시할 항목 조회 및 정렬"""
         search_query = self.search_input.text()
         filter_type = self.filter_combo.currentText()
+        collection_filter = getattr(self, "current_collection_filter", "__all__")
 
         bookmarked = filter_type == "⭐ 북마크"
         tag_filter = self.current_tag_filter
+        collection_id = collection_filter if isinstance(collection_filter, int) else None
+        uncategorized = collection_filter == "__uncategorized__"
 
         # 1. DB 조회 (FTS-backed unified search if available)
         if hasattr(self.db, "search_items"):
@@ -5716,10 +5994,20 @@ class MainWindow(QMainWindow):
                 type_filter=filter_type,
                 tag_filter=tag_filter,
                 bookmarked=bookmarked,
+                collection_id=collection_id,
+                uncategorized=uncategorized,
             )
         else:
             if tag_filter:
                 items = self.db.get_items_by_tag(tag_filter)
+                if search_query:
+                    items = [i for i in items if search_query.lower() in (i[1] or "").lower()]
+            elif uncategorized and hasattr(self.db, "get_items_uncategorized"):
+                items = self.db.get_items_uncategorized()
+                if search_query:
+                    items = [i for i in items if search_query.lower() in (i[1] or "").lower()]
+            elif collection_id is not None:
+                items = self.db.get_items_by_collection(collection_id)
                 if search_query:
                     items = [i for i in items if search_query.lower() in (i[1] or "").lower()]
             elif bookmarked:
@@ -5754,6 +6042,11 @@ class MainWindow(QMainWindow):
             empty_msg = f"🔍 '{search_query}'에 대한 검색 결과가 없습니다\n\n다른 검색어를 입력하거나 필터를 변경해보세요"
         elif self.current_tag_filter:
             empty_msg = f"🏷️ '{self.current_tag_filter}' 태그가 없습니다\n\n항목을 선택하고 마우스 오른쪽 버튼으로 태그를 추가하세요"
+        elif getattr(self, "current_collection_filter", "__all__") == "__uncategorized__":
+            empty_msg = "🧺 미분류 항목이 없습니다\n\n컬렉션에서 제거된 항목만 이 필터에 표시됩니다"
+        elif isinstance(getattr(self, "current_collection_filter", "__all__"), int):
+            current_collection_label = self.collection_filter_combo.currentText() if hasattr(self, "collection_filter_combo") else "선택한 컬렉션"
+            empty_msg = f"📁 '{current_collection_label}'에 항목이 없습니다\n\n항목을 우클릭하여 컬렉션으로 이동해보세요"
         else:
             empty_msg = "📋 클립보드 히스토리가 비어있습니다\n\n"
             empty_msg += "💡 시작 방법:\n"
@@ -6076,8 +6369,16 @@ class MainWindow(QMainWindow):
         if ok and name:
             icons = ["📁", "📂", "🗂️", "📦", "💼", "🎯", "⭐", "❤️", "🔖", "📌"]
             icon, _ = QInputDialog.getItem(self, "아이콘 선택", "아이콘:", icons, 0, False)
-            self.db.add_collection(name, icon or "📁")
-            self.statusBar().showMessage(f"📁 '{name}' 컬렉션이 생성되었습니다.", 2000)
+            created_id = self.db.add_collection(name, icon or "📁")
+            if created_id:
+                self.refresh_collection_filter_options()
+                if hasattr(self, "collection_filter_combo"):
+                    idx = self.collection_filter_combo.findData(created_id)
+                    if idx >= 0:
+                        self.collection_filter_combo.setCurrentIndex(idx)
+                self.statusBar().showMessage(f"📁 '{name}' 컬렉션이 생성되었습니다.", 2000)
+            else:
+                self.statusBar().showMessage("⚠️ 컬렉션 생성에 실패했습니다.", 2000)
     
     def move_to_collection(self, collection_id):
         pid = self.get_selected_id()
@@ -6087,6 +6388,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("📁 컬렉션으로 이동됨", 2000)
             else:
                 self.statusBar().showMessage("🚫 컬렉션에서 제거됨", 2000)
+            self.refresh_collection_filter_options()
             self.load_data()
 
     def open_link(self):

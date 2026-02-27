@@ -179,6 +179,60 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertIn(normal_first, [row[0] for row in items[3:]])
         self.assertIn(normal_last, [row[0] for row in items[3:]])
 
+    def test_soft_delete_restore_preserves_metadata(self):
+        item_id = self.db.add_item("meta-item", None, "TEXT")
+        self.db.set_item_tags(item_id, "alpha, beta")
+        self.db.set_note(item_id, "important note")
+        self.db.toggle_bookmark(item_id)
+        collection_id = self.db.add_collection("work")
+        self.assertTrue(collection_id)
+        self.assertTrue(self.db.assign_to_collection(item_id, collection_id))
+        self.db.toggle_pin(item_id)
+        self.db.increment_use_count(item_id)
+        self.db.increment_use_count(item_id)
+
+        self.assertTrue(self.db.soft_delete(item_id))
+        deleted_rows = self.db.get_deleted_items()
+        self.assertEqual(len(deleted_rows), 1)
+        deleted_id = deleted_rows[0][0]
+
+        self.assertTrue(self.db.restore_item(deleted_id))
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT tags, note, bookmark, collection_id, pinned, pin_order, use_count "
+                "FROM history WHERE content = ?",
+                ("meta-item",),
+            )
+            restored = cursor.fetchone()
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored[0], "alpha, beta")
+        self.assertEqual(restored[1], "important note")
+        self.assertEqual(restored[2], 1)
+        self.assertEqual(restored[3], collection_id)
+        self.assertEqual(restored[4], 1)
+        self.assertGreaterEqual(restored[5], 0)
+        self.assertEqual(restored[6], 2)
+
+    def test_cleanup_vacuum_uses_separate_counter(self):
+        calls = {"vacuum": 0}
+
+        def tracer(sql):
+            if "VACUUM" in sql.upper():
+                calls["vacuum"] += 1
+
+        self.db.conn.set_trace_callback(tracer)
+        try:
+            for _ in range(50):
+                self.db.cleanup(max_history=50)
+        finally:
+            self.db.conn.set_trace_callback(None)
+
+        self.assertGreaterEqual(calls["vacuum"], 1)
+        self.assertEqual(self.db.cleanup_count, 0)
+
 
 class CoreDatabaseSearchTests(unittest.TestCase):
     def setUp(self):
@@ -224,6 +278,21 @@ class CoreDatabaseSearchTests(unittest.TestCase):
         items = self.db.search_items("pinned")
         self.assertEqual([row[0] for row in items[:2]], [pinned_b, pinned_a])
         self.assertNotIn(normal, [row[0] for row in items])
+
+    def test_search_items_uncategorized_filter(self):
+        uncategorized_id = self.db.add_item("uncategorized-only", None, "TEXT")
+        categorized_id = self.db.add_item("categorized-only", None, "TEXT")
+        collection_id = self.db.add_collection("project")
+        self.assertTrue(collection_id)
+        self.assertTrue(self.db.assign_to_collection(categorized_id, collection_id))
+
+        uncategorized_items = {row[0] for row in self.db.search_items("", uncategorized=True)}
+        self.assertIn(uncategorized_id, uncategorized_items)
+        self.assertNotIn(categorized_id, uncategorized_items)
+
+        uncategorized_search = {row[0] for row in self.db.search_items("only", uncategorized=True)}
+        self.assertIn(uncategorized_id, uncategorized_search)
+        self.assertNotIn(categorized_id, uncategorized_search)
 
 
 if __name__ == "__main__":

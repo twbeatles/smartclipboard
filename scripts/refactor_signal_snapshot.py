@@ -28,7 +28,8 @@ def build_snapshot(path: str | pathlib.Path) -> list[str]:
     for lineno in range(class_start, class_end + 1):
         line = lines[lineno - 1]
         if ".connect(" in line:
-            snapshot.append(f"{lineno}:{line.strip()}")
+            normalized = " ".join(line.strip().split())
+            snapshot.append(normalized)
     return snapshot
 
 

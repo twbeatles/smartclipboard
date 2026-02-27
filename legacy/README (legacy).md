@@ -2,6 +2,8 @@
 
 > 고급 클립보드 매니저 - PyQt6 기반의 현대적이고 강력한 클립보드 관리 도구
 
+> ⚠️ 이 문서는 레거시 보관본입니다. 최신 실행 동작/검증 절차는 루트 `README.md`를 우선 기준으로 확인하세요.
+
 ![Version](https://img.shields.io/badge/version-10.6-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
@@ -23,7 +25,7 @@
 ### 🔒 보안 보관함
 - AES-256 암호화로 민감한 데이터 안전 보관
 - 마스터 비밀번호 기반 잠금
-- **v10.2**: 비밀번호 강도 검증 (8자 이상, 대/소문자+숫자+특수문자)
+- **v10.2**: 비밀번호 강도 검증 (8자 이상, 숫자+특수문자)
 - 5분 자동 잠금 타이머
 
 ### ⚡ 클립보드 액션 자동화
@@ -49,6 +51,7 @@
 ### 📤 내보내기/가져오기
 - JSON, CSV, Markdown 포맷 지원
 - 날짜 및 타입 필터링
+- JSON 마이그레이션 모드 (태그/메모/북마크/컬렉션 메타데이터 포함)
 - 백업 및 마이그레이션 용이
 
 ### 🎨 UI/UX
@@ -58,6 +61,7 @@
 - 온보딩 가이드가 포함된 빈 상태 UI
 - 플로팅 토스트 알림 (슬라이드 애니메이션)
 - 미니 창 모드 지원
+- 상단 컬렉션 필터(전체/미분류/개별 컬렉션)
 
 ### ⌨️ 글로벌 핫키
 | 단축키 | 기능 |
@@ -111,10 +115,17 @@ Pillow>=9.0.0           # 이미지 처리
 ## 🔨 빌드
 
 ```powershell
-pyinstaller smartclipboard.spec
+python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
+pyinstaller --clean smartclipboard.spec
 ```
 
 결과물: `dist/SmartClipboard.exe` (~40MB, UPX 압축 적용 시)
+
+## ✅ 로컬 프리플라이트
+
+```powershell
+python scripts/preflight_local.py
+```
 
 ---
 
@@ -161,6 +172,8 @@ pyinstaller smartclipboard.spec
 - `add_snippet`, `update_snippet`, `delete_snippet`: rollback/return 추가
 - `set_setting`: rollback 추가
 - `update_url_title`: URL 제목 캐시 저장 메서드 추가
+- 삭제/복원 시 휴지통 메타데이터(tags/note/bookmark/collection/pin/use_count) 보존
+- 고정 항목 순서 갱신을 트랜잭션 일괄 처리로 변경(`update_pin_orders`)
 
 ### 📁 Collections API 구현
 - `add_collection()`: 컴렉션 생성
@@ -169,6 +182,11 @@ pyinstaller smartclipboard.spec
 - `delete_collection()`: 삭제 (항목 연결 해제)
 - `assign_to_collection()`: 항목 할당/해제
 - `get_items_by_collection()`: 컴렉션별 조회
+- 메인 상단 상시 필터로 `전체/미분류/컬렉션` 즉시 조회 지원
+
+### ⌨️ 핫키/백업 동작 보강
+- 핫키 설정 저장 즉시 `register_hotkeys()` 재등록 (재시작 불필요)
+- 자동 백업을 "앱 시작 1회"에서 "실질적 일 1회"로 보강 (1시간 주기 날짜 변경 감시)
 
 ---
 
@@ -196,7 +214,7 @@ pyinstaller smartclipboard.spec
 ## 📝 v10.2 변경사항
 
 ### 🔐 보안 강화
-- 마스터 비밀번호 강도 검증 추가 (8자 이상, 대/소문자+숫자+특수문자 필수)
+- 마스터 비밀번호 강도 검증 추가 (8자 이상, 숫자+특수문자 필수)
 - URL 제목 가져오기 타임아웃 설정 (기본 5초)
 - 액션 패턴 정규식 유효성 검증
 
@@ -216,8 +234,8 @@ pyinstaller smartclipboard.spec
 - 충돌 핫키 감지 및 경고
 
 ### ⏱️ 클린업 타이머
-- 만료된 임시 항목 자동 정리 (1분 주기)
-- 휴지통 만료 항목 자동 삭제 (1분 주기)
+- 만료된 임시 항목 자동 정리 (1시간 주기)
+- 휴지통 만료 항목 자동 삭제 (1시간 주기)
 - `QTimer` 기반 리소스 정리
 
 ---

@@ -1,7 +1,4043 @@
 {
-  "file": "smartclipboard_app/legacy_main.py",
-  "has_main_entry": false,
-  "constants": [],
-  "top_functions": [],
-  "classes": []
+  "file": "smartclipboard_app/legacy_main_src.py",
+  "has_main_entry": true,
+  "constants": [
+    "ANIM_FAST",
+    "ANIM_NORMAL",
+    "ANIM_SLOW",
+    "APP_DIR",
+    "APP_NAME",
+    "CLEANUP_INTERVAL",
+    "CODE_INDICATORS",
+    "DB_FILE",
+    "DEFAULT_HOTKEYS",
+    "FILTER_TAG_MAP",
+    "GLASS_STYLES",
+    "HOTKEY",
+    "LOG_FILE",
+    "MAX_HISTORY",
+    "ORG_NAME",
+    "RE_HEX_COLOR",
+    "RE_HSL_COLOR",
+    "RE_RGB_COLOR",
+    "RE_URL",
+    "THEMES",
+    "TYPE_ICONS",
+    "UI_TEXTS",
+    "VERSION"
+  ],
+  "top_functions": [
+    {
+      "name": "get_app_directory",
+      "signature": {
+        "posonly": [],
+        "args": [],
+        "vararg": null,
+        "kwonly": [],
+        "kwarg": null,
+        "defaults_count": 0,
+        "kw_defaults_count": 0
+      }
+    }
+  ],
+  "classes": [
+    {
+      "name": "ClipboardActionManager",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "db"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_fetch_title_logic",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "url",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_handle_title_result",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "result",
+              "action_name"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "execute_action",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "action_type",
+              "text",
+              "params",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "fetch_url_title",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "url",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "fetch_url_title_async",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "url",
+              "item_id",
+              "action_name"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "format_email",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "format_phone",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "process",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "reload_actions",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "transform_text",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text",
+              "mode"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "ClipboardActionsDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db",
+              "action_manager"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_action",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_default_actions",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_action",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "action_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "load_actions",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_action",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "action_id",
+              "state"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "ClipboardDB",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_build_fts_match",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "cls",
+              "query"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_tokenize_search_query",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "query"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_clipboard_action",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "name",
+              "pattern",
+              "action_type",
+              "action_params"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_collection",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "name",
+              "icon",
+              "color"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 2,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_copy_rule",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "name",
+              "pattern",
+              "action",
+              "replacement"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "content",
+              "image_data",
+              "type_tag"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_snippet",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "name",
+              "content",
+              "shortcut",
+              "category"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 2,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_temp_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "content",
+              "image_data",
+              "type_tag",
+              "minutes"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_vault_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "encrypted_content",
+              "label"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "assign_to_collection",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id",
+              "collection_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "backup_db",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "target_path",
+              "force"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 2,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "cleanup",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "cleanup_expired_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "cleanup_expired_trash",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "clear_all",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "close",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "create_tables",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_clipboard_action",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "action_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_collection",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "collection_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_copy_rule",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "rule_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_snippet",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "snippet_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_vault_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "empty_trash",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "ensure_search_index",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_all_tags",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_all_text_content",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_bookmarked_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_clipboard_actions",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_collections",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_content",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_copy_rules",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_deleted_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_item_tags",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "search_query",
+              "type_filter"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 2,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_items_by_collection",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "collection_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_items_by_tag",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "tag"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_items_uncategorized",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_note",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_setting",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "key",
+              "default"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_snippets",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "category"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_statistics",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_today_count",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_top_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "limit"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_vault_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "increment_use_count",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "move_to_collection",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id",
+              "collection_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "restore_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "deleted_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "search_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "query",
+              "type_filter",
+              "tag_filter",
+              "bookmarked",
+              "collection_id",
+              "limit",
+              "uncategorized"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 6,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "set_item_metadata",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": "metadata",
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "set_item_tags",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id",
+              "tags"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "set_note",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id",
+              "note"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "set_setting",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "key",
+              "value"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "soft_delete",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_bookmark",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_clipboard_action",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "action_id",
+              "enabled"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_copy_rule",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "rule_id",
+              "enabled"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_pin",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "update_collection",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "collection_id",
+              "name",
+              "icon",
+              "color"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 2,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "update_pin_order",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id",
+              "order"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "update_pin_orders",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "ordered_ids"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "update_snippet",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "snippet_id",
+              "name",
+              "content",
+              "shortcut",
+              "category"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 2,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "update_url_title",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item_id",
+              "title"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "CopyRulesDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_rule",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_rule",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "load_rules",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_rule",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "rule_id",
+              "state"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "ExportDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "export_manager"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "do_export",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "ExportImportManager",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "db"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "export_csv",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "path",
+              "filter_type"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "export_json",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "path",
+              "filter_type",
+              "date_from",
+              "include_metadata"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 3,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "export_markdown",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "path",
+              "filter_type"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "import_csv",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "path"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "import_json",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "path"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "FloatingMiniWindow",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "db",
+              "parent"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "apply_mini_theme",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "load_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "mouseMoveEvent",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "event"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "mousePressEvent",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "event"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "on_item_double_clicked",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "item"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "open_main_window",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "showEvent",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "event"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "HotkeySettingsDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "reset_defaults",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "save_hotkeys",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "ImportDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "export_manager"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "browse_file",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "do_import",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "MainWindow",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "start_minimized"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_get_display_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_handle_drop_event",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "event"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_paste_last_item_slot",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_populate_table",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "items",
+              "theme"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_process_actions",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_process_image_clipboard",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "mime_data"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_process_text_clipboard",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "mime_data"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_show_empty_state",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "theme"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_toggle_mini_window_slot",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "analyze_text",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "apply_copy_rules",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "apply_theme",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "backup_data",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "change_theme",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "theme_key"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "check_startup_registry",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "check_vault_timeout",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "clear_all_history",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "closeEvent",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "event"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "copy_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "create_app_icon",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "create_collection",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_selected_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "edit_note",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "edit_tag",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "eventFilter",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "source",
+              "event"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "export_history",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "filter_by_tag",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "tag"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "generate_qr",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_selected_id",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_menu",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_shortcuts",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_tray",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "invalidate_rules_cache",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "is_light_color",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "hex_color"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "keyPressEvent",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "event"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "load_data",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "merge_selected",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "move_to_collection",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "collection_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "on_action_completed",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "action_name",
+              "result"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "on_clipboard_change",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "on_collection_filter_changed",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "_index"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "on_double_click_paste",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "row",
+              "col"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "on_header_clicked",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "section"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "on_search_text_changed",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "on_selection_changed",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "on_tray_activated",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "reason"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "open_link",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "paste_last_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "paste_selected",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "process_clipboard",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "quit_app",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "refresh_collection_filter_options",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "register_hotkeys",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "reset_clipboard_monitor",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "reset_settings",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "restore_data",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "restore_window_state",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "run_daily_backup_if_needed",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "run_periodic_cleanup",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "save_image_to_file",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "search_google",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "showEvent",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "event"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_about_dialog",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_clipboard_actions",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_context_menu",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "pos"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_copy_rules",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_export_dialog",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_hotkey_settings",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_import_dialog",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_secure_vault",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_settings",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_shortcuts_dialog",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_snippet_manager",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_statistics",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_tag_filter_menu",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_trash",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_window_from_tray",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_always_on_top",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_bookmark",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_debug_mode",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_mini_window",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_monitoring_pause",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_pin",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_privacy_mode",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "toggle_startup",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "tools_layout_visible",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "visible"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "transform_text",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "mode"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "update_always_on_top",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "update_status_bar",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "selection_count"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "update_tray_theme",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "update_ui_state",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "enabled"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "SecureVaultDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db",
+              "vault_manager"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "copy_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "vid",
+              "encrypted_data"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_item",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "vid"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "load_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "lock_vault",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_lock_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "unlock_vault",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "validate_password_strength",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "password"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "SecureVaultManager",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "db"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "check_timeout",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "decrypt",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "encrypted_data"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "derive_key",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "password",
+              "salt"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "encrypt",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "has_master_password",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "lock",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "set_master_password",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "password"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "unlock",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "password"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "SettingsDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db",
+              "current_theme"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "apply_dialog_theme",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_selected_theme",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "save_settings",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "SnippetDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db",
+              "snippet"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "save_snippet",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "SnippetManagerDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_snippet",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "delete_snippet",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "edit_snippet",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_selected_id",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "load_snippets",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "process_template",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "use_snippet",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": "_args",
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "StatisticsDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "TagEditDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db",
+              "item_id",
+              "current_tags"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "add_tag",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "tag"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_tags",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "current_tags"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "ToastNotification",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "message",
+              "duration",
+              "toast_type"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 2,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "_cleanup",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "fade_out",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "showEvent",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "event"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_toast",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "parent",
+              "message",
+              "duration",
+              "toast_type"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 2,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "TrashDialog",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "parent",
+              "db"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "apply_dialog_theme",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "empty_trash",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "init_ui",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "load_items",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "restore_selected",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "Worker",
+      "methods": [
+        {
+          "name": "__init__",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "fn"
+            ],
+            "vararg": "args",
+            "kwonly": [],
+            "kwarg": "kwargs",
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "run",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "WorkerSignals",
+      "methods": []
+    }
+  ]
 }

@@ -3,7 +3,8 @@
 SmartClipboard Pro v10.6 - PyInstaller spec
 
 Build:
-    pyinstaller smartclipboard.spec
+    python scripts/preflight_local.py
+    pyinstaller --clean smartclipboard.spec
 """
 
 from pathlib import Path
