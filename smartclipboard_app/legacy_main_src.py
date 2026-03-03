@@ -30,6 +30,7 @@ import base64
 import uuid
 import csv
 import hashlib  # v10.1: 모듈 레벨 import로 이동 (성능 최적화)
+import atexit
 from urllib.parse import quote  # v10.3: URL 인코딩용
 
 # 암호화 라이브러리 체크
@@ -91,15 +92,28 @@ APP_DIR = get_app_directory()
 from logging.handlers import RotatingFileHandler
 
 LOG_FILE = os.path.join(APP_DIR, "clipboard_manager.log")
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        RotatingFileHandler(LOG_FILE, maxBytes=1*1024*1024, backupCount=3, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    file_handler = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=1*1024*1024,
+        backupCount=3,
+        encoding='utf-8',
+        delay=True,
+    )
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    logger.propagate = False
+
+atexit.register(logging.shutdown)
 
 # --- 설정 ---
 DB_FILE = os.path.join(APP_DIR, "clipboard_history_v6.db")
@@ -602,19 +616,8 @@ class ClipboardDB:
         self._last_search_fallback = False
         self._last_search_error = None
 
-        if not q:
-            if normalized_tag:
-                return self.get_items_by_tag(normalized_tag)
-            if bookmarked or type_filter == "⭐ 북마크":
-                return self.get_bookmarked_items()
-            if collection_id is not None:
-                return self.get_items_by_collection(collection_id)
-            if uncategorized:
-                return self.get_items_uncategorized()
-            return self.get_items("", type_filter)
-
         match_expr = self._build_fts_match(q)
-        if match_expr:
+        if q and match_expr:
             with self.lock:
                 try:
                     cursor = self.conn.cursor()
@@ -665,12 +668,16 @@ class ClipboardDB:
 
         with self.lock:
             cursor = self.conn.cursor()
-            like = f"%{q}%"
             sql = (
                 "SELECT id, content, type, timestamp, pinned, use_count, pin_order "
-                "FROM history WHERE (content LIKE ? OR tags LIKE ? OR note LIKE ? OR url_title LIKE ?)"
+                "FROM history WHERE 1=1"
             )
-            params2 = [like, like, like, like]
+            params2 = []
+
+            if q:
+                like = f"%{q}%"
+                sql += " AND (content LIKE ? OR tags LIKE ? OR note LIKE ? OR url_title LIKE ?)"
+                params2.extend([like, like, like, like])
 
             if normalized_tag:
                 sql += (
@@ -688,6 +695,11 @@ class ClipboardDB:
             elif type_filter in FILTER_TAG_MAP:
                 sql += " AND type = ?"
                 params2.append(FILTER_TAG_MAP[type_filter])
+            elif type_filter != "전체":
+                legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
+                if type_filter in legacy_map:
+                    sql += " AND type = ?"
+                    params2.append(legacy_map[type_filter])
 
             if collection_id is not None:
                 sql += " AND collection_id = ?"
@@ -1771,7 +1783,12 @@ class ClipboardActionManager(QObject):  # v10.5: QObject 상속 (시그널 사�
                     
                     # v10.5: fetch_url_title은 비동기로 처리
                     if action_type == "fetch_title":
-                        self.fetch_url_title_async(text, item_id, name)
+                        match = re.search(r"https?://[^\s<>'\"\]\)]+", text or "")
+                        url = match.group(0) if match else None
+                        if not url:
+                            results.append((name, {"type": "notify", "message": "URL을 찾지 못해 제목 가져오기를 건너뛰었습니다."}))
+                            continue
+                        self.fetch_url_title_async(url, item_id, name)
                         results.append((name, {"type": "notify", "message": "URL 제목 가져오는 중..."}))
                     else:
                         result = self.execute_action(action_type, text, params, item_id)
@@ -1881,6 +1898,24 @@ class ExportImportManager:
                 "migration_mode": bool(include_metadata),
                 "items": []
             }
+            if include_metadata:
+                export_data["collections"] = []
+                try:
+                    with self.db.lock:
+                        cursor = self.db.conn.cursor()
+                        cursor.execute("SELECT id, name, icon, color FROM collections ORDER BY id")
+                        for cid, cname, cicon, ccolor in cursor.fetchall():
+                            export_data["collections"].append(
+                                {
+                                    "legacy_id": cid,
+                                    "name": cname,
+                                    "icon": cicon or "📁",
+                                    "color": ccolor or "#6366f1",
+                                }
+                            )
+                except Exception as col_exc:
+                    logger.debug(f"Export collections metadata skipped: {col_exc}")
+
             for item in items:
                 pid, content, ptype, timestamp, pinned, use_count, pin_order = item
                 if filter_type != "all" and filter_type != ptype:
@@ -2000,6 +2035,31 @@ class ExportImportManager:
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+
+            collection_id_map = {}
+            collections_payload = data.get("collections")
+            has_collections_payload = isinstance(collections_payload, list)
+            if has_collections_payload:
+                for col in collections_payload:
+                    if not isinstance(col, dict):
+                        continue
+                    legacy_id = col.get("legacy_id")
+                    name = (col.get("name") or "").strip()
+                    if not name:
+                        continue
+                    icon = col.get("icon") or "📁"
+                    color = col.get("color") or "#6366f1"
+                    new_id = self.db.add_collection(name, icon, color)
+                    if not new_id and hasattr(self.db, "get_collections"):
+                        for cid, cname, cicon, ccolor, _created_at in self.db.get_collections():
+                            if cname == name and (cicon or "📁") == icon and (ccolor or "#6366f1") == color:
+                                new_id = cid
+                                break
+                    if legacy_id is not None and new_id:
+                        try:
+                            collection_id_map[int(legacy_id)] = int(new_id)
+                        except (TypeError, ValueError):
+                            pass
             
             imported = 0
             for item in data.get("items", []):
@@ -2015,7 +2075,15 @@ class ExportImportManager:
                         metadata = {}
                         for key in ("tags", "note", "bookmark", "collection_id", "pinned", "pin_order", "use_count", "timestamp"):
                             if key in item:
-                                metadata[key] = item.get(key)
+                                if key == "collection_id" and has_collections_payload:
+                                    raw_legacy_collection = item.get(key)
+                                    try:
+                                        legacy_collection_id = int(raw_legacy_collection) if raw_legacy_collection is not None else None
+                                    except (TypeError, ValueError):
+                                        legacy_collection_id = None
+                                    metadata[key] = collection_id_map.get(legacy_collection_id)
+                                else:
+                                    metadata[key] = item.get(key)
                         if metadata and hasattr(self.db, "set_item_metadata"):
                             self.db.set_item_metadata(item_id, **metadata)
             return imported
@@ -2952,6 +3020,7 @@ class TrashDialog(QDialog):
         self.table.setColumnWidth(2, 90)
         self.table.setColumnWidth(3, 90)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
         
@@ -3196,6 +3265,8 @@ class FloatingMiniWindow(QWidget):
             if data:
                 content, blob, ptype = data
                 clipboard = QApplication.clipboard()
+                if self.parent_window and hasattr(self.parent_window, "is_internal_copy"):
+                    self.parent_window.is_internal_copy = True
                 if ptype == "IMAGE" and blob:
                     pixmap = QPixmap()
                     pixmap.loadFromData(blob)
@@ -3859,7 +3930,7 @@ class MainWindow(QMainWindow):
             # 앱 시작 시 5초 후 정리 작업 실행
             QTimer.singleShot(5000, self.run_periodic_cleanup)
             
-            logger.info("SmartClipboard Pro v10.3 started")
+            logger.info(f"SmartClipboard Pro v{VERSION} started")
         except Exception as e:
             logger.error(f"MainWindow Init Error: {e}", exc_info=True)
             raise e
@@ -5396,7 +5467,7 @@ class MainWindow(QMainWindow):
                         self.clipboard.dataChanged.disconnect(self.on_clipboard_change)  # 일시적 연결 해제
                     except (TypeError, RuntimeError):
                         pass  # 이미 연결 해제된 경우
-                    self.show_toast("🔗 링크 제목 발견", f"{title}")
+                    ToastNotification.show_toast(self, f"🔗 링크 제목 발견: {title}", duration=2500, toast_type="info")
                     # UI 입력 중이 아닐 때만 데이터 다시 로드
                     if not self.search_input.hasFocus():
                         self.load_data()
@@ -5450,10 +5521,10 @@ class MainWindow(QMainWindow):
         self.tray_pause_action.setChecked(self.is_monitoring_paused)
         
         if self.is_monitoring_paused:
-            self.show_toast("⏸ 모니터링 일시정지", "클립보드 수집이 잠시 중단됩니다.")
+            ToastNotification.show_toast(self, "⏸ 모니터링 일시정지: 클립보드 수집이 잠시 중단됩니다.", duration=2500, toast_type="info")
             self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION} (일시정지됨)")
         else:
-            self.show_toast("▶ 모니터링 재개", "클립보드 수집을 다시 시작합니다.")
+            ToastNotification.show_toast(self, "▶ 모니터링 재개: 클립보드 수집을 다시 시작합니다.", duration=2500, toast_type="success")
             self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION}")
             
         self.update_status_bar()
@@ -5570,11 +5641,13 @@ class MainWindow(QMainWindow):
         self.update_always_on_top()
 
     def update_always_on_top(self):
+        was_visible = self.isVisible()
         if self.always_on_top:
             self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         else:
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
-        self.show()
+        if was_visible:
+            self.show()
 
     def check_startup_registry(self):
         try:

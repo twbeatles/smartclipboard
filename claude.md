@@ -20,6 +20,7 @@
 - `legacy_main_payload.marshal`은 텍스트 diff/리뷰가 어려운 바이너리 payload입니다.
 - `legacy_main.py`를 소스 본문 파일로 가정하고 리팩토링하면 안 됩니다.
 - UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`을 재생성한 뒤 빌드해야 합니다.
+- JSON 마이그레이션 포맷(`include_metadata=True`)은 `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color)를 포함하며, import 시 컬렉션 ID remap을 수행합니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
   - `scripts/refactor_signal_snapshot.py`
@@ -39,6 +40,11 @@ python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.
 python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_app/legacy_main_src.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
 python -m unittest discover -s tests -v
 ```
+
+권장 회귀 포인트:
+- `tests/test_payload_sync.py` (payload 런타임 시그니처/URL 액션)
+- `tests/test_migration_collections.py` (JSON 마이그레이션 컬렉션 메타/ID remap)
+- `tests/test_legacy_ui_contracts.py` (레거시 UI 계약: 토스트 호출/선택모드/가시성 가드)
 
 ## 5. 빌드
 

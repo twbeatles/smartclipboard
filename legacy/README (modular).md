@@ -20,7 +20,7 @@ Windows용 PyQt6 기반 클립보드 매니저입니다.
 - 클립보드 액션 자동화
 - 스니펫/휴지통/미니 윈도우
 - JSON/CSV/Markdown 내보내기
-- JSON 마이그레이션 모드(메타데이터 포함) 내보내기/가져오기
+- JSON 마이그레이션 모드(메타데이터 + 컬렉션 정의/ID 매핑 정보 포함) 내보내기/가져오기
 
 ## 프로젝트 구조
 
@@ -62,6 +62,11 @@ python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.p
 python -m unittest discover -s tests -v
 ```
 
+권장 회귀 테스트:
+- `tests/test_payload_sync.py`
+- `tests/test_migration_collections.py`
+- `tests/test_legacy_ui_contracts.py`
+
 ## 빌드
 
 ```powershell
@@ -78,3 +83,4 @@ pyinstaller --clean smartclipboard.spec
 
 - 현재 `legacy_main`이 marshal payload 로더이므로, `smartclipboard_app/legacy_main.py` 소스만으로는 클래스/시그널 구조를 직접 추적하기 어렵습니다.
 - 구조 리팩토링을 재개하려면 신뢰 가능한 원본 `legacy_main.py` 소스 복원이 선행되어야 합니다.
+- 2026-03 정합성 패치로 URL 제목 추출 경로, 복합 필터 검색 경로, 휴지통 다중선택, minimized 시작 안정성, JSON 컬렉션 remap이 보강되었습니다.

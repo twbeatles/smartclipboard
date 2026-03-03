@@ -3,6 +3,7 @@
 > 고급 클립보드 매니저 - PyQt6 기반의 현대적이고 강력한 클립보드 관리 도구
 
 > ⚠️ 이 문서는 레거시 보관본입니다. 최신 실행 동작/검증 절차는 루트 `README.md`를 우선 기준으로 확인하세요.
+> ℹ️ 2026-03 정합성 패치(첫 URL 제목추출, 복합필터 검색 통합, 휴지통 다중선택, JSON 컬렉션 remap)는 루트 `README.md`와 테스트 스위트(`test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`)를 기준으로 관리됩니다.
 
 ![Version](https://img.shields.io/badge/version-10.6-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)

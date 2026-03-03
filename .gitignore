@@ -30,6 +30,7 @@ Desktop.ini
 *.sqlite
 *.sqlite3
 *.log
+*.log.*
 debug_startup_error.log
 
 # Backups (contains user DB snapshots)

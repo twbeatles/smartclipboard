@@ -49,7 +49,7 @@
 ### 📤 내보내기/가져오기
 - JSON, CSV, Markdown 포맷 지원
 - 날짜 및 타입 필터링
-- JSON 마이그레이션 모드 (태그/메모/북마크/컬렉션 메타데이터 포함)
+- JSON 마이그레이션 모드 (태그/메모/북마크 + 컬렉션 정의/ID 매핑 정보 포함)
 - 백업 및 마이그레이션 용이
 
 ### 🎨 UI/UX
@@ -126,6 +126,7 @@ python scripts/preflight_local.py
 ```
 
 `preflight_local.py`는 payload 재생성, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
+현재 회귀 범위에는 `test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`가 포함됩니다.
 
 필요 시 payload 재생성 단계를 건너뛰려면:
 
@@ -193,6 +194,14 @@ python scripts/preflight_local.py --skip-payload-build
 ### ⌨️ 핫키/백업 동작 보강
 - 핫키 설정 저장 즉시 `register_hotkeys()` 재등록 (재시작 불필요)
 - 자동 백업을 "앱 시작 1회"에서 "실질적 일 1회"로 보강 (1시간 주기 날짜 변경 감시)
+
+### 🛠️ 2026-03 정합성 패치
+- `ClipboardActionManager.fetch_title`가 텍스트 전체가 아닌 **첫 URL만 추출**해 제목 요청하도록 보강
+- 빈 검색(`q == ""`)에서도 태그/북마크/컬렉션/미분류 **복합 필터를 동시 적용**하도록 검색 경로 통합
+- `TrashDialog` 다중 선택(`ExtendedSelection`)을 명시해 문서와 실제 동작 정합성 확보
+- 미니 창 더블클릭 복사 시 `is_internal_copy`를 설정해 자기 재수집 루프 방지
+- `update_always_on_top()`에서 창 가시성 보존 가드 적용 (`--minimized` 시작 안정성 개선)
+- JSON 마이그레이션에 `collections` 메타데이터를 포함하고 import 시 컬렉션 ID remap 지원
 
 ---
 

@@ -5,6 +5,11 @@ SmartClipboard Pro v10.6 - PyInstaller spec
 Build:
     python scripts/preflight_local.py
     pyinstaller --clean smartclipboard.spec
+
+Notes:
+    - Runtime behavior is restored via legacy marshal payload.
+    - If legacy source changes, rebuild payload first and keep tests green
+      (`test_payload_sync`, `test_migration_collections`).
 """
 
 from pathlib import Path

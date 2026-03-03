@@ -294,6 +294,65 @@ class CoreDatabaseSearchTests(unittest.TestCase):
         self.assertIn(uncategorized_id, uncategorized_search)
         self.assertNotIn(categorized_id, uncategorized_search)
 
+    def test_search_items_empty_query_supports_tag_and_collection_filters_together(self):
+        target_id = self.db.add_item("target-item", None, "TEXT")
+        tag_only_id = self.db.add_item("tag-only", None, "TEXT")
+        collection_only_id = self.db.add_item("collection-only", None, "TEXT")
+
+        collection_id = self.db.add_collection("work")
+        self.assertTrue(collection_id)
+
+        self.db.set_item_tags(target_id, "alpha")
+        self.db.assign_to_collection(target_id, collection_id)
+
+        self.db.set_item_tags(tag_only_id, "alpha")
+        self.db.assign_to_collection(collection_only_id, collection_id)
+
+        rows = self.db.search_items("", tag_filter="alpha", collection_id=collection_id)
+        ids = {row[0] for row in rows}
+
+        self.assertIn(target_id, ids)
+        self.assertNotIn(tag_only_id, ids)
+        self.assertNotIn(collection_only_id, ids)
+
+    def test_search_items_empty_query_supports_tag_and_uncategorized_filters_together(self):
+        target_id = self.db.add_item("target-uncategorized", None, "TEXT")
+        categorized_id = self.db.add_item("categorized", None, "TEXT")
+        no_tag_id = self.db.add_item("no-tag", None, "TEXT")
+
+        collection_id = self.db.add_collection("project")
+        self.assertTrue(collection_id)
+
+        self.db.set_item_tags(target_id, "alpha")
+        self.db.set_item_tags(categorized_id, "alpha")
+        self.db.assign_to_collection(categorized_id, collection_id)
+
+        rows = self.db.search_items("", tag_filter="alpha", uncategorized=True)
+        ids = {row[0] for row in rows}
+
+        self.assertIn(target_id, ids)
+        self.assertNotIn(categorized_id, ids)
+        self.assertNotIn(no_tag_id, ids)
+
+    def test_search_items_empty_query_supports_bookmark_and_tag_filters_together(self):
+        target_id = self.db.add_item("bookmark-target", None, "TEXT")
+        unbookmarked_id = self.db.add_item("unbookmarked", None, "TEXT")
+        wrong_tag_id = self.db.add_item("wrong-tag", None, "TEXT")
+
+        self.db.set_item_tags(target_id, "alpha")
+        self.db.toggle_bookmark(target_id)
+
+        self.db.set_item_tags(unbookmarked_id, "alpha")
+        self.db.set_item_tags(wrong_tag_id, "beta")
+        self.db.toggle_bookmark(wrong_tag_id)
+
+        rows = self.db.search_items("", tag_filter="alpha", bookmarked=True)
+        ids = {row[0] for row in rows}
+
+        self.assertIn(target_id, ids)
+        self.assertNotIn(unbookmarked_id, ids)
+        self.assertNotIn(wrong_tag_id, ids)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

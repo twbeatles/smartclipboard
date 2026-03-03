@@ -342,21 +342,9 @@ class ClipboardDB:
         self._last_search_fallback = False
         self._last_search_error = None
 
-        # No query: preserve existing behavior (including existing filters).
-        if not q:
-            if normalized_tag:
-                return self.get_items_by_tag(normalized_tag)
-            if bookmarked or type_filter == "⭐ 북마크":
-                return self.get_bookmarked_items()
-            if collection_id is not None:
-                return self.get_items_by_collection(collection_id)
-            if uncategorized:
-                return self.get_items_uncategorized()
-            return self.get_items("", type_filter)
-
         # Prefer FTS if initialized.
         match_expr = self._build_fts_match(q)
-        if match_expr:
+        if q and match_expr:
             with self.lock:
                 try:
                     cursor = self.conn.cursor()
@@ -413,12 +401,16 @@ class ClipboardDB:
         # Fallback: LIKE across key fields.
         with self.lock:
             cursor = self.conn.cursor()
-            like = f"%{q}%"
             sql = (
                 "SELECT id, content, type, timestamp, pinned, use_count, pin_order "
-                "FROM history WHERE (content LIKE ? OR tags LIKE ? OR note LIKE ? OR url_title LIKE ?)"
+                "FROM history WHERE 1=1"
             )
-            params2: list[object] = [like, like, like, like]
+            params2: list[object] = []
+
+            if q:
+                like = f"%{q}%"
+                sql += " AND (content LIKE ? OR tags LIKE ? OR note LIKE ? OR url_title LIKE ?)"
+                params2.extend([like, like, like, like])
 
             if normalized_tag:
                 sql += (
@@ -436,6 +428,11 @@ class ClipboardDB:
             elif type_filter in FILTER_TAG_MAP:
                 sql += " AND type = ?"
                 params2.append(FILTER_TAG_MAP[type_filter])
+            elif type_filter != "전체":
+                legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
+                if type_filter in legacy_map:
+                    sql += " AND type = ?"
+                    params2.append(legacy_map[type_filter])
 
             if collection_id is not None:
                 sql += " AND collection_id = ?"

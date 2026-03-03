@@ -6,10 +6,16 @@ import os
 import pathlib
 import unittest
 
+from PyQt6.QtCore import QCoreApplication
+
 from scripts.refactor_symbol_inventory import build_inventory
 
 
 class PayloadSyncTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QCoreApplication.instance() or QCoreApplication([])
+
     @staticmethod
     def _sig_dict(func):
         signature = inspect.signature(func)
@@ -120,6 +126,75 @@ class PayloadSyncTests(unittest.TestCase):
             params = list(inspect.signature(method).parameters.values())
             has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
             self.assertTrue(has_varargs, "payload SnippetManagerDialog.use_snippet must accept signal args")
+        finally:
+            if old_impl is None:
+                os.environ.pop("SMARTCLIPBOARD_LEGACY_IMPL", None)
+            else:
+                os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = old_impl
+
+    def test_payload_fetch_title_uses_first_extracted_url(self):
+        class FakeActionDB:
+            def get_clipboard_actions(self):
+                return [(1, "fetch", r".*", "fetch_title", "{}", 1, 0)]
+
+            def update_url_title(self, item_id, title):
+                return True
+
+        old_impl = os.environ.get("SMARTCLIPBOARD_LEGACY_IMPL")
+        try:
+            os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = "payload"
+            module = importlib.import_module("smartclipboard_app.legacy_main")
+            module = importlib.reload(module)
+
+            manager = module.ClipboardActionManager(FakeActionDB())
+            captured = {}
+
+            def fake_fetch(url, item_id, action_name):
+                captured["url"] = url
+                captured["item_id"] = item_id
+                captured["action_name"] = action_name
+
+            manager.fetch_url_title_async = fake_fetch
+            results = manager.process("prefix https://example.com/path?q=1 suffix", item_id=9)
+
+            self.assertEqual(captured.get("url"), "https://example.com/path?q=1")
+            self.assertEqual(captured.get("item_id"), 9)
+            self.assertEqual(captured.get("action_name"), "fetch")
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0][1]["type"], "notify")
+        finally:
+            if old_impl is None:
+                os.environ.pop("SMARTCLIPBOARD_LEGACY_IMPL", None)
+            else:
+                os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = old_impl
+
+    def test_payload_fetch_title_without_url_returns_notify(self):
+        class FakeActionDB:
+            def get_clipboard_actions(self):
+                return [(1, "fetch", r".*", "fetch_title", "{}", 1, 0)]
+
+            def update_url_title(self, item_id, title):
+                return True
+
+        old_impl = os.environ.get("SMARTCLIPBOARD_LEGACY_IMPL")
+        try:
+            os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = "payload"
+            module = importlib.import_module("smartclipboard_app.legacy_main")
+            module = importlib.reload(module)
+
+            manager = module.ClipboardActionManager(FakeActionDB())
+            called = {"count": 0}
+
+            def fake_fetch(url, item_id, action_name):
+                called["count"] += 1
+
+            manager.fetch_url_title_async = fake_fetch
+            results = manager.process("url 없음", item_id=3)
+
+            self.assertEqual(called["count"], 0)
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0][1]["type"], "notify")
+            self.assertIn("URL", results[0][1]["message"])
         finally:
             if old_impl is None:
                 os.environ.pop("SMARTCLIPBOARD_LEGACY_IMPL", None)
