@@ -1,4 +1,4 @@
-"""Run local preflight checks for SmartClipboard.
+﻿"""Run local preflight checks for SmartClipboard.
 
 This script standardizes the minimum verification sequence before packaging:
 1) rebuild payload + smoke import
@@ -23,6 +23,27 @@ def run_step(cmd: list[str]) -> int:
     if result.returncode != 0:
         print(f"step failed with code {result.returncode}")
     return result.returncode
+
+
+def compile_targets() -> list[str]:
+    targets = [
+        "클립모드 매니저.py",
+        "smartclipboard_app/bootstrap.py",
+        "smartclipboard_app/legacy_main.py",
+        "smartclipboard_app/legacy_main_src.py",
+        "smartclipboard_core/database.py",
+        "smartclipboard_core/actions.py",
+        "smartclipboard_core/worker.py",
+    ]
+
+    helper_dir = REPO_ROOT / "smartclipboard_app" / "ui" / "mainwindow_parts"
+    if helper_dir.exists():
+        targets.extend(
+            str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+            for path in sorted(helper_dir.glob("*.py"))
+        )
+
+    return targets
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -50,20 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             ]
         )
 
-    steps.append(
-        [
-            python,
-            "-m",
-            "py_compile",
-            "클립모드 매니저.py",
-            "smartclipboard_app/bootstrap.py",
-            "smartclipboard_app/legacy_main.py",
-            "smartclipboard_app/legacy_main_src.py",
-            "smartclipboard_core/database.py",
-            "smartclipboard_core/actions.py",
-            "smartclipboard_core/worker.py",
-        ]
-    )
+    steps.append([python, "-m", "py_compile", *compile_targets()])
     steps.append([python, "-m", "unittest", "discover", "-s", "tests", "-v"])
 
     for step in steps:

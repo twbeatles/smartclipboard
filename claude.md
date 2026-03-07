@@ -60,3 +60,11 @@ pyinstaller --clean smartclipboard.spec
 
 장기적으로 구조 분할 리팩토링을 지속하려면 `legacy_main.py` 원본 소스 복원이 필요합니다.  
 복원 전에는 로더/payload 호환성을 깨지 않는 변경만 수행합니다.
+
+## 7. MainWindow 분할 리팩토링 작업 규칙 (2026-03-07)
+
+- `legacy_main_src.MainWindow` 메서드 시그니처는 외부 계약으로 간주하고 유지합니다.
+- 본문 분할은 `smartclipboard_app/ui/mainwindow_parts/` helper 함수로 수행합니다.
+- `eventFilter` helper에서는 module-level `super()`를 사용하지 않고, 원본 클래스의 fallback 이벤트 필터를 주입받아 호출합니다.
+- `scripts/refactor_signal_snapshot.py` 스냅샷은 `legacy_main_src.py` + `mainwindow_parts/*.py`를 모두 포함해야 합니다.
+- 수동 `py_compile` 검증 시 helper 모듈도 함께 포함해야 하며, 기본적으로는 `python scripts/preflight_local.py` 실행을 우선합니다.

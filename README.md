@@ -349,3 +349,16 @@ MIT License
   <b>Made with ❤️ by MySmartTools</b><br>
   <sub>© 2025-2026</sub>
 </div>
+
+---
+
+## MainWindow 분할 구조 (2026-03-07)
+
+- `smartclipboard_app/legacy_main_src.py`의 `MainWindow` 공개 메서드 시그니처는 유지됩니다.
+- 실제 대형 메서드 본문은 `smartclipboard_app/ui/mainwindow_parts/`로 위임되었습니다.
+  - `theme_ops.py`: `apply_theme`
+  - `ui_ops.py`: `init_ui`, `eventFilter`, `_handle_drop_event`
+  - `menu_ops.py`: `init_menu`, `show_context_menu`
+  - `table_ops.py`: `load_data`, `_get_display_items`, `_show_empty_state`, `_populate_table`, `on_selection_changed`
+- 시그널 스냅샷 검증(`scripts/refactor_signal_snapshot.py`, `tests/test_signal_snapshot.py`)은 `legacy_main_src.py`와 `mainwindow_parts/*.py`를 함께 스캔합니다.
+- 로컬 사전검증(`scripts/preflight_local.py`)의 `py_compile` 단계에 `mainwindow_parts/*.py`가 포함됩니다.

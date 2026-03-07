@@ -8,7 +8,8 @@ class SignalSnapshotTests(unittest.TestCase):
     def test_mainwindow_signal_connections_snapshot(self):
         baseline_path = pathlib.Path("tests/baseline/mainwindow_signal_connects.txt")
         baseline = baseline_path.read_text(encoding="utf-8").splitlines()
-        current = build_snapshot("smartclipboard_app/legacy_main_src.py")
+        helper_paths = sorted(pathlib.Path("smartclipboard_app/ui/mainwindow_parts").glob("*.py"))
+        current = build_snapshot("smartclipboard_app/legacy_main_src.py", helper_paths=[*helper_paths])
         self.assertEqual(current, baseline)
 
 
