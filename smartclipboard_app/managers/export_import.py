@@ -37,6 +37,21 @@ class ExportImportManager:
                 "migration_mode": bool(include_metadata),
                 "items": [],
             }
+            if include_metadata:
+                export_data["collections"] = []
+                if hasattr(self.db, "get_collections"):
+                    try:
+                        for cid, cname, cicon, ccolor, _created_at in self.db.get_collections():
+                            export_data["collections"].append(
+                                {
+                                    "legacy_id": int(cid),
+                                    "name": cname,
+                                    "icon": cicon,
+                                    "color": ccolor,
+                                }
+                            )
+                    except Exception as exc:
+                        self.logger.debug("Collection export skipped: %s", exc)
             for item in items:
                 pid, content, ptype, timestamp, pinned, use_count, pin_order = item
                 if filter_type != "all" and filter_type != ptype:
@@ -151,6 +166,23 @@ class ExportImportManager:
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
 
+            collection_id_map = {}
+            collections_payload = data.get("collections", [])
+            if collections_payload and hasattr(self.db, "add_collection"):
+                for entry in collections_payload:
+                    legacy_id = entry.get("legacy_id")
+                    name = (entry.get("name") or "").strip()
+                    if not name:
+                        continue
+                    icon = entry.get("icon") or "?뱛"
+                    color = entry.get("color") or "#6366f1"
+                    try:
+                        new_id = self.db.add_collection(name, icon, color)
+                        if new_id and legacy_id is not None:
+                            collection_id_map[int(legacy_id)] = int(new_id)
+                    except Exception as exc:
+                        self.logger.debug("Collection import skipped for %s: %s", name, exc)
+
             imported = 0
             for item in data.get("items", []):
                 content = item.get("content", "")
@@ -168,6 +200,14 @@ class ExportImportManager:
                 for key in ("tags", "note", "bookmark", "collection_id", "pinned", "pin_order", "use_count", "timestamp"):
                     if key in item:
                         metadata[key] = item.get(key)
+                if collection_id_map and "collection_id" in metadata:
+                    legacy_collection_id = metadata.get("collection_id")
+                    try:
+                        lookup_key = int(legacy_collection_id)
+                    except (TypeError, ValueError):
+                        lookup_key = legacy_collection_id
+                    if lookup_key in collection_id_map:
+                        metadata["collection_id"] = collection_id_map[lookup_key]
                 if metadata and hasattr(self.db, "set_item_metadata"):
                     self.db.set_item_metadata(item_id, **metadata)
             return imported

@@ -107,6 +107,7 @@ class TrashDialog(QDialog):
         self.table.setColumnWidth(2, 90)
         self.table.setColumnWidth(3, 90)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
 

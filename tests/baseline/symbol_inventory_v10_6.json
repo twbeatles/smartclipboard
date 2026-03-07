@@ -59,6 +59,22 @@
             "defaults_count": 0,
             "kw_defaults_count": 0
           }
+        },
+        {
+          "name": "process",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "text",
+              "item_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 1,
+            "kw_defaults_count": 0
+          }
         }
       ]
     },

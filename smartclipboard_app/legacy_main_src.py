@@ -92,6 +92,7 @@ from smartclipboard_core import (
     Worker as CoreWorker,
     WorkerSignals as CoreWorkerSignals,
 )
+from smartclipboard_core.actions import extract_first_url as core_extract_first_url
 from smartclipboard_app.managers.export_import import ExportImportManager as AppExportImportManager
 from smartclipboard_app.managers.secure_vault import SecureVaultManager as AppSecureVaultManager
 from smartclipboard_app.ui.dialogs.snippets import (
@@ -361,6 +362,31 @@ class SecureVaultManager(AppSecureVaultManager):
 class ClipboardActionManager(CoreClipboardActionManager):
     """Compatibility export backed by smartclipboard_core.actions."""
 
+    def process(self, text, item_id=None):
+        results = super().process(text, item_id=item_id)
+        if results:
+            return results
+
+        for action in self.actions_cache:
+            if not action.get("enabled") or action.get("type") != "fetch_title":
+                continue
+            try:
+                compiled = action.get("compiled")
+                if compiled is None or not compiled.search(text):
+                    continue
+            except re.error:
+                continue
+
+            if core_extract_first_url(text):
+                return [
+                    (
+                        action.get("name", "fetch_title"),
+                        {"type": "notify", "message": "URL 제목 가져오기를 요청했습니다."},
+                    )
+                ]
+
+        return results
+
     def fetch_url_title(self, url, item_id):
         # Kept for legacy compatibility.
         return None
@@ -421,6 +447,7 @@ class TrashDialog(AppTrashDialog):
 
     def __init__(self, parent, db):
         super().__init__(parent=parent, db=db, themes=THEMES)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
 
 # --- v8.0: 플로팅 미니 창 ---
@@ -1161,7 +1188,7 @@ class MainWindow(QMainWindow):
                         self.clipboard.dataChanged.disconnect(self.on_clipboard_change)  # 일시적 연결 해제
                     except (TypeError, RuntimeError):
                         pass  # 이미 연결 해제된 경우
-                    self.show_toast("🔗 링크 제목 발견", f"{title}")
+                    ToastNotification.show_toast(self, "🔗 링크 제목 발견", f"{title}")
                     # UI 입력 중이 아닐 때만 데이터 다시 로드
                     if not self.search_input.hasFocus():
                         self.load_data()
@@ -1215,10 +1242,10 @@ class MainWindow(QMainWindow):
         self.tray_pause_action.setChecked(self.is_monitoring_paused)
         
         if self.is_monitoring_paused:
-            self.show_toast("⏸ 모니터링 일시정지", "클립보드 수집이 잠시 중단됩니다.")
+            ToastNotification.show_toast(self, "⏸ 모니터링 일시정지", "클립보드 수집이 잠시 중단됩니다.")
             self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION} (일시정지됨)")
         else:
-            self.show_toast("▶ 모니터링 재개", "클립보드 수집을 다시 시작합니다.")
+            ToastNotification.show_toast(self, "▶ 모니터링 재개", "클립보드 수집을 다시 시작합니다.")
             self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION}")
             
         self.update_status_bar()
@@ -1335,11 +1362,13 @@ class MainWindow(QMainWindow):
         self.update_always_on_top()
 
     def update_always_on_top(self):
+        was_visible = self.isVisible()
         if self.always_on_top:
             self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         else:
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
-        self.show()
+        if was_visible:
+            self.show()
 
     def check_startup_registry(self):
         try:
