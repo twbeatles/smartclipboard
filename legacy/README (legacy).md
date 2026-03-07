@@ -3,7 +3,7 @@
 > 고급 클립보드 매니저 - PyQt6 기반의 현대적이고 강력한 클립보드 관리 도구
 
 > ⚠️ 이 문서는 레거시 보관본입니다. 최신 실행 동작/검증 절차는 루트 `README.md`를 우선 기준으로 확인하세요.
-> ℹ️ 2026-03 정합성 패치(첫 URL 제목추출, 복합필터 검색 통합, 휴지통 다중선택, JSON 컬렉션 remap)는 루트 `README.md`와 테스트 스위트(`test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`)를 기준으로 관리됩니다.
+> ℹ️ 2026-03 정합성 패치(첫 URL 제목추출, 복합필터 검색 통합, 휴지통 다중선택, JSON 컬렉션 remap)는 루트 `README.md`와 테스트 스위트(`test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`)를 기준으로 관리됩니다.
 
 ![Version](https://img.shields.io/badge/version-10.6-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
@@ -177,17 +177,25 @@ python scripts/preflight_local.py
 - 고정 항목 순서 갱신을 트랜잭션 일괄 처리로 변경(`update_pin_orders`)
 
 ### 📁 Collections API 구현
-- `add_collection()`: 컴렉션 생성
+- `add_collection()`: 컬렉션 생성
 - `get_collections()`: 목록 조회
 - `update_collection()`: 수정
 - `delete_collection()`: 삭제 (항목 연결 해제)
 - `assign_to_collection()`: 항목 할당/해제
-- `get_items_by_collection()`: 컴렉션별 조회
+- `get_items_by_collection()`: 컬렉션별 조회
 - 메인 상단 상시 필터로 `전체/미분류/컬렉션` 즉시 조회 지원
 
 ### ⌨️ 핫키/백업 동작 보강
 - 핫키 설정 저장 즉시 `register_hotkeys()` 재등록 (재시작 불필요)
 - 자동 백업을 "앱 시작 1회"에서 "실질적 일 1회"로 보강 (1시간 주기 날짜 변경 감시)
+
+### 🛠️ 2026-03 정합성 패치
+- `fetch_title` 액션 경로가 텍스트 전체가 아닌 **첫 URL만 추출**해 제목 요청하도록 보강
+- 빈 검색(`q == ""`)에서도 태그/북마크/컬렉션/미분류 **복합 필터를 동시 적용**하도록 검색 경로 통합
+- `TrashDialog` 다중 선택(`ExtendedSelection`)을 명시해 문서와 실제 동작 정합성 확보
+- 미니 창 더블클릭 복사 시 `is_internal_copy`를 설정해 자기 재수집 루프 방지
+- `update_always_on_top()`에서 창 가시성 보존 가드 적용 (`--minimized` 시작 안정성 개선)
+- JSON 마이그레이션에 `collections` 메타데이터를 포함하고 import 시 컬렉션 ID remap 지원
 
 ---
 

@@ -126,7 +126,7 @@ python scripts/preflight_local.py
 ```
 
 `preflight_local.py`는 payload 재생성, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
-현재 회귀 범위에는 `test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`가 포함됩니다.
+현재 회귀 범위에는 `test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`가 포함됩니다.
 
 필요 시 payload 재생성 단계를 건너뛰려면:
 
@@ -183,12 +183,12 @@ python scripts/preflight_local.py --skip-payload-build
 - 고정 항목 순서 갱신을 트랜잭션 일괄 처리로 변경(`update_pin_orders`)
 
 ### 📁 Collections API 구현
-- `add_collection()`: 컴렉션 생성
+- `add_collection()`: 컬렉션 생성
 - `get_collections()`: 목록 조회
 - `update_collection()`: 수정
 - `delete_collection()`: 삭제 (항목 연결 해제)
 - `assign_to_collection()`: 항목 할당/해제
-- `get_items_by_collection()`: 컴렉션별 조회
+- `get_items_by_collection()`: 컬렉션별 조회
 - 메인 상단 상시 필터로 `전체/미분류/컬렉션` 즉시 조회 지원
 
 ### ⌨️ 핫키/백업 동작 보강
@@ -196,7 +196,7 @@ python scripts/preflight_local.py --skip-payload-build
 - 자동 백업을 "앱 시작 1회"에서 "실질적 일 1회"로 보강 (1시간 주기 날짜 변경 감시)
 
 ### 🛠️ 2026-03 정합성 패치
-- `ClipboardActionManager.fetch_title`가 텍스트 전체가 아닌 **첫 URL만 추출**해 제목 요청하도록 보강
+- `fetch_title` 액션 경로가 텍스트 전체가 아닌 **첫 URL만 추출**해 제목 요청하도록 보강
 - 빈 검색(`q == ""`)에서도 태그/북마크/컬렉션/미분류 **복합 필터를 동시 적용**하도록 검색 경로 통합
 - `TrashDialog` 다중 선택(`ExtendedSelection`)을 명시해 문서와 실제 동작 정합성 확보
 - 미니 창 더블클릭 복사 시 `is_internal_copy`를 설정해 자기 재수집 루프 방지
@@ -362,3 +362,9 @@ MIT License
   - `table_ops.py`: `load_data`, `_get_display_items`, `_show_empty_state`, `_populate_table`, `on_selection_changed`
 - 시그널 스냅샷 검증(`scripts/refactor_signal_snapshot.py`, `tests/test_signal_snapshot.py`)은 `legacy_main_src.py`와 `mainwindow_parts/*.py`를 함께 스캔합니다.
 - 로컬 사전검증(`scripts/preflight_local.py`)의 `py_compile` 단계에 `mainwindow_parts/*.py`가 포함됩니다.
+
+## 문서 정합성 기준 (2026-03-07)
+
+- 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `legacy/README (modular).md`는 동일 기준을 따릅니다.
+- 권장 회귀 테스트 기준은 `test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot` 4종입니다.
+- PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`) 포함과 함께 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집합니다.

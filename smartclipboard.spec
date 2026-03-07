@@ -9,10 +9,12 @@ Build:
 Notes:
     - Runtime behavior is restored via legacy marshal payload.
     - If legacy source changes, rebuild payload first and keep tests green
-      (`test_payload_sync`, `test_migration_collections`).
+      (`test_payload_sync`, `test_migration_collections`,
+       `test_legacy_ui_contracts`, `test_signal_snapshot`).
 """
 
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 
 APP_NAME = "SmartClipboard"
 APP_VERSION = "10.6"
@@ -22,6 +24,10 @@ LEGACY_PAYLOAD = Path("smartclipboard_app/legacy_main_payload.marshal")
 
 if not LEGACY_PAYLOAD.exists():
     raise FileNotFoundError(f"Required legacy payload not found: {LEGACY_PAYLOAD}")
+
+# Keep refactor-safe module coverage for payload runtime imports.
+CORE_SUBMODULES = collect_submodules("smartclipboard_core")
+MAINWINDOW_PARTS_SUBMODULES = collect_submodules("smartclipboard_app.ui.mainwindow_parts")
 
 EXCLUDES = [
     "pytest", "unittest", "test", "tests", "setuptools", "pip", "wheel",
@@ -87,6 +93,10 @@ HIDDEN_IMPORTS = [
     "cryptography.hazmat.primitives.kdf.pbkdf2",
     "requests", "bs4", "qrcode", "PIL", "PIL.ImageQt",
 ]
+
+for submodule in CORE_SUBMODULES + MAINWINDOW_PARTS_SUBMODULES:
+    if submodule not in HIDDEN_IMPORTS:
+        HIDDEN_IMPORTS.append(submodule)
 
 a = Analysis(
     [MAIN_SCRIPT],

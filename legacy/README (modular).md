@@ -66,6 +66,7 @@ python -m unittest discover -s tests -v
 - `tests/test_payload_sync.py`
 - `tests/test_migration_collections.py`
 - `tests/test_legacy_ui_contracts.py`
+- `tests/test_signal_snapshot.py`
 
 ## 빌드
 
@@ -77,10 +78,15 @@ pyinstaller --clean smartclipboard.spec
 
 - `dist/SmartClipboard.exe`
 
-`smartclipboard.spec`는 `smartclipboard_app/legacy_main_payload.marshal`을 `datas`로 포함하도록 설정되어 있습니다.
+`smartclipboard.spec`는 `smartclipboard_app/legacy_main_payload.marshal`을 `datas`로 포함하며, `smartclipboard_core`와 `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집합니다.
 
 ## 중요 참고
 
 - 현재 `legacy_main`이 marshal payload 로더이므로, `smartclipboard_app/legacy_main.py` 소스만으로는 클래스/시그널 구조를 직접 추적하기 어렵습니다.
 - 구조 리팩토링을 재개하려면 신뢰 가능한 원본 `legacy_main.py` 소스 복원이 선행되어야 합니다.
-- 2026-03 정합성 패치로 URL 제목 추출 경로, 복합 필터 검색 경로, 휴지통 다중선택, minimized 시작 안정성, JSON 컬렉션 remap이 보강되었습니다.
+- 2026-03 정합성 패치로 fetch_title 액션의 첫 URL 추출 경로, 복합 필터 검색 경로, 휴지통 다중선택, minimized 시작 안정성, JSON 컬렉션 remap이 보강되었습니다.
+
+## 문서 정합성 기준 (2026-03-07)
+
+- 상세 변경 이력은 루트 `README.md`를 기준으로 관리합니다.
+- 개발 가이드는 `claude.md`, `.gemini/GEMINI.md`와 동일한 테스트/빌드 기준을 따릅니다.

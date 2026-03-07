@@ -21,7 +21,9 @@
 - `legacy_main.py`에 기존 대형 소스가 있다고 가정하고 라인 단위 리팩토링하면 안 됩니다.
 - 구조 인벤토리/시그널 스냅샷은 로더 구조 특성상 소스 본문 검증과 의미가 달라질 수 있습니다.
 - payload 반영 누락 방지를 위해 `tests/test_payload_sync.py`를 포함한 로컬 preflight를 우선 실행합니다.
+- `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
 - JSON 마이그레이션(`include_metadata=True`)에는 top-level `collections` 메타데이터가 포함되며 import 시 컬렉션 ID remap이 수행됩니다.
+- `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
 
 ## 검증 커맨드
 
@@ -41,6 +43,7 @@ python -m unittest discover -s tests -v
 - `tests/test_payload_sync.py`
 - `tests/test_migration_collections.py`
 - `tests/test_legacy_ui_contracts.py`
+- `tests/test_signal_snapshot.py`
 
 ## 빌드
 
