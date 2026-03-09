@@ -1,0 +1,16 @@
+{
+  "typeCheckingMode": "standard",
+  "include": [
+    "클립모드 매니저.py",
+    "smartclipboard_app",
+    "smartclipboard_core",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "build",
+    "dist",
+    "legacy",
+    "smartclipboard_app/legacy_main_src.py"
+  ]
+}

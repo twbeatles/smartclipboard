@@ -14,7 +14,8 @@ class LegacyUiContractsTests(unittest.TestCase):
     def _method_block(self, method_name: str) -> str:
         pattern = rf"^    def {re.escape(method_name)}\(self[^\n]*\):\n((?:        .*\n)*)"
         match = re.search(pattern, self.source, flags=re.MULTILINE)
-        self.assertIsNotNone(match, f"missing method: {method_name}")
+        if match is None:
+            self.fail(f"missing method: {method_name}")
         return match.group(1)
 
     def test_show_toast_calls_are_not_bound_to_mainwindow(self):

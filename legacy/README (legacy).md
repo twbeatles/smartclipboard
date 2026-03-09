@@ -4,6 +4,7 @@
 
 > ⚠️ 이 문서는 레거시 보관본입니다. 최신 실행 동작/검증 절차는 루트 `README.md`를 우선 기준으로 확인하세요.
 > ℹ️ 2026-03 정합성 패치(첫 URL 제목추출, 복합필터 검색 통합, 휴지통 다중선택, JSON 컬렉션 remap)는 루트 `README.md`와 테스트 스위트(`test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`)를 기준으로 관리됩니다.
+> ℹ️ Pylance/pyright 기준선은 루트 `pyrightconfig.json`을 따르며, 이 레거시 보관본과 `smartclipboard_app/legacy_main_src.py`는 기본 분석 범위에서 제외됩니다.
 
 ![Version](https://img.shields.io/badge/version-10.6-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
@@ -84,7 +85,7 @@
 ## 📦 설치
 
 ### 방법 1: 실행 파일 (권장)
-[Releases](https://github.com/your-repo/smartclipboard/releases)에서 `SmartClipboard.exe` 다운로드
+[Releases](https://github.com/twbeatles/smartclipboard/releases)에서 `SmartClipboard.exe` 다운로드
 
 ### 방법 2: 소스에서 실행
 ```powershell
@@ -126,6 +127,12 @@ pyinstaller --clean smartclipboard.spec
 
 ```powershell
 python scripts/preflight_local.py
+```
+
+정적 분석은 루트 기준으로 별도 실행합니다:
+
+```powershell
+pyright
 ```
 
 ---

@@ -1,3 +1,13 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .clipboard_controller import ClipboardController
+    from .lifecycle_controller import LifecycleController
+    from .table_controller import TableController
+    from .tray_hotkey_controller import TrayHotkeyController
+
 __all__ = [
     "ClipboardController",
     "TableController",
@@ -6,7 +16,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name):
+def __getattr__(name: str):
     if name == "ClipboardController":
         from .clipboard_controller import ClipboardController
 

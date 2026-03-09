@@ -464,13 +464,15 @@ class ClipboardDB:
                     "INSERT INTO history (content, image_data, type, timestamp) VALUES (?, ?, ?, ?)", 
                     (content, image_data, type_tag, timestamp)
                 )
+                item_id = cursor.lastrowid
+                if item_id is None:
+                    raise sqlite3.Error("Inserted history row has no id")
                 self.conn.commit()
                 # v10.0: cleanup 최적화 - 매번이 아닌 N회마다 실행
                 self.add_count += 1
                 if self.add_count >= CLEANUP_INTERVAL:
                     self.cleanup()
                     self.add_count = 0
-                item_id = cursor.lastrowid
                 logger.debug(f"항목 추가: {type_tag} (id={item_id})")
                 return item_id  # 삽입된 항목 ID 반환 (성능 최적화)
             except sqlite3.Error as e:
@@ -726,10 +728,13 @@ class ClipboardDB:
     def _get_max_history(self, fallback: int = DEFAULT_MAX_HISTORY) -> int:
         """Resolve max_history setting with safe bounds."""
         raw_value = self.get_setting("max_history", fallback)
-        try:
-            max_history = int(raw_value)
-        except (TypeError, ValueError):
+        if raw_value is None:
             max_history = fallback
+        else:
+            try:
+                max_history = int(raw_value)
+            except (TypeError, ValueError):
+                max_history = fallback
         return min(max(max_history, 10), 500)
 
     def cleanup(self, max_history: int | None = None) -> None:
@@ -881,8 +886,11 @@ class ClipboardDB:
                     "INSERT INTO collections (name, icon, color, created_at) VALUES (?, ?, ?, ?)",
                     (name, icon, color, created_at)
                 )
+                collection_row_id = cursor.lastrowid
+                if collection_row_id is None:
+                    raise sqlite3.Error("Inserted collection row has no id")
                 self.conn.commit()
-                return cursor.lastrowid
+                return collection_row_id
             except sqlite3.Error as e:
                 logger.error(f"Collection Add Error: {e}")
                 self.conn.rollback()

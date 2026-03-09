@@ -81,7 +81,7 @@
 ## 📦 설치
 
 ### 방법 1: 실행 파일 (권장)
-[Releases](https://github.com/your-repo/smartclipboard/releases)에서 `SmartClipboard.exe` 다운로드
+[Releases](https://github.com/twbeatles/smartclipboard/releases)에서 `SmartClipboard.exe` 다운로드
 
 ### 방법 2: 소스에서 실행
 ```powershell
@@ -127,12 +127,23 @@ python scripts/preflight_local.py
 
 `preflight_local.py`는 payload 재생성, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
 현재 회귀 범위에는 `test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`가 포함됩니다.
+`pyright`는 별도 단계이며 루트 `pyrightconfig.json` 기준으로 현행 유지보수 대상만 분석합니다.
 
 필요 시 payload 재생성 단계를 건너뛰려면:
 
 ```powershell
 python scripts/preflight_local.py --skip-payload-build
 ```
+
+## 🔎 정적 분석 (Pylance/Pyright)
+
+```powershell
+pyright
+```
+
+- 루트 `pyrightconfig.json`이 공식 분석 범위를 정의합니다.
+- 기본 범위에는 현행 유지보수 대상(`클립모드 매니저.py`, `smartclipboard_app/`, `smartclipboard_core/`, `tests/`)만 포함됩니다.
+- 레거시 보관본 `legacy/클립모드 매니저 (legacy).py`와 소스 스냅샷 `smartclipboard_app/legacy_main_src.py`는 호환성 참조용이므로 기본 분석에서 제외됩니다.
 
 ---
 
@@ -277,14 +288,25 @@ python scripts/preflight_local.py --skip-payload-build
 
 ## 📁 프로젝트 구조
 
-```
-smartclipboard-main/
-├── 클립모드 매니저.py    # 메인 애플리케이션 (6,000+ lines)
-├── requirements.txt      # Python 의존성
-├── smartclipboard.spec   # PyInstaller 빌드 설정
-├── README.md             # 문서
-├── claude.md             # AI 가이드
-└── clipboard_history_v6.db  # SQLite 데이터베이스 (자동 생성)
+```text
+smartclipboard/
+├── 클립모드 매니저.py                # 외부 호환 파사드
+├── pyrightconfig.json               # Pylance/pyright 분석 범위
+├── requirements.txt                 # Python 의존성
+├── smartclipboard.spec              # PyInstaller 빌드 설정
+├── smartclipboard_app/
+│   ├── bootstrap.py
+│   ├── legacy_main.py               # legacy payload loader
+│   ├── legacy_main_payload.marshal  # 런타임 payload
+│   ├── managers/
+│   └── ui/
+│       └── mainwindow_parts/        # MainWindow helper 분리 모듈
+├── smartclipboard_core/
+│   ├── actions.py
+│   ├── database.py
+│   └── worker.py
+├── tests/
+└── legacy/                          # 참조용 레거시 보관본
 ```
 
 ---
@@ -321,6 +343,7 @@ smartclipboard-main/
 - 기본값(권장): payload 모드 (`smartclipboard_app/legacy_main_payload.marshal`) (env: 미설정 또는 `SMARTCLIPBOARD_LEGACY_IMPL=payload`)
 - 소스 모드(정적 분석/클래스/시그널 추적용): env `SMARTCLIPBOARD_LEGACY_IMPL=src`
 - 복원된 원본 소스: `smartclipboard_app/legacy_main_src.py` (원본: `legacy/클립모드 매니저 (legacy).py`)
+- Pylance/pyright는 루트 `pyrightconfig.json`을 기준으로 현행 유지보수 코드만 검사합니다.
 - 기존 모듈러 레이아웃 README는 `legacy/README (modular).md`에 보관되어 있습니다.
 
 ---

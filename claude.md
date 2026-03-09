@@ -5,6 +5,7 @@
 - 실행 진입점: `클립모드 매니저.py`
 - 부트스트랩: `smartclipboard_app/bootstrap.py`
 - 코어 비즈니스 로직: `smartclipboard_core/`
+- 정적 분석 범위: 루트 `pyrightconfig.json` (현행 유지보수 대상 기준)
 - 레거시 런타임:
   - `smartclipboard_app/legacy_main.py`는 **marshal payload 로더**
   - 실제 본문은 `smartclipboard_app/legacy_main_payload.marshal`
@@ -19,6 +20,7 @@
 
 - `legacy_main_payload.marshal`은 텍스트 diff/리뷰가 어려운 바이너리 payload입니다.
 - `legacy_main.py`를 소스 본문 파일로 가정하고 리팩토링하면 안 됩니다.
+- `pyright`/Pylance 진단은 기본적으로 `legacy/클립모드 매니저 (legacy).py`와 `smartclipboard_app/legacy_main_src.py`를 제외한 현행 코드 기준으로 맞춥니다.
 - UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`을 재생성한 뒤 빌드해야 합니다.
 - `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
 - JSON 마이그레이션 포맷(`include_metadata=True`)은 `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color)를 포함하며, import 시 컬렉션 ID remap을 수행합니다.
@@ -32,12 +34,14 @@
 ## 4. 필수 검증
 
 ```powershell
+pyright
 python scripts/preflight_local.py
 ```
 
 또는 단계별 실행:
 
 ```powershell
+pyright
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_app/legacy_main_src.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
 python -m unittest discover -s tests -v

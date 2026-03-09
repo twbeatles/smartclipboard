@@ -1,3 +1,20 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .clipboard_actions import ClipboardActionsDialog
+    from .copy_rules import CopyRulesDialog
+    from .export_dialog import ExportDialog
+    from .hotkeys import HotkeySettingsDialog
+    from .import_dialog import ImportDialog
+    from .secure_vault import SecureVaultDialog
+    from .settings import SettingsDialog
+    from .snippets import SnippetDialog, SnippetManagerDialog
+    from .statistics import StatisticsDialog
+    from .tags import TagEditDialog
+    from .trash_dialog import TrashDialog
+
 __all__ = [
     "SettingsDialog",
     "SecureVaultDialog",
@@ -14,7 +31,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name):
+def __getattr__(name: str):
     if name == "SettingsDialog":
         from .settings import SettingsDialog
 

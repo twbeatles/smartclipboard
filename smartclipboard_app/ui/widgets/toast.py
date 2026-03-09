@@ -1,7 +1,7 @@
 """Toast widget module."""
 
 from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QTimer, Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QShowEvent
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel
 
 
@@ -90,8 +90,8 @@ class ToastNotification(QFrame):
 
         QTimer.singleShot(duration, self.fade_out)
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
         self.slide_in_animation.start()
 
     def fade_out(self):

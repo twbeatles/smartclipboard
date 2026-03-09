@@ -3,10 +3,13 @@
 SmartClipboard Pro v10.6 - PyInstaller spec
 
 Build:
+    pyright
     python scripts/preflight_local.py
     pyinstaller --clean smartclipboard.spec
 
 Notes:
+    - Static analysis scope lives in pyrightconfig.json and intentionally
+      excludes legacy archive/source snapshots from the default Pylance run.
     - Runtime behavior is restored via legacy marshal payload.
     - If legacy source changes, rebuild payload first and keep tests green
       (`test_payload_sync`, `test_migration_collections`,

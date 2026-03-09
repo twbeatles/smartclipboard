@@ -5,17 +5,24 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from PyQt6.QtCore import QObject, QThreadPool, pyqtSignal
 
-try:
-    import requests
-    from bs4 import BeautifulSoup
+requests: Any | None
+BeautifulSoup: Any | None
 
-    HAS_WEB = True
+try:
+    import requests as _requests
+    from bs4 import BeautifulSoup as _BeautifulSoup
 except ImportError:
+    requests = None
+    BeautifulSoup = None
     HAS_WEB = False
+else:
+    requests = _requests
+    BeautifulSoup = _BeautifulSoup
+    HAS_WEB = True
 
 from .worker import Worker
 
@@ -40,7 +47,10 @@ class ClipboardActionManager(QObject):
         self.db = db
         self.actions_cache = []
         self.reload_actions()
-        self.threadpool = QThreadPool.globalInstance()
+        threadpool = QThreadPool.globalInstance()
+        if threadpool is None:
+            threadpool = QThreadPool()
+        self.threadpool = threadpool
 
     def reload_actions(self):
         """액션 규칙 캐시 갱신 - 정규식 사전 컴파일 최적화."""
@@ -131,6 +141,8 @@ class ClipboardActionManager(QObject):
     def _fetch_title_logic(url, item_id):
         """작업 스레드에서 실행될 로직."""
         try:
+            if requests is None or BeautifulSoup is None:
+                return {"title": None, "item_id": item_id, "url": url, "error": "web libraries unavailable"}
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             response = requests.get(url, headers=headers, timeout=(3, 5), verify=True)
             response.raise_for_status()

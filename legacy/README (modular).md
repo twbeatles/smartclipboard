@@ -2,11 +2,14 @@
 
 Windows용 PyQt6 기반 클립보드 매니저입니다.
 
+> ⚠️ 이 문서는 모듈화 전환 당시의 보관 문서입니다. 최신 기준은 루트 `README.md`와 `pyrightconfig.json`입니다.
+
 ## 현재 상태
 
 - 엔트리 파일: `클립모드 매니저.py` (호환 파사드)
 - 앱 부트스트랩: `smartclipboard_app/bootstrap.py`
 - 코어 로직: `smartclipboard_core/`
+- 정적 분석 범위: 루트 `pyrightconfig.json` (현행 유지보수 대상 기준)
 - 레거시 런타임: `smartclipboard_app/legacy_main.py`
   - 현재 `legacy_main.py`는 소스 본문이 아니라 `legacy_main_payload.marshal`을 로드/실행하는 호환 로더입니다.
   - payload 파일: `smartclipboard_app/legacy_main_payload.marshal`
@@ -54,9 +57,16 @@ python "클립모드 매니저.py"
 python scripts/preflight_local.py
 ```
 
+정적 분석은 별도 실행:
+
+```powershell
+pyright
+```
+
 또는 단계별 실행:
 
 ```powershell
+pyright
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_app/legacy_main_src.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
 python -m unittest discover -s tests -v
@@ -83,6 +93,7 @@ pyinstaller --clean smartclipboard.spec
 ## 중요 참고
 
 - 현재 `legacy_main`이 marshal payload 로더이므로, `smartclipboard_app/legacy_main.py` 소스만으로는 클래스/시그널 구조를 직접 추적하기 어렵습니다.
+- `pyright`/Pylance는 현행 유지보수 코드만 기본 분석 대상으로 보며, `smartclipboard_app/legacy_main_src.py`와 `legacy/` 보관본은 제외됩니다.
 - 구조 리팩토링을 재개하려면 신뢰 가능한 원본 `legacy_main.py` 소스 복원이 선행되어야 합니다.
 - 2026-03 정합성 패치로 fetch_title 액션의 첫 URL 추출 경로, 복합 필터 검색 경로, 휴지통 다중선택, minimized 시작 안정성, JSON 컬렉션 remap이 보강되었습니다.
 

@@ -9,7 +9,10 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pyright/
+.pyrightcache/
 .coverage
+.coverage.*
 htmlcov/
 *.egg-info/
 

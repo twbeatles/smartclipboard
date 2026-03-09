@@ -1,7 +1,15 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .export_import import ExportImportManager
+    from .secure_vault import SecureVaultManager
+
 __all__ = ["SecureVaultManager", "ExportImportManager"]
 
 
-def __getattr__(name):
+def __getattr__(name: str):
     if name == "SecureVaultManager":
         from .secure_vault import SecureVaultManager
 

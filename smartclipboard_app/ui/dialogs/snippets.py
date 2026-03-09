@@ -1,5 +1,7 @@
 """Snippet dialogs module."""
 
+from typing import Callable, cast
+
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -11,6 +13,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QStatusBar,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -112,15 +115,18 @@ class SnippetManagerDialog(QDialog):
         self.table.setHorizontalHeaderLabels(["이름", "카테고리", "내용 미리보기"])
 
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        if header is not None:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 120)
         self.table.setColumnWidth(1, 80)
 
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.verticalHeader().setVisible(False)
+        vertical_header = self.table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
         self.table.cellDoubleClicked.connect(self.use_snippet)
@@ -167,9 +173,14 @@ class SnippetManagerDialog(QDialog):
             self.load_snippets()
 
     def get_selected_id(self):
-        rows = self.table.selectionModel().selectedRows()
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return None
+        rows = selection_model.selectedRows()
         if rows:
-            return self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+            item = self.table.item(rows[0].row(), 0)
+            if item is not None:
+                return item.data(Qt.ItemDataRole.UserRole)
         return None
 
     def use_snippet(self, *_args):
@@ -182,9 +193,18 @@ class SnippetManagerDialog(QDialog):
                 content = s[2]
                 content = self.process_template(content)
                 clipboard = QApplication.clipboard()
+                if clipboard is None:
+                    return
                 clipboard.setText(content)
-                if self.parent_window and hasattr(self.parent_window, "statusBar"):
-                    self.parent_window.statusBar().showMessage("✅ 스니펫이 클립보드에 복사되었습니다.", 2000)
+                if self.parent_window:
+                    status_bar_getter = cast(
+                        Callable[[], QStatusBar | None] | None,
+                        getattr(self.parent_window, "statusBar", None),
+                    )
+                    if status_bar_getter is not None:
+                        status_bar = status_bar_getter()
+                        if status_bar is not None:
+                            status_bar.showMessage("✅ 스니펫이 클립보드에 복사되었습니다.", 2000)
                 self.close()
                 break
 
@@ -200,7 +220,8 @@ class SnippetManagerDialog(QDialog):
         text = text.replace("{{datetime}}", now.strftime("%Y-%m-%d %H:%M:%S"))
 
         if "{{clipboard}}" in text:
-            current_clip = QApplication.clipboard().text() or ""
+            clipboard = QApplication.clipboard()
+            current_clip = clipboard.text() if clipboard is not None else ""
             text = text.replace("{{clipboard}}", current_clip)
 
         random_pattern = r"\{\{random:(\d+)\}\}"

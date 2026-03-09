@@ -21,6 +21,8 @@ class SymbolInventoryTests(unittest.TestCase):
         self.assertIn("run(", text)
 
         spec = importlib.util.spec_from_file_location("smartclipboard_facade", facade_path)
+        assert spec is not None
+        assert spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
