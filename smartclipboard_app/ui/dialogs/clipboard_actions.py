@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import TypeVar
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -18,6 +19,13 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+T = TypeVar("T")
+
+
+def _ensure(value: T | None) -> T:
+    assert value is not None
+    return value
 
 
 class ClipboardActionsDialog(QDialog):
@@ -45,7 +53,7 @@ class ClipboardActionsDialog(QDialog):
         self.table = QTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(["활성", "이름", "패턴", "액션", "삭제"])
-        header = self.table.horizontalHeader()
+        header = _ensure(self.table.horizontalHeader())
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -55,7 +63,9 @@ class ClipboardActionsDialog(QDialog):
         self.table.setColumnWidth(1, 120)
         self.table.setColumnWidth(3, 100)
         self.table.setColumnWidth(4, 60)
-        self.table.verticalHeader().setVisible(False)
+        vertical_header = self.table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
         layout.addWidget(self.table)
 
         default_layout = QHBoxLayout()

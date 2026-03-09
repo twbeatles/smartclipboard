@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Protocol, cast
 
 from PyQt6.QtWidgets import (
     QDialog,
@@ -23,6 +24,16 @@ DEFAULT_HOTKEYS = {
     "show_mini": "alt+v",
     "paste_last": "ctrl+shift+z",
 }
+
+
+class _HotkeyParent(Protocol):
+    def register_hotkeys(self) -> None: ...
+
+
+def _hotkey_parent(value: object | None) -> _HotkeyParent | None:
+    if value is not None and hasattr(value, "register_hotkeys"):
+        return cast(_HotkeyParent, value)
+    return None
 
 
 class HotkeySettingsDialog(QDialog):
@@ -87,9 +98,10 @@ class HotkeySettingsDialog(QDialog):
             "paste_last": self.input_paste.text().strip().lower(),
         }
         self.db.set_setting("hotkeys", json.dumps(hotkeys))
-        if self.parent() and hasattr(self.parent(), "register_hotkeys"):
+        parent = _hotkey_parent(self.parent())
+        if parent is not None:
             try:
-                self.parent().register_hotkeys()
+                parent.register_hotkeys()
             except Exception as exc:
                 self.logger.warning("Hotkey apply error: %s", exc)
                 QMessageBox.warning(self, "부분 적용", f"설정은 저장되었지만 즉시 적용에 실패했습니다.\n{exc}")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol, TypeVar, cast
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -15,6 +17,23 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+T = TypeVar("T")
+
+
+class _RulesParent(Protocol):
+    def invalidate_rules_cache(self) -> None: ...
+
+
+def _ensure(value: T | None) -> T:
+    assert value is not None
+    return value
+
+
+def _rules_parent(value: object | None) -> _RulesParent | None:
+    if value is not None and hasattr(value, "invalidate_rules_cache"):
+        return cast(_RulesParent, value)
+    return None
 
 
 class CopyRulesDialog(QDialog):
@@ -39,7 +58,7 @@ class CopyRulesDialog(QDialog):
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["활성", "이름", "패턴", "동작"])
-        header = self.table.horizontalHeader()
+        header = _ensure(self.table.horizontalHeader())
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -47,7 +66,9 @@ class CopyRulesDialog(QDialog):
         self.table.setColumnWidth(0, 50)
         self.table.setColumnWidth(1, 100)
         self.table.setColumnWidth(3, 80)
-        self.table.verticalHeader().setVisible(False)
+        vertical_header = self.table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
         layout.addWidget(self.table)
 
         bottom_layout = QHBoxLayout()
@@ -94,22 +115,31 @@ class CopyRulesDialog(QDialog):
         if ok:
             self.db.add_copy_rule(name.strip(), pattern.strip(), action)
             self.load_rules()
-            if hasattr(self.parent(), "invalidate_rules_cache"):
-                self.parent().invalidate_rules_cache()
+            parent = _rules_parent(self.parent())
+            if parent is not None:
+                parent.invalidate_rules_cache()
 
     def toggle_rule(self, rule_id, state):
         self.db.toggle_copy_rule(rule_id, 1 if state else 0)
-        if hasattr(self.parent(), "invalidate_rules_cache"):
-            self.parent().invalidate_rules_cache()
+        parent = _rules_parent(self.parent())
+        if parent is not None:
+            parent.invalidate_rules_cache()
 
     def delete_rule(self):
-        rows = self.table.selectionModel().selectedRows()
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return
+        rows = selection_model.selectedRows()
         if rows:
-            rid = self.table.item(rows[0].row(), 1).data(Qt.ItemDataRole.UserRole)
+            item = self.table.item(rows[0].row(), 1)
+            if item is None:
+                return
+            rid = item.data(Qt.ItemDataRole.UserRole)
             self.db.delete_copy_rule(rid)
             self.load_rules()
-            if hasattr(self.parent(), "invalidate_rules_cache"):
-                self.parent().invalidate_rules_cache()
+            parent = _rules_parent(self.parent())
+            if parent is not None:
+                parent.invalidate_rules_cache()
 
 
 __all__ = ["CopyRulesDialog"]

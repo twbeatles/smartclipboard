@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import Protocol, cast
 
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import QPoint, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QMouseEvent, QPixmap, QShowEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -35,6 +36,23 @@ FALLBACK_GLASS_STYLES = {"dark": {"glass_bg": "rgba(22, 33, 62, 0.85)"}}
 FALLBACK_TYPE_ICONS = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨"}
 
 
+class _MiniParent(Protocol):
+    current_theme: str
+
+    def show(self) -> None: ...
+    def activateWindow(self) -> None: ...
+
+
+class _KeyboardSender(Protocol):
+    def send(self, hotkey: str) -> object: ...
+
+
+def _mini_parent(value: object | None) -> _MiniParent | None:
+    if value is not None and hasattr(value, "show") and hasattr(value, "activateWindow"):
+        return cast(_MiniParent, value)
+    return None
+
+
 class FloatingMiniWindow(QWidget):
     """Floating quick-access clipboard widget."""
 
@@ -57,13 +75,13 @@ class FloatingMiniWindow(QWidget):
         self.glass_styles = glass_styles or FALLBACK_GLASS_STYLES
         self.type_icons = type_icons or FALLBACK_TYPE_ICONS
         self.logger = logger_ or logger
-        self.keyboard = keyboard_module
+        self.keyboard = cast(_KeyboardSender | None, keyboard_module)
         self.setWindowTitle("📋 빠른 클립보드")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMinimumSize(280, 350)
         self.resize(300, 400)
-        self.drag_pos = None
+        self.drag_pos: QPoint | None = None
         self.init_ui()
 
     def init_ui(self):
@@ -106,7 +124,8 @@ class FloatingMiniWindow(QWidget):
         main_layout.addWidget(self.container)
 
     def apply_mini_theme(self):
-        theme_name = self.parent_window.current_theme if self.parent_window and hasattr(self.parent_window, "current_theme") else "dark"
+        parent = _mini_parent(self.parent_window)
+        theme_name = parent.current_theme if parent is not None else "dark"
         theme = self.themes.get(theme_name, self.themes["dark"])
         glass = self.glass_styles.get(theme_name, self.glass_styles["dark"])
 
@@ -188,6 +207,8 @@ class FloatingMiniWindow(QWidget):
             if data:
                 content, blob, ptype = data
                 clipboard = QApplication.clipboard()
+                if clipboard is None:
+                    return
                 if ptype == "IMAGE" and blob:
                     pixmap = QPixmap()
                     pixmap.loadFromData(blob)
@@ -196,29 +217,31 @@ class FloatingMiniWindow(QWidget):
                     clipboard.setText(content)
                 self.db.increment_use_count(pid)
                 self.hide()
-                if self.keyboard is not None:
-                    QTimer.singleShot(200, lambda: self.keyboard.send("ctrl+v"))
+                keyboard = self.keyboard
+                if keyboard is not None:
+                    QTimer.singleShot(200, lambda: keyboard.send("ctrl+v"))
         except Exception as exc:
             self.logger.error("Mini window copy error: %s", exc)
 
     def open_main_window(self):
-        if self.parent_window:
-            self.parent_window.show()
-            self.parent_window.activateWindow()
+        parent = _mini_parent(self.parent_window)
+        if parent is not None:
+            parent.show()
+            parent.activateWindow()
         self.hide()
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+    def mousePressEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
+            self.drag_pos = a0.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            a0.accept()
 
-    def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.MouseButton.LeftButton and self.drag_pos:
-            self.move(event.globalPosition().toPoint() - self.drag_pos)
-            event.accept()
+    def mouseMoveEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is not None and a0.buttons() == Qt.MouseButton.LeftButton and self.drag_pos is not None:
+            self.move(a0.globalPosition().toPoint() - self.drag_pos)
+            a0.accept()
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
         self.load_items()
 
 

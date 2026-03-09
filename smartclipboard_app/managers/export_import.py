@@ -174,12 +174,12 @@ class ExportImportManager:
                     name = (entry.get("name") or "").strip()
                     if not name:
                         continue
-                    icon = entry.get("icon") or "?뱛"
+                    icon = entry.get("icon") or "📁"
                     color = entry.get("color") or "#6366f1"
                     try:
                         new_id = self.db.add_collection(name, icon, color)
-                        if new_id and legacy_id is not None:
-                            collection_id_map[int(legacy_id)] = int(new_id)
+                        if isinstance(new_id, int) and not isinstance(new_id, bool) and legacy_id is not None:
+                            collection_id_map[int(legacy_id)] = new_id
                     except Exception as exc:
                         self.logger.debug("Collection import skipped for %s: %s", name, exc)
 
@@ -202,10 +202,12 @@ class ExportImportManager:
                         metadata[key] = item.get(key)
                 if collection_id_map and "collection_id" in metadata:
                     legacy_collection_id = metadata.get("collection_id")
-                    try:
-                        lookup_key = int(legacy_collection_id)
-                    except (TypeError, ValueError):
-                        lookup_key = legacy_collection_id
+                    lookup_key = legacy_collection_id
+                    if legacy_collection_id is not None and not isinstance(legacy_collection_id, bool):
+                        try:
+                            lookup_key = int(str(legacy_collection_id))
+                        except (TypeError, ValueError):
+                            pass
                     if lookup_key in collection_id_map:
                         metadata["collection_id"] = collection_id_map[lookup_key]
                 if metadata and hasattr(self.db, "set_item_metadata"):

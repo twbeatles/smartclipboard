@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+from typing import TypeVar
+
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QMenu
 
+T = TypeVar("T")
+
+
+def _ensure(value: T | None) -> T:
+    assert value is not None
+    return value
+
 
 def init_menu_impl(self, THEMES):
-    menubar = self.menuBar()
+    menubar = _ensure(self.menuBar())
     
     # 파일 메뉴
-    file_menu = menubar.addMenu("파일")
+    file_menu = _ensure(menubar.addMenu("파일"))
     
     action_export = QAction("💾 텍스트 내보내기", self)
     action_export.triggered.connect(self.export_history)
@@ -34,7 +43,7 @@ def init_menu_impl(self, THEMES):
     file_menu.addAction(action_quit)
 
     # 편집 메뉴
-    edit_menu = menubar.addMenu("편집")
+    edit_menu = _ensure(menubar.addMenu("편집"))
     
     action_clear = QAction("🗑️ 기록 전체 삭제", self)
     action_clear.triggered.connect(self.clear_all_history)
@@ -65,7 +74,7 @@ def init_menu_impl(self, THEMES):
     edit_menu.addAction(action_trash)
 
     # 보기 메뉴
-    view_menu = menubar.addMenu("보기")
+    view_menu = _ensure(menubar.addMenu("보기"))
     
     action_stats = QAction("📊 히스토리 통계...", self)
     action_stats.triggered.connect(self.show_statistics)
@@ -79,7 +88,8 @@ def init_menu_impl(self, THEMES):
     
     view_menu.addSeparator()
     
-    self.action_ontop = QAction("📌 항상 위 고정", self, checkable=True)
+    self.action_ontop = QAction("📌 항상 위 고정", self)
+    self.action_ontop.setCheckable(True)
     self.action_ontop.setChecked(True)
     self.action_ontop.triggered.connect(self.toggle_always_on_top)
     view_menu.addAction(self.action_ontop)
@@ -87,7 +97,7 @@ def init_menu_impl(self, THEMES):
     view_menu.addSeparator()
     
     # 테마 서브메뉴
-    theme_menu = view_menu.addMenu("🎨 테마")
+    theme_menu = _ensure(view_menu.addMenu("🎨 테마"))
     for key, theme in THEMES.items():
         action = QAction(theme["name"], self)
         action.setData(key)
@@ -95,9 +105,10 @@ def init_menu_impl(self, THEMES):
         theme_menu.addAction(action)
 
     # 설정 메뉴
-    settings_menu = menubar.addMenu("설정")
+    settings_menu = _ensure(menubar.addMenu("설정"))
     
-    self.action_startup = QAction("🚀 시작 시 자동 실행", self, checkable=True)
+    self.action_startup = QAction("🚀 시작 시 자동 실행", self)
+    self.action_startup.setCheckable(True)
     self.action_startup.setChecked(self.check_startup_registry())
     self.action_startup.triggered.connect(self.toggle_startup)
     settings_menu.addAction(self.action_startup)
@@ -131,16 +142,18 @@ def init_menu_impl(self, THEMES):
     
     settings_menu.addSeparator()
     
-    self.action_privacy = QAction("🔒 프라이버시 모드 (기록 중지)", self, checkable=True)
+    self.action_privacy = QAction("🔒 프라이버시 모드 (기록 중지)", self)
+    self.action_privacy.setCheckable(True)
     self.action_privacy.triggered.connect(self.toggle_privacy_mode)
     settings_menu.addAction(self.action_privacy)
     
-    self.action_debug = QAction("🐛 디버그 모드", self, checkable=True)
+    self.action_debug = QAction("🐛 디버그 모드", self)
+    self.action_debug.setCheckable(True)
     self.action_debug.triggered.connect(self.toggle_debug_mode)
     settings_menu.addAction(self.action_debug)
     
     # 도움말 메뉴
-    help_menu = menubar.addMenu("도움말")
+    help_menu = _ensure(menubar.addMenu("도움말"))
     
     action_shortcuts = QAction("⌨️ 키보드 단축키", self)
     action_shortcuts.triggered.connect(self.show_shortcuts_dialog)
@@ -157,17 +170,17 @@ def show_context_menu_impl(self, pos, THEMES, webbrowser):
     if not item: return
     
     theme = THEMES.get(self.current_theme, THEMES["dark"])
-    menu = QMenu()
+    menu = QMenu(self)
     menu.setStyleSheet(f"""
         QMenu {{ background-color: {theme["surface"]}; color: {theme["text"]}; border: 1px solid {theme["border"]}; padding: 5px; }}
         QMenu::item {{ padding: 8px 20px; }}
         QMenu::item:selected {{ background-color: {theme["primary"]}; }}
     """)
     
-    copy_action = menu.addAction("📄 복사")
+    copy_action = _ensure(menu.addAction("📄 복사"))
     copy_action.triggered.connect(self.copy_item)
     
-    paste_action = menu.addAction("📋 붙여넣기")
+    paste_action = _ensure(menu.addAction("📋 붙여넣기"))
     paste_action.triggered.connect(self.paste_selected)
     
     menu.addSeparator()
@@ -178,58 +191,59 @@ def show_context_menu_impl(self, pos, THEMES, webbrowser):
         data = self.db.get_content(pid)
         if data and data[2] == "LINK":
             url = data[0]
-            open_menu = menu.addMenu("🌐 링크 열기")
+            open_menu = _ensure(menu.addMenu("🌐 링크 열기"))
             
-            open_default = open_menu.addAction("🔗 기본 브라우저로 열기")
+            open_default = _ensure(open_menu.addAction("🔗 기본 브라우저로 열기"))
             open_default.triggered.connect(lambda: webbrowser.open(url))
             
             open_menu.addSeparator()
             
-            copy_url = open_menu.addAction("📋 URL 복사")
+            copy_url = _ensure(open_menu.addAction("📋 URL 복사"))
             copy_url.triggered.connect(lambda: self.clipboard.setText(url))
             
-            search_action = open_menu.addAction("🔍 Google에서 검색")
+            search_action = _ensure(open_menu.addAction("🔍 Google에서 검색"))
             search_action.triggered.connect(lambda: webbrowser.open(f"https://www.google.com/search?q={url}"))
             
             menu.addSeparator()
     
-    pin_action = menu.addAction("📌 고정/해제")
+    pin_action = _ensure(menu.addAction("📌 고정/해제"))
     pin_action.triggered.connect(self.toggle_pin)
     
     # v10.0: 북마크
-    bookmark_action = menu.addAction("⭐ 북마크 토글")
+    bookmark_action = _ensure(menu.addAction("⭐ 북마크 토글"))
     bookmark_action.triggered.connect(self.toggle_bookmark)
     
-    tag_action = menu.addAction("🏷️ 태그 편집")
+    tag_action = _ensure(menu.addAction("🏷️ 태그 편집"))
     tag_action.triggered.connect(self.edit_tag)
     
     # v10.0: 메모
-    note_action = menu.addAction("📝 메모 추가/편집")
+    note_action = _ensure(menu.addAction("📝 메모 추가/편집"))
     note_action.triggered.connect(self.edit_note)
     
     # v10.0: 컬렉션 서브메뉴
-    collection_menu = menu.addMenu("📁 컬렉션으로 이동")
+    collection_menu = _ensure(menu.addMenu("📁 컬렉션으로 이동"))
     collections = self.db.get_collections()
     if collections:
         for cid, cname, cicon, ccolor, _ in collections:  # created_at 무시
-            c_action = collection_menu.addAction(f"{cicon} {cname}")
+            c_action = _ensure(collection_menu.addAction(f"{cicon} {cname}"))
             c_action.triggered.connect(lambda checked, col_id=cid: self.move_to_collection(col_id))
         collection_menu.addSeparator()
-    new_col_action = collection_menu.addAction("➕ 새 컬렉션 만들기")
+    new_col_action = _ensure(collection_menu.addAction("➕ 새 컬렉션 만들기"))
     new_col_action.triggered.connect(self.create_collection)
-    remove_col_action = collection_menu.addAction("🚫 컬렉션에서 제거")
+    remove_col_action = _ensure(collection_menu.addAction("🚫 컬렉션에서 제거"))
     remove_col_action.triggered.connect(lambda: self.move_to_collection(None))
     
     menu.addSeparator()
     
     # 다중 선택 시 병합 옵션
-    selected_count = len(self.table.selectionModel().selectedRows())
+    selection_model = self.table.selectionModel()
+    selected_count = len(selection_model.selectedRows()) if selection_model is not None else 0
     if selected_count >= 2:
-        merge_action = menu.addAction(f"🔗 {selected_count}개 병합")
+        merge_action = _ensure(menu.addAction(f"🔗 {selected_count}개 병합"))
         merge_action.triggered.connect(self.merge_selected)
         menu.addSeparator()
     
-    delete_action = menu.addAction("🗑️ 삭제 (휴지통)")
+    delete_action = _ensure(menu.addAction("🗑️ 삭제 (휴지통)"))
     delete_action.triggered.connect(self.delete_item)
     
     # 텍스트 변환 서브메뉴 (텍스트 항목인 경우)
@@ -237,21 +251,21 @@ def show_context_menu_impl(self, pos, THEMES, webbrowser):
         data = self.db.get_content(pid)
         if data and data[2] not in ["IMAGE"]:
             menu.addSeparator()
-            transform_menu = menu.addMenu("✍️ 텍스트 변환")
+            transform_menu = _ensure(menu.addMenu("✍️ 텍스트 변환"))
             
-            upper_action = transform_menu.addAction("ABC 대문자 변환")
+            upper_action = _ensure(transform_menu.addAction("ABC 대문자 변환"))
             upper_action.triggered.connect(lambda: self.transform_text("upper"))
             
-            lower_action = transform_menu.addAction("abc 소문자 변환")
+            lower_action = _ensure(transform_menu.addAction("abc 소문자 변환"))
             lower_action.triggered.connect(lambda: self.transform_text("lower"))
             
-            strip_action = transform_menu.addAction("✂️ 공백 제거")
+            strip_action = _ensure(transform_menu.addAction("✂️ 공백 제거"))
             strip_action.triggered.connect(lambda: self.transform_text("strip"))
             
-            normalize_action = transform_menu.addAction("📋 줄바꿈 정리")
+            normalize_action = _ensure(transform_menu.addAction("📋 줄바꿈 정리"))
             normalize_action.triggered.connect(lambda: self.transform_text("normalize"))
             
-            json_action = transform_menu.addAction("{ } JSON 포맷팅")
+            json_action = _ensure(transform_menu.addAction("{ } JSON 포맷팅"))
             json_action.triggered.connect(lambda: self.transform_text("json"))
     
-    menu.exec(self.table.viewport().mapToGlobal(pos))
+    menu.exec(_ensure(self.table.viewport()).mapToGlobal(pos))

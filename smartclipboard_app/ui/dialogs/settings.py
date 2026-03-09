@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Protocol, cast
 
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -34,6 +35,26 @@ FALLBACK_THEMES = {
         "border": "#334155",
     }
 }
+
+
+class _HotkeyParent(Protocol):
+    def register_hotkeys(self) -> None: ...
+
+
+class _ThemeParent(Protocol):
+    def change_theme(self, theme_name: str) -> None: ...
+
+
+def _hotkey_parent(value: object | None) -> _HotkeyParent | None:
+    if value is not None and hasattr(value, "register_hotkeys"):
+        return cast(_HotkeyParent, value)
+    return None
+
+
+def _theme_parent(value: object | None) -> _ThemeParent | None:
+    if value is not None and hasattr(value, "change_theme"):
+        return cast(_ThemeParent, value)
+    return None
 
 
 class SettingsDialog(QDialog):
@@ -195,7 +216,7 @@ class SettingsDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def save_settings(self):
-        selected_theme = self.theme_combo.currentData()
+        selected_theme = cast(str, self.theme_combo.currentData() or self.current_theme)
         current_theme = self.current_theme
 
         self.db.set_setting("theme", selected_theme)
@@ -203,10 +224,11 @@ class SettingsDialog(QDialog):
 
         mini_enabled = "true" if self.mini_window_enabled.isChecked() else "false"
         self.db.set_setting("mini_window_enabled", mini_enabled)
-        if self.parent() and hasattr(self.parent(), "register_hotkeys"):
-            self.parent().register_hotkeys()
+        hotkey_parent = _hotkey_parent(self.parent())
+        if hotkey_parent is not None:
+            hotkey_parent.register_hotkeys()
 
-        selected_log_level = self.log_level_combo.currentData()
+        selected_log_level = cast(str, self.log_level_combo.currentData() or "INFO")
         self.db.set_setting("log_level", selected_log_level)
         log_level_map = {
             "DEBUG": logging.DEBUG,
@@ -221,8 +243,9 @@ class SettingsDialog(QDialog):
 
         if selected_theme != current_theme:
             QMessageBox.information(self, "테마 변경", "설정한 테마가 적용되었습니다.")
-            if self.parent():
-                self.parent().change_theme(selected_theme)
+            theme_parent = _theme_parent(self.parent())
+            if theme_parent is not None:
+                theme_parent.change_theme(selected_theme)
 
         self.accept()
 

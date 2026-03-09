@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TypeVar
+
 from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -19,6 +21,13 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+T = TypeVar("T")
+
+
+def _ensure(value: T | None) -> T:
+    assert value is not None
+    return value
 
 
 def init_ui_impl(self, HAS_QRCODE):
@@ -117,7 +126,7 @@ def init_ui_impl(self, HAS_QRCODE):
     self.table.setColumnCount(5)
     self.table.setHorizontalHeaderLabels(["📌", "유형", "내용", "시간", "사용"])
     
-    header = self.table.horizontalHeader()
+    header = _ensure(self.table.horizontalHeader())
     header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
     header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
     header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -129,8 +138,10 @@ def init_ui_impl(self, HAS_QRCODE):
     self.table.setColumnWidth(3, 95)
     self.table.setColumnWidth(4, 50)
     
-    self.table.verticalHeader().setVisible(False)
-    self.table.verticalHeader().setDefaultSectionSize(42)  # v9.0: 행 높이 증가
+    vertical_header = self.table.verticalHeader()
+    if vertical_header is not None:
+        vertical_header.setVisible(False)
+        vertical_header.setDefaultSectionSize(42)  # v9.0: 행 높이 증가
     
     self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # 다중 선택 지원
@@ -153,7 +164,9 @@ def init_ui_impl(self, HAS_QRCODE):
     self.table.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
     self.table.setDefaultDropAction(Qt.DropAction.CopyAction)
     self.table.setDragDropOverwriteMode(False)
-    self.table.viewport().installEventFilter(self)
+    viewport = self.table.viewport()
+    if viewport is not None:
+        viewport.installEventFilter(self)
 
     splitter.addWidget(self.table)
 
@@ -290,7 +303,8 @@ def init_ui_impl(self, HAS_QRCODE):
 
 def event_filter_impl(self, source, event, fallback_event_filter):
     """드래그 앤 드롭 이벤트 처리 (고정 항목 순서 변경)"""
-    if source != self.table.viewport():
+    viewport = self.table.viewport()
+    if viewport is None or source != viewport:
         return fallback_event_filter(source, event)
     
     # DragEnter: 드래그 시작 허용 여부
@@ -321,7 +335,11 @@ def handle_drop_event_impl(self, event, THEMES, logger) -> bool:
             return True  # 이벤트 소비 (Qt 기본 동작 막기)
         
         # 선택된 행 (드래그 중인 행)
-        selected_rows = self.table.selectionModel().selectedRows()
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            event.ignore()
+            return True
+        selected_rows = selection_model.selectedRows()
         if not selected_rows:
             event.ignore()
             return True
@@ -346,7 +364,9 @@ def handle_drop_event_impl(self, event, THEMES, logger) -> bool:
         
         if not (is_source_pinned and is_target_pinned):
             # 비고정 항목 드래그 시도 시 토스트 알림
-            self.statusBar().showMessage("📌 고정 항목끼리만 순서를 변경할 수 있습니다.", 2000)
+            status_bar = self.statusBar()
+            if status_bar is not None:
+                status_bar.showMessage("📌 고정 항목끼리만 순서를 변경할 수 있습니다.", 2000)
             event.ignore()
             return True
         
@@ -383,9 +403,13 @@ def handle_drop_event_impl(self, event, THEMES, logger) -> bool:
         if success:
             # 성공 시 UI 갱신 (딜레이로 드롭 애니메이션 방지)
             QTimer.singleShot(50, self.load_data)
-            self.statusBar().showMessage("✅ 고정 항목 순서가 변경되었습니다.", 2000)
+            status_bar = self.statusBar()
+            if status_bar is not None:
+                status_bar.showMessage("✅ 고정 항목 순서가 변경되었습니다.", 2000)
         else:
-            self.statusBar().showMessage("⚠️ 순서 변경 중 오류가 발생했습니다.", 2000)
+            status_bar = self.statusBar()
+            if status_bar is not None:
+                status_bar.showMessage("⚠️ 순서 변경 중 오류가 발생했습니다.", 2000)
         
         event.accept()
         return True  # 이벤트 소비

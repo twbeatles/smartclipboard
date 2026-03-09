@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol, TypeVar, cast
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -11,6 +13,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QStatusBar,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -27,6 +30,24 @@ FALLBACK_THEMES = {
         "border": "#334155",
     }
 }
+
+T = TypeVar("T")
+
+
+class _TrashParent(Protocol):
+    def load_data(self) -> None: ...
+    def statusBar(self) -> QStatusBar | None: ...
+
+
+def _ensure(value: T | None) -> T:
+    assert value is not None
+    return value
+
+
+def _trash_parent(value: object | None) -> _TrashParent | None:
+    if value is not None and hasattr(value, "load_data") and hasattr(value, "statusBar"):
+        return cast(_TrashParent, value)
+    return None
 
 
 class TrashDialog(QDialog):
@@ -98,7 +119,7 @@ class TrashDialog(QDialog):
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["내용", "유형", "삭제일", "만료일"])
-        header = self.table.horizontalHeader()
+        header = _ensure(self.table.horizontalHeader())
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
@@ -108,7 +129,9 @@ class TrashDialog(QDialog):
         self.table.setColumnWidth(3, 90)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.verticalHeader().setVisible(False)
+        vertical_header = self.table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
         layout.addWidget(self.table)
 
         btn_layout = QHBoxLayout()
@@ -155,22 +178,31 @@ class TrashDialog(QDialog):
             self.table.setSpan(0, 0, 1, 4)
 
     def restore_selected(self):
-        rows = self.table.selectionModel().selectedRows()
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return
+        rows = selection_model.selectedRows()
         if not rows:
             QMessageBox.information(self, "알림", "복원할 항목을 선택하세요.")
             return
 
         restored_count = 0
         for row in rows:
-            did = self.table.item(row.row(), 0).data(Qt.ItemDataRole.UserRole)
+            item = self.table.item(row.row(), 0)
+            if item is None:
+                continue
+            did = item.data(Qt.ItemDataRole.UserRole)
             if did and self.db.restore_item(did):
                 restored_count += 1
 
         if restored_count > 0:
             self.load_items()
-            if self.parent_window:
-                self.parent_window.load_data()
-                self.parent_window.statusBar().showMessage(f"♻️ {restored_count}개 항목이 복원되었습니다.", 2000)
+            parent = _trash_parent(self.parent_window)
+            if parent is not None:
+                parent.load_data()
+                status_bar = parent.statusBar()
+                if status_bar is not None:
+                    status_bar.showMessage(f"♻️ {restored_count}개 항목이 복원되었습니다.", 2000)
 
     def empty_trash(self):
         reply = QMessageBox.question(
@@ -182,8 +214,11 @@ class TrashDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             self.db.empty_trash()
             self.load_items()
-            if self.parent_window:
-                self.parent_window.statusBar().showMessage("🗑️ 휴지통이 비워졌습니다.", 2000)
+            parent = _trash_parent(self.parent_window)
+            if parent is not None:
+                status_bar = parent.statusBar()
+                if status_bar is not None:
+                    status_bar.showMessage("🗑️ 휴지통이 비워졌습니다.", 2000)
 
 
 __all__ = ["TrashDialog", "FALLBACK_THEMES"]

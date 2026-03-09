@@ -6,15 +6,26 @@ import base64
 import logging
 import os
 import time
+from typing import Any
+
+Fernet: Any | None
+hashes: Any | None
+PBKDF2HMAC: Any | None
 
 try:
-    from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
-    HAS_CRYPTO = True
+    from cryptography.fernet import Fernet as _Fernet
+    from cryptography.hazmat.primitives import hashes as _hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC as _PBKDF2HMAC
 except ImportError:
+    Fernet = None
+    hashes = None
+    PBKDF2HMAC = None
     HAS_CRYPTO = False
+else:
+    Fernet = _Fernet
+    hashes = _hashes
+    PBKDF2HMAC = _PBKDF2HMAC
+    HAS_CRYPTO = True
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +35,14 @@ class SecureVaultManager:
 
     def __init__(self, db, logger_=None):
         self.db = db
-        self.fernet = None
+        self.fernet: Any | None = None
         self.is_unlocked = False
         self.last_activity = time.time()
         self.lock_timeout = 300
         self.logger = logger_ or logger
 
     def derive_key(self, password, salt):
-        if not HAS_CRYPTO:
+        if not HAS_CRYPTO or PBKDF2HMAC is None or hashes is None:
             return None
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
@@ -42,12 +53,15 @@ class SecureVaultManager:
         return base64.urlsafe_b64encode(kdf.derive(password.encode()))
 
     def set_master_password(self, password):
-        if not HAS_CRYPTO:
+        if not HAS_CRYPTO or Fernet is None:
             return False
         salt = os.urandom(16)
         key = self.derive_key(password, salt)
-        self.fernet = Fernet(key)
-        verification = self.fernet.encrypt(b"VAULT_VERIFIED")
+        if key is None:
+            return False
+        fernet = Fernet(key)
+        verification = fernet.encrypt(b"VAULT_VERIFIED")
+        self.fernet = fernet
         self.db.set_setting("vault_salt", base64.b64encode(salt).decode())
         self.db.set_setting("vault_verification", verification.decode())
         self.is_unlocked = True
@@ -55,7 +69,7 @@ class SecureVaultManager:
         return True
 
     def unlock(self, password):
-        if not HAS_CRYPTO:
+        if not HAS_CRYPTO or Fernet is None:
             return False
         salt_b64 = self.db.get_setting("vault_salt")
         verification = self.db.get_setting("vault_verification")
@@ -64,8 +78,11 @@ class SecureVaultManager:
         try:
             salt = base64.b64decode(salt_b64)
             key = self.derive_key(password, salt)
-            self.fernet = Fernet(key)
-            if self.fernet.decrypt(verification.encode()) == b"VAULT_VERIFIED":
+            if key is None:
+                return False
+            fernet = Fernet(key)
+            if fernet.decrypt(verification.encode()) == b"VAULT_VERIFIED":
+                self.fernet = fernet
                 self.is_unlocked = True
                 self.last_activity = time.time()
                 return True

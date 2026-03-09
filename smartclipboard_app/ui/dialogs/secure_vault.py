@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol, TypeVar, cast
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QApplication,
@@ -13,11 +15,29 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QStatusBar,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+
+T = TypeVar("T")
+
+
+class _VaultParent(Protocol):
+    def statusBar(self) -> QStatusBar | None: ...
+
+
+def _ensure(value: T | None) -> T:
+    assert value is not None
+    return value
+
+
+def _vault_parent(value: object | None) -> _VaultParent | None:
+    if value is not None and hasattr(value, "statusBar"):
+        return cast(_VaultParent, value)
+    return None
 
 
 class SecureVaultDialog(QDialog):
@@ -38,12 +58,12 @@ class SecureVaultDialog(QDialog):
             self.show_lock_ui()
 
     def init_ui(self):
-        self.layout = QVBoxLayout(self)
-        self.layout.setSpacing(12)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setSpacing(12)
 
         self.status_label = QLabel("🔒 보관함이 잠겨 있습니다")
         self.status_label.setStyleSheet("font-size: 14px; font-weight: bold;")
-        self.layout.addWidget(self.status_label)
+        self.main_layout.addWidget(self.status_label)
 
         self.password_widget = QWidget()
         pw_layout = QVBoxLayout(self.password_widget)
@@ -58,7 +78,7 @@ class SecureVaultDialog(QDialog):
         btn_unlock.clicked.connect(self.unlock_vault)
         pw_layout.addWidget(btn_unlock)
 
-        self.layout.addWidget(self.password_widget)
+        self.main_layout.addWidget(self.password_widget)
 
         self.items_widget = QWidget()
         items_layout = QVBoxLayout(self.items_widget)
@@ -77,21 +97,23 @@ class SecureVaultDialog(QDialog):
         self.table = QTableWidget()
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels(["레이블", "생성일", "동작"])
-        header = self.table.horizontalHeader()
+        header = _ensure(self.table.horizontalHeader())
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(1, 120)
         self.table.setColumnWidth(2, 100)
-        self.table.verticalHeader().setVisible(False)
+        vertical_header = self.table.verticalHeader()
+        if vertical_header is not None:
+            vertical_header.setVisible(False)
         items_layout.addWidget(self.table)
 
         self.items_widget.setVisible(False)
-        self.layout.addWidget(self.items_widget)
+        self.main_layout.addWidget(self.items_widget)
 
         btn_close = QPushButton("닫기")
         btn_close.clicked.connect(self.close)
-        self.layout.addWidget(btn_close)
+        self.main_layout.addWidget(btn_close)
 
     def show_lock_ui(self):
         self.status_label.setText("🔒 보관함이 잠겨 있습니다")
@@ -175,9 +197,15 @@ class SecureVaultDialog(QDialog):
         decrypted = self.vault.decrypt(encrypted_data)
         if decrypted:
             clipboard = QApplication.clipboard()
+            if clipboard is None:
+                QMessageBox.warning(self, "오류", "클립보드에 접근할 수 없습니다.")
+                return
             clipboard.setText(decrypted)
-            if self.parent_window:
-                self.parent_window.statusBar().showMessage("✅ 복호화된 내용이 클립보드에 복사되었습니다.", 3000)
+            parent = _vault_parent(self.parent_window)
+            if parent is not None:
+                status_bar = parent.statusBar()
+                if status_bar is not None:
+                    status_bar.showMessage("✅ 복호화된 내용이 클립보드에 복사되었습니다.", 3000)
         else:
             QMessageBox.warning(self, "오류", "복호화에 실패했습니다. 보관함을 다시 열어주세요.")
 
