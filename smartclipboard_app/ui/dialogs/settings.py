@@ -57,6 +57,27 @@ def _theme_parent(value: object | None) -> _ThemeParent | None:
     return None
 
 
+def _parse_bool_setting(value: object, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _parse_int_setting(value: object, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError, AttributeError):
+        parsed = default
+    return min(max(parsed, minimum), maximum)
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent, db, current_theme, themes=None, max_history=100, logger_=None):
         super().__init__(parent)
@@ -143,7 +164,13 @@ class SettingsDialog(QDialog):
         self.theme_combo = QComboBox()
         for key, theme in self.themes.items():
             self.theme_combo.addItem(theme["name"], key)
-        self.theme_combo.setCurrentIndex(list(self.themes.keys()).index(self.current_theme))
+        theme_keys = list(self.themes.keys())
+        if self.current_theme in theme_keys:
+            current_theme_idx = theme_keys.index(self.current_theme)
+        else:
+            current_theme_idx = 0
+            self.logger.warning("Unknown theme setting '%s'; using '%s'", self.current_theme, theme_keys[0])
+        self.theme_combo.setCurrentIndex(current_theme_idx)
         theme_layout.addRow("테마 선택:", self.theme_combo)
         general_layout.addWidget(theme_group)
 
@@ -151,14 +178,16 @@ class SettingsDialog(QDialog):
         history_layout = QFormLayout(history_group)
         self.max_history_spin = QSpinBox()
         self.max_history_spin.setRange(10, 500)
-        self.max_history_spin.setValue(int(self.db.get_setting("max_history", self.max_history)))
+        max_history_raw = self.db.get_setting("max_history", self.max_history)
+        self.max_history_spin.setValue(_parse_int_setting(max_history_raw, int(self.max_history), 10, 500))
         history_layout.addRow("최대 저장 개수:", self.max_history_spin)
         general_layout.addWidget(history_group)
 
         mini_window_group = QGroupBox("🔲 미니 창")
         mini_window_layout = QFormLayout(mini_window_group)
         self.mini_window_enabled = QCheckBox("미니 클립보드 창 활성화")
-        self.mini_window_enabled.setChecked(self.db.get_setting("mini_window_enabled", "true").lower() == "true")
+        mini_enabled_raw = self.db.get_setting("mini_window_enabled", "true")
+        self.mini_window_enabled.setChecked(_parse_bool_setting(mini_enabled_raw, default=True))
         self.mini_window_enabled.setToolTip("비활성화하면 Alt+V 단축키로 미니 창이 열리지 않습니다.")
         mini_window_layout.addRow(self.mini_window_enabled)
         general_layout.addWidget(mini_window_group)
@@ -174,10 +203,12 @@ class SettingsDialog(QDialog):
         ]
         for name, value in log_levels:
             self.log_level_combo.addItem(name, value)
-        current_level = self.db.get_setting("log_level", "INFO")
+        current_level = str(self.db.get_setting("log_level", "INFO") or "INFO").upper()
         level_values = [v for _, v in log_levels]
         if current_level in level_values:
             self.log_level_combo.setCurrentIndex(level_values.index(current_level))
+        else:
+            self.log_level_combo.setCurrentIndex(level_values.index("INFO"))
         logging_layout.addRow("로깅 레벨:", self.log_level_combo)
         general_layout.addWidget(logging_group)
 
@@ -237,9 +268,14 @@ class SettingsDialog(QDialog):
             "ERROR": logging.ERROR,
         }
         if selected_log_level in log_level_map:
-            self.logger.setLevel(log_level_map[selected_log_level])
+            level = log_level_map[selected_log_level]
+            root_logger = logging.getLogger()
+            root_logger.setLevel(level)
+            for handler in root_logger.handlers:
+                handler.setLevel(level)
+            self.logger.setLevel(level)
             for handler in self.logger.handlers:
-                handler.setLevel(log_level_map[selected_log_level])
+                handler.setLevel(level)
 
         if selected_theme != current_theme:
             QMessageBox.information(self, "테마 변경", "설정한 테마가 적용되었습니다.")

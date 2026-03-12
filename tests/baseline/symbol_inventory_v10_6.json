@@ -372,6 +372,20 @@
           }
         },
         {
+          "name": "apply_saved_log_level",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
           "name": "apply_theme",
           "signature": {
             "posonly": [],
@@ -630,6 +644,20 @@
         },
         {
           "name": "get_selected_id",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "get_selected_ids",
           "signature": {
             "posonly": [],
             "args": [

@@ -206,6 +206,8 @@ class FloatingMiniWindow(QWidget):
             data = self.db.get_content(pid)
             if data:
                 content, blob, ptype = data
+                if self.parent_window is not None and hasattr(self.parent_window, "is_internal_copy"):
+                    setattr(self.parent_window, "is_internal_copy", True)
                 clipboard = QApplication.clipboard()
                 if clipboard is None:
                     return

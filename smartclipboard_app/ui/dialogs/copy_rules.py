@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Protocol, TypeVar, cast
 
 from PyQt6.QtCore import Qt
@@ -11,6 +12,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -110,10 +112,22 @@ class CopyRulesDialog(QDialog):
         pattern, ok = QInputDialog.getText(self, "규칙 추가", "패턴 (정규식):")
         if not ok or not pattern.strip():
             return
+        try:
+            re.compile(pattern.strip())
+        except re.error as exc:
+            QMessageBox.warning(self, "패턴 오류", f"잘못된 정규식 패턴입니다.\n{exc}")
+            return
         actions = ["trim", "lowercase", "uppercase", "remove_newlines"]
         action, ok = QInputDialog.getItem(self, "규칙 추가", "동작:", actions, 0, False)
         if ok:
-            self.db.add_copy_rule(name.strip(), pattern.strip(), action)
+            if hasattr(self.db, "is_duplicate_copy_rule") and self.db.is_duplicate_copy_rule(
+                pattern.strip(), action, ""
+            ):
+                QMessageBox.information(self, "중복 규칙", "동일한 패턴/동작 규칙이 이미 존재합니다.")
+                return
+            if not self.db.add_copy_rule(name.strip(), pattern.strip(), action):
+                QMessageBox.critical(self, "오류", "규칙 추가에 실패했습니다.")
+                return
             self.load_rules()
             parent = _rules_parent(self.parent())
             if parent is not None:

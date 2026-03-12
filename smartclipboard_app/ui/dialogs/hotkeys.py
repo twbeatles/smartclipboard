@@ -48,6 +48,23 @@ class HotkeySettingsDialog(QDialog):
         self.setMinimumSize(400, 250)
         self.init_ui()
 
+    def _load_hotkeys(self) -> dict[str, str]:
+        raw = self.db.get_setting("hotkeys", json.dumps(self.default_hotkeys))
+        try:
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("hotkeys setting is not a JSON object")
+        except Exception as exc:
+            self.logger.warning("Invalid hotkeys setting; restoring defaults: %s", exc)
+            parsed = dict(self.default_hotkeys)
+            self.db.set_setting("hotkeys", json.dumps(parsed))
+
+        return {
+            "show_main": str(parsed.get("show_main", self.default_hotkeys["show_main"])),
+            "show_mini": str(parsed.get("show_mini", self.default_hotkeys["show_mini"])),
+            "paste_last": str(parsed.get("paste_last", self.default_hotkeys["paste_last"])),
+        }
+
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
@@ -57,7 +74,7 @@ class HotkeySettingsDialog(QDialog):
         layout.addWidget(info)
 
         form = QFormLayout()
-        hotkeys = json.loads(self.db.get_setting("hotkeys", json.dumps(self.default_hotkeys)))
+        hotkeys = self._load_hotkeys()
 
         self.input_main = QLineEdit(hotkeys.get("show_main", "ctrl+shift+v"))
         self.input_main.setPlaceholderText("ctrl+shift+v")

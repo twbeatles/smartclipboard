@@ -101,3 +101,11 @@ pyinstaller --clean smartclipboard.spec
 
 - 상세 변경 이력은 루트 `README.md`를 기준으로 관리합니다.
 - 개발 가이드는 `claude.md`, `.gemini/GEMINI.md`와 동일한 테스트/빌드 기준을 따릅니다.
+
+## Refactor Sync (2026-03-12)
+
+- MainWindow helper modules have expanded under `smartclipboard_app/ui/mainwindow_parts/`.
+- DB layer is split to `smartclipboard_core/db_parts/` with `database.py` as composition entrypoint.
+- Local guard now compiles both helper folders via `scripts/preflight_local.py`.
+- Added API surface tests: `tests/test_public_surfaces.py` and `tests/baseline/clipboarddb_public_methods.txt`.
+- Packaging guard: `smartclipboard.spec` now explicitly includes `smartclipboard_core.db_parts` collection.

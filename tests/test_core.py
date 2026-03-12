@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from PyQt6.QtCore import QCoreApplication
+from PyQt6.QtWidgets import QApplication
 
 from smartclipboard_core.actions import ClipboardActionManager, extract_first_url
 from smartclipboard_core.database import ClipboardDB
@@ -25,7 +25,7 @@ class FakeActionDB:
 class CoreActionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QCoreApplication.instance() or QCoreApplication([])
+        cls.app = QApplication.instance() or QApplication([])
 
     def test_extract_first_url(self):
         text = "prefix https://example.com/path?q=1 suffix"
@@ -233,6 +233,34 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertGreaterEqual(calls["vacuum"], 1)
         self.assertEqual(self.db.cleanup_count, 0)
 
+    def test_duplicate_rule_helpers(self):
+        self.assertFalse(self.db.is_duplicate_copy_rule(r"\s+", "trim", ""))
+        self.assertTrue(self.db.add_copy_rule("trim-rule", r"\s+", "trim"))
+        self.assertTrue(self.db.is_duplicate_copy_rule(r"\s+", "trim", ""))
+
+        self.assertFalse(self.db.is_duplicate_clipboard_action(r"https?://", "fetch_title", "{}"))
+        self.assertTrue(self.db.add_clipboard_action("fetch", r"https?://", "fetch_title", "{}"))
+        self.assertTrue(self.db.is_duplicate_clipboard_action(r"https?://", "fetch_title", "{}"))
+
+    def test_move_items_to_collection_bulk(self):
+        item_a = self.db.add_item("bulk-a", None, "TEXT")
+        item_b = self.db.add_item("bulk-b", None, "TEXT")
+        item_c = self.db.add_item("bulk-c", None, "TEXT")
+        collection_id = self.db.add_collection("bulk")
+        self.assertTrue(collection_id)
+
+        moved = self.db.move_items_to_collection([item_a, item_b, item_b, item_c], collection_id)
+        self.assertEqual(moved, 3)
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM history WHERE id IN (?, ?, ?) AND collection_id = ?",
+                (item_a, item_b, item_c, collection_id),
+            )
+            assigned = cursor.fetchone()[0]
+        self.assertEqual(assigned, 3)
+
 
 class CoreDatabaseSearchTests(unittest.TestCase):
     def setUp(self):
@@ -356,3 +384,4 @@ class CoreDatabaseSearchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

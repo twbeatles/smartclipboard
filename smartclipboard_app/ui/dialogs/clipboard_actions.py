@@ -134,7 +134,16 @@ class ClipboardActionsDialog(QDialog):
         action, ok = QInputDialog.getItem(self, "액션 추가", "액션 유형:", action_labels, 0, False)
         if ok:
             idx = action_labels.index(action)
-            self.db.add_clipboard_action(name.strip(), pattern.strip(), action_types[idx])
+            action_type = action_types[idx]
+            if hasattr(self.db, "is_duplicate_clipboard_action") and self.db.is_duplicate_clipboard_action(
+                pattern.strip(), action_type, "{}"
+            ):
+                QMessageBox.information(self, "중복 액션", "동일한 패턴/유형의 액션이 이미 존재합니다.")
+                return
+
+            if not self.db.add_clipboard_action(name.strip(), pattern.strip(), action_type):
+                QMessageBox.critical(self, "오류", "액션 추가에 실패했습니다.")
+                return
             self.action_manager.reload_actions()
             self.load_actions()
 
@@ -150,13 +159,27 @@ class ClipboardActionsDialog(QDialog):
     def add_default_actions(self):
         defaults = [
             ("URL 제목 가져오기", r"https?://", "fetch_title"),
-            ("전화번호 자동 포맷", r"^0\\d{9,10}$", "format_phone"),
+            ("전화번호 자동 포맷", r"^0\d{9,10}$", "format_phone"),
         ]
+        added = 0
+        skipped = 0
+        failed = 0
         for name, pattern, action_type in defaults:
-            self.db.add_clipboard_action(name, pattern, action_type)
+            if hasattr(self.db, "is_duplicate_clipboard_action") and self.db.is_duplicate_clipboard_action(
+                pattern, action_type, "{}"
+            ):
+                skipped += 1
+                continue
+            if self.db.add_clipboard_action(name, pattern, action_type):
+                added += 1
+            else:
+                failed += 1
         self.action_manager.reload_actions()
         self.load_actions()
-        QMessageBox.information(self, "완료", "기본 액션이 추가되었습니다.")
+        summary = f"기본 액션 처리 완료\n추가: {added}개\n중복 건너뜀: {skipped}개"
+        if failed:
+            summary += f"\n추가 실패: {failed}개"
+        QMessageBox.information(self, "완료", summary)
 
 
 __all__ = ["ClipboardActionsDialog"]

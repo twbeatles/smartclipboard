@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import importlib
 import inspect
 import marshal
@@ -6,7 +6,7 @@ import os
 import pathlib
 import unittest
 
-from PyQt6.QtCore import QCoreApplication
+from PyQt6.QtWidgets import QApplication
 
 from scripts.refactor_symbol_inventory import build_inventory
 
@@ -14,7 +14,7 @@ from scripts.refactor_symbol_inventory import build_inventory
 class PayloadSyncTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QCoreApplication.instance() or QCoreApplication([])
+        cls.app = QApplication.instance() or QApplication([])
 
     @staticmethod
     def _sig_dict(func):
@@ -204,3 +204,4 @@ class PayloadSyncTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

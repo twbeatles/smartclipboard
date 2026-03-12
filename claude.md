@@ -20,6 +20,7 @@
 
 - `legacy_main_payload.marshal`은 텍스트 diff/리뷰가 어려운 바이너리 payload입니다.
 - `legacy_main.py`를 소스 본문 파일로 가정하고 리팩토링하면 안 됩니다.
+- `legacy_main.py`는 payload 로딩 실패 시 `legacy_main_src.py`로 자동 폴백하며, `LEGACY_IMPL_ACTIVE`/`LEGACY_IMPL_FALLBACK_REASON`로 활성 구현과 폴백 사유를 확인할 수 있습니다.
 - `pyright`/Pylance 진단은 기본적으로 `legacy/클립모드 매니저 (legacy).py`와 `smartclipboard_app/legacy_main_src.py`를 제외한 현행 코드 기준으로 맞춥니다.
 - UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`을 재생성한 뒤 빌드해야 합니다.
 - `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
@@ -52,10 +53,12 @@ python -m unittest discover -s tests -v
 - `tests/test_migration_collections.py` (JSON 마이그레이션 컬렉션 메타/ID remap)
 - `tests/test_legacy_ui_contracts.py` (레거시 UI 계약: 토스트 호출/선택모드/가시성 가드)
 - `tests/test_signal_snapshot.py` (MainWindow 분할 구조 시그널 스냅샷)
+- `tests/test_legacy_loader.py` (payload 실패 시 src 폴백/활성 구현 상수)
 
 ## 5. 빌드
 
 ```powershell
+python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 pyinstaller --clean smartclipboard.spec
 ```
 
@@ -68,10 +71,32 @@ pyinstaller --clean smartclipboard.spec
 장기적으로 구조 분할 리팩토링을 지속하려면 `legacy_main.py` 원본 소스 복원이 필요합니다.  
 복원 전에는 로더/payload 호환성을 깨지 않는 변경만 수행합니다.
 
-## 7. MainWindow 분할 리팩토링 작업 규칙 (2026-03-07)
+## 7. CI 검증 (GitHub Actions)
+
+- 워크플로우: `.github/workflows/ci.yml`
+- 실행 환경: `windows-latest`
+- Python 매트릭스: `3.10`, `3.11`, `3.12`, `3.13`
+- 단계:
+  - `scripts/build_legacy_payload.py --smoke-import`
+  - `scripts/preflight_local.py --skip-payload-build`
+
+## 8. MainWindow 분할 리팩토링 작업 규칙 (2026-03-07)
 
 - `legacy_main_src.MainWindow` 메서드 시그니처는 외부 계약으로 간주하고 유지합니다.
 - 본문 분할은 `smartclipboard_app/ui/mainwindow_parts/` helper 함수로 수행합니다.
 - `eventFilter` helper에서는 module-level `super()`를 사용하지 않고, 원본 클래스의 fallback 이벤트 필터를 주입받아 호출합니다.
 - `scripts/refactor_signal_snapshot.py` 스냅샷은 `legacy_main_src.py` + `mainwindow_parts/*.py`를 모두 포함해야 합니다.
 - 수동 `py_compile` 검증 시 helper 모듈도 함께 포함해야 하며, 기본적으로는 `python scripts/preflight_local.py` 실행을 우선합니다.
+
+## 9. Refactor Notes (2026-03-12)
+
+- `smartclipboard_core/database.py` has been split into mixins under `smartclipboard_core/db_parts/`.
+- `smartclipboard_app/ui/mainwindow_parts/` now includes additional helper modules:
+  - `theme_style_sections.py`
+  - `ui_init_sections.py`, `ui_dragdrop_ops.py`
+  - `tray_hotkey_ops.py`, `status_lifecycle_ops.py`, `clipboard_runtime_ops.py`
+- Keep `MainWindow` and `ClipboardDB` public signatures stable.
+- `scripts/preflight_local.py` now compiles `smartclipboard_core/db_parts/*.py` as part of local guard checks.
+- Added API surface regression check:
+  - `tests/test_public_surfaces.py`
+  - `tests/baseline/clipboarddb_public_methods.txt`

@@ -62,3 +62,16 @@ pyinstaller --clean smartclipboard.spec
 ## 향후 리팩토링 전제
 
 본격적인 코드 분할 리팩토링(클래스/메서드 단위 이동)을 재개하려면 `legacy_main.py` 원본 소스 복원이 선행되어야 합니다.
+
+## Refactor Sync (2026-03-12)
+
+- `smartclipboard_core/database.py` is now split into `smartclipboard_core/db_parts/*.py` mixins.
+- `smartclipboard_app/ui/mainwindow_parts/` now includes:
+  - `theme_style_sections.py`
+  - `ui_init_sections.py`, `ui_dragdrop_ops.py`
+  - `tray_hotkey_ops.py`, `status_lifecycle_ops.py`, `clipboard_runtime_ops.py`
+- `scripts/preflight_local.py` compiles `db_parts/*.py` and `mainwindow_parts/*.py`.
+- Added API surface regression checks:
+  - `tests/test_public_surfaces.py`
+  - `tests/baseline/clipboarddb_public_methods.txt`
+- `smartclipboard.spec` explicitly collects `smartclipboard_core.db_parts` submodules.

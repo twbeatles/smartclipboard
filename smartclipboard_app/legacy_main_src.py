@@ -110,17 +110,35 @@ from smartclipboard_app.ui.dialogs.statistics import StatisticsDialog as AppStat
 from smartclipboard_app.ui.dialogs.tags import TagEditDialog as AppTagEditDialog
 from smartclipboard_app.ui.dialogs.trash_dialog import TrashDialog as AppTrashDialog
 from smartclipboard_app.ui.mainwindow_parts import (
+    analyze_text_impl,
     apply_theme_impl,
+    apply_copy_rules_impl,
+    check_vault_timeout_impl,
     event_filter_impl,
     get_display_items_impl,
     handle_drop_event_impl,
     init_menu_impl,
+    init_tray_impl,
     init_ui_impl,
     load_data_impl,
+    on_clipboard_change_impl,
+    on_tray_activated_impl,
     on_selection_changed_impl,
+    paste_last_item_slot_impl,
     populate_table_impl,
+    process_actions_impl,
+    process_clipboard_impl,
+    process_image_clipboard_impl,
+    process_text_clipboard_impl,
+    quit_app_impl,
+    register_hotkeys_impl,
+    run_periodic_cleanup_impl,
     show_context_menu_impl,
+    show_window_from_tray_impl,
     show_empty_state_impl,
+    toggle_mini_window_slot_impl,
+    update_status_bar_impl,
+    update_tray_theme_impl,
 )
 from smartclipboard_app.ui.widgets.floating_mini_window import FloatingMiniWindow as AppFloatingMiniWindow
 from smartclipboard_app.ui.widgets.toast import ToastNotification as AppToastNotification
@@ -513,6 +531,7 @@ class MainWindow(QMainWindow):
         self.is_monitoring_paused = False  # v10.6: 모니터링 일시정지 플래그
         try:
             self.db = ClipboardDB()
+            self.apply_saved_log_level()
             self.clipboard = QApplication.clipboard()
             self.clipboard.dataChanged.connect(self.on_clipboard_change)
             self.is_internal_copy = False
@@ -600,113 +619,54 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"MainWindow Init Error: {e}", exc_info=True)
             raise e
-    
-    def register_hotkeys(self):
-        """v10.2: 커스텀 핫키 등록 - 개선된 버전 (앱 전용 핫키만 관리)"""
-        try:
-            hotkeys = json.loads(self.db.get_setting("hotkeys", json.dumps(DEFAULT_HOTKEYS)))
-            
-            # v10.2: 이전에 등록된 핫키만 해제 (다른 앱 핫키 보호)
-            if hasattr(self, '_registered_hotkeys') and self._registered_hotkeys:
-                for hk in self._registered_hotkeys:
-                    try:
-                        keyboard.remove_hotkey(hk)
-                    except Exception:
-                        pass
-            self._registered_hotkeys = []
 
-            # 메인 창 열기 핫키 - 시그널 emit으로 메인 스레드에서 실행
-            main_key = hotkeys.get("show_main", "ctrl+shift+v")
-            hk1 = keyboard.add_hotkey(main_key, lambda: self.show_main_signal.emit())
-            self._registered_hotkeys.append(hk1)
-            
-            # 미니 창 핫키 - 설정에서 활성화된 경우만 등록
-            mini_enabled = self.db.get_setting("mini_window_enabled", "true").lower() == "true"
-            if mini_enabled:
-                mini_key = hotkeys.get("show_mini", "alt+v")
-                hk2 = keyboard.add_hotkey(mini_key, lambda: self.toggle_mini_signal.emit())
-                self._registered_hotkeys.append(hk2)
-                logger.info(f"Mini window hotkey registered: {mini_key}")
-            else:
-                mini_key = "(비활성화)"
-                logger.info("Mini window hotkey disabled by user setting")
-            
-            # 마지막 항목 즉시 붙여넣기 핫키 - 시그널 emit
-            paste_key = hotkeys.get("paste_last", "ctrl+shift+z")
-            hk3 = keyboard.add_hotkey(paste_key, lambda: self.paste_last_signal.emit())
-            self._registered_hotkeys.append(hk3)
-            
-            logger.info(f"Hotkeys registered: {main_key}, {mini_key}, {paste_key}")
-            
-        except Exception as e:
-            logger.warning(f"Hotkey registration error: {e}")
+    def apply_saved_log_level(self):
+        """저장된 로그 레벨을 root/logger에 반영."""
+        try:
+            raw_level = self.db.get_setting("log_level", "INFO")
+            level_name = str(raw_level or "INFO").upper()
+            level_map = {
+                "DEBUG": logging.DEBUG,
+                "INFO": logging.INFO,
+                "WARNING": logging.WARNING,
+                "ERROR": logging.ERROR,
+            }
+            level = level_map.get(level_name, logging.INFO)
+            root_logger = logging.getLogger()
+            root_logger.setLevel(level)
+            for handler in root_logger.handlers:
+                handler.setLevel(level)
+            logger.setLevel(level)
+        except Exception as log_level_exc:
+            logger.debug(f"Failed to apply saved log level: {log_level_exc}")
+
+    def register_hotkeys(self):
+        """v10.2: custom hotkey registration."""
+        return register_hotkeys_impl(self, logger, keyboard, json, DEFAULT_HOTKEYS)
     
     def toggle_mini_window(self):
         """미니 창 토글 (외부에서 호출 시 시그널 사용)"""
         self.toggle_mini_signal.emit()
     
     def _toggle_mini_window_slot(self):
-        """미니 창 토글 (메인 스레드에서 실행되는 슬롯)"""
-        try:
-            # 미니 창 비활성화 시 무시
-            if self.db.get_setting("mini_window_enabled", "true").lower() != "true":
-                return
-            
-            if self.mini_window.isVisible():
-                self.mini_window.hide()
-            else:
-                # 커서 위치 근처에 표시
-                from PyQt6.QtGui import QCursor
-                cursor_pos = QCursor.pos()
-                self.mini_window.move(cursor_pos.x() - 150, cursor_pos.y() - 200)
-                self.mini_window.show()
-                self.mini_window.activateWindow()
-        except Exception as e:
-            logger.error(f"Toggle mini window error: {e}")
+        """Mini window toggle slot on main thread."""
+        return toggle_mini_window_slot_impl(self, logger)
     
     def paste_last_item(self):
         """마지막 항목 즉시 붙여넣기 (외부에서 호출 시 시그널 사용)"""
         self.paste_last_signal.emit()
     
     def _paste_last_item_slot(self):
-        """마지막 항목 즉시 붙여넣기 (메인 스레드에서 실행되는 슬롯)"""
-        try:
-            items = self.db.get_items("", "전체")
-            if items:
-                pid, content, ptype, *_ = items[0]
-                data = self.db.get_content(pid)
-                if data:
-                    content, blob, ptype = data
-                    self.is_internal_copy = True
-                    if ptype == "IMAGE" and blob:
-                        pixmap = QPixmap()
-                        pixmap.loadFromData(blob)
-                        self.clipboard.setPixmap(pixmap)
-                    else:
-                        self.clipboard.setText(content)
-                    self.db.increment_use_count(pid)
-                    QTimer.singleShot(100, lambda: keyboard.send('ctrl+v'))
-        except Exception as e:
-            logger.error(f"Paste last item error: {e}")
+        """Paste last clipboard item slot on main thread."""
+        return paste_last_item_slot_impl(self, logger, QPixmap, QTimer, keyboard)
     
     def check_vault_timeout(self):
-        """보관함 자동 잠금 체크"""
-        if self.vault_manager.check_timeout():
-            logger.info("Vault auto-locked due to inactivity")
+        """Auto-lock secure vault on inactivity."""
+        return check_vault_timeout_impl(self, logger)
     
     def run_periodic_cleanup(self):
-        """v10.2: 주기적 정리 작업 실행 (만료된 임시 항목 및 휴지통 정리)"""
-        try:
-            expired_count = self.db.cleanup_expired_items()
-            self.db.cleanup_expired_trash()
-            # v10.5: 이미지 캐시 정리
-            # v10.5: 이미지 및 오래된 항목 정리
-            self.db.cleanup()
-            if expired_count > 0:
-                logger.info(f"주기적 정리: 만료 항목 {expired_count}개 삭제됨")
-                self.load_data()  # UI 갱신
-        except Exception as e:
-            logger.debug(f"Periodic cleanup error: {e}")
+        """Periodic cleanup for expired data and trash."""
+        return run_periodic_cleanup_impl(self, logger)
 
     def run_daily_backup_if_needed(self):
         """하루 1회 자동 백업 실행 (앱 재시작 없이 날짜 변경 대응)."""
@@ -767,50 +727,8 @@ class MainWindow(QMainWindow):
             event.accept()
 
     def quit_app(self):
-        """v10.2: 앱 종료 및 리소스 정리 - 개선된 버전"""
-        logger.info("앱 종료 시작...")
-        
-        try:
-            # 1. 등록된 핫키만 해제 (다른 앱 핫키 보호)
-            if hasattr(self, '_registered_hotkeys') and self._registered_hotkeys:
-                for hk in self._registered_hotkeys:
-                    try:
-                        keyboard.remove_hotkey(hk)
-                    except Exception:
-                        pass
-                self._registered_hotkeys = []
-            logger.debug("핫키 훅 해제됨")
-            
-            # 2. 타이머들 중지
-            if hasattr(self, 'vault_timer') and self.vault_timer.isActive():
-                self.vault_timer.stop()
-                logger.debug("보관함 타이머 중지됨")
-            
-            if hasattr(self, 'cleanup_timer') and self.cleanup_timer.isActive():
-                self.cleanup_timer.stop()
-                logger.debug("정리 타이머 중지됨")
-            if hasattr(self, 'backup_timer') and self.backup_timer.isActive():
-                self.backup_timer.stop()
-                logger.debug("백업 타이머 중지됨")
-            
-            # 3. 플로팅 미니 창 닫기
-            if hasattr(self, 'mini_window') and self.mini_window:
-                self.mini_window.close()
-                logger.debug("미니 창 닫힘")
-                
-        except Exception as e:
-            logger.warning(f"Cleanup warning: {e}")
-            
-        # 4. DB 연결 종료
-        try:
-            self.db.close()
-            logger.debug("DB 연결 종료됨")
-        except Exception:
-            pass
-            
-        logger.info("앱 종료 완료")
-        # 5. Qt 앱 종료
-        QApplication.quit()
+        """Shutdown app and cleanup resources."""
+        return quit_app_impl(self, logger, keyboard, QApplication)
 
     def toggle_privacy_mode(self):
         """프라이버시 모드 토글"""
@@ -862,7 +780,8 @@ class MainWindow(QMainWindow):
                 # DB 연결 종료 시도 (안전한 복사를 위해)
                 self.db.conn.close()
                 import shutil
-                shutil.copy2(file_name, DB_FILE)
+                target_db_file = getattr(self.db, "db_file", DB_FILE)
+                shutil.copy2(file_name, target_db_file)
                 QMessageBox.information(self, "복원 완료", "데이터가 복원되었습니다.\n프로그램을 재시작합니다.")
                 self.quit_app()
             except Exception as e:
@@ -871,6 +790,7 @@ class MainWindow(QMainWindow):
                 self.db = ClipboardDB()
                 self.vault_manager = SecureVaultManager(self.db)
                 self.action_manager = ClipboardActionManager(self.db)
+                self.action_manager.action_completed.connect(self.on_action_completed)
                 self.export_manager = ExportImportManager(self.db)
                 logger.warning("복원 실패 후 DB 연결 및 매니저 재초기화됨")
 
@@ -1197,42 +1117,7 @@ class MainWindow(QMainWindow):
             logger.error(f"Action Handler Error: {e}")
 
     def init_tray(self):
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(self.app_icon)
-        self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION}")
-        
-        self.tray_menu = QMenu()
-        self.update_tray_theme()
-        
-        show_action = QAction("📋 열기", self)
-        show_action.triggered.connect(self.show_window_from_tray)
-        
-        self.tray_privacy_action = QAction("🔒 프라이버시 모드", self, checkable=True)
-        self.tray_privacy_action.triggered.connect(self.toggle_privacy_mode)
-
-        # v10.6: 모니터링 일시정지 액션
-        self.tray_pause_action = QAction("⏸ 모니터링 일시정지", self, checkable=True)
-        self.tray_pause_action.triggered.connect(self.toggle_monitoring_pause)
-        
-        quit_action = QAction("❌ 종료", self)
-        quit_action.triggered.connect(self.quit_app)
-
-        adv_menu = QMenu("고급")
-        adv_menu.addAction("설정 초기화", self.reset_settings)
-        adv_menu.addAction("클립보드 모니터 재시작", self.reset_clipboard_monitor)
-        
-        self.tray_menu.addAction(show_action)
-        self.tray_menu.addSeparator()
-        self.tray_menu.addAction(self.tray_privacy_action)
-        self.tray_menu.addAction(self.tray_pause_action)
-        self.tray_menu.addSeparator()
-        self.tray_menu.addMenu(adv_menu)
-        self.tray_menu.addSeparator()
-        self.tray_menu.addAction(quit_action)
-        
-        self.tray_icon.setContextMenu(self.tray_menu)
-        self.tray_icon.activated.connect(self.on_tray_activated)
-        self.tray_icon.show()
+        return init_tray_impl(self, VERSION, QAction, QMenu, QSystemTrayIcon)
 
     def toggle_monitoring_pause(self):
         """v10.6: 모니터링 일시정지 토글"""
@@ -1281,80 +1166,12 @@ class MainWindow(QMainWindow):
         shortcut_copy.activated.connect(self.copy_item)
 
     def update_tray_theme(self):
-        """트레이 메뉴에 현재 테마 적용"""
-        theme = THEMES.get(self.current_theme, THEMES["dark"])
-        self.tray_menu.setStyleSheet(f"""
-            QMenu {{ 
-                background-color: {theme["surface"]}; 
-                color: {theme["text"]}; 
-                border: 1px solid {theme["border"]}; 
-                padding: 5px; 
-            }}
-            QMenu::item {{ padding: 8px 20px; }}
-            QMenu::item:selected {{ background-color: {theme["primary"]}; }}
-        """)
+        """Apply active theme to tray menu."""
+        return update_tray_theme_impl(self, THEMES)
 
     def update_status_bar(self, selection_count=0):
-        """상태바 업데이트 - 통계 및 선택 정보 표시"""
-        # v10.7: 프라이버시 인디케이터 업데이트
-        if hasattr(self, 'privacy_indicator'):
-            if self.is_privacy_mode:
-                self.privacy_indicator.setText("🔒 프라이버시")
-            elif self.is_monitoring_paused:
-                self.privacy_indicator.setText("⏸ 일시정지")
-            else:
-                self.privacy_indicator.setText("")
-        
-        # 프라이버시 모드 표시
-        if self.is_privacy_mode:
-            self.statusBar().showMessage("🔒 프라이버시 모드 활성화됨 (클립보드 기록 중지)")
-            return
-            
-        stats = self.db.get_statistics()
-        today_count = self.db.get_today_count()
-        
-        # 기본 통계
-        status_parts = [
-            f"📊 총 {stats['total']}개",
-            f"📌 고정 {stats['pinned']}개",
-            f"📅 오늘 {today_count}개"
-        ]
-        
-        # 모니터링 일시정지 표시
-        if self.is_monitoring_paused:
-             status_parts.append("⏸ [일시정지됨]")
-        
-        # 현재 필터 상태
-        current_filter = self.filter_combo.currentText() if hasattr(self, 'filter_combo') else "전체"
-        if current_filter != "전체":
-            status_parts.append(f"🔍 {current_filter}")
-        collection_filter = getattr(self, "current_collection_filter", "__all__")
-        if collection_filter == "__uncategorized__":
-            status_parts.append("📁 미분류")
-        elif isinstance(collection_filter, int):
-            if hasattr(self, "collection_filter_combo"):
-                label = self.collection_filter_combo.currentText()
-                if label:
-                    status_parts.append(f"📁 {label}")
-
-        # 검색 결과 수
-        search_query = self.search_input.text() if hasattr(self, "search_input") else ""
-        if search_query.strip():
-            shown = getattr(self, "_last_display_count", None)
-            if shown is not None:
-                status_parts.append(f"🔎 검색 {shown}개")
-        
-        # 선택된 항목 수
-        if selection_count > 0:
-            status_parts.append(f"✅ {selection_count}개 선택")
-        
-        # 정렬 상태
-        if hasattr(self, 'sort_column') and self.sort_column > 0:
-            sort_names = {1: "유형", 2: "내용", 3: "시간", 4: "사용"}
-            order = "▲" if self.sort_order == Qt.SortOrder.AscendingOrder else "▼"
-            status_parts.append(f"{sort_names.get(self.sort_column, '')}{order}")
-        
-        self.statusBar().showMessage(" | ".join(status_parts))
+        """Refresh status bar message."""
+        return update_status_bar_impl(self, selection_count, Qt)
 
     # --- 기능 로직 ---
     def toggle_always_on_top(self):
@@ -1537,173 +1354,29 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "QR 오류", str(e))
 
     def on_tray_activated(self, reason):
-        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
-            if self.isVisible():
-                self.hide()
-            else:
-                self.show_window_from_tray()
+        return on_tray_activated_impl(self, reason, QSystemTrayIcon)
 
     def show_window_from_tray(self):
-        self.show()
-        self.activateWindow()
-        self.raise_()
-        self.search_input.setFocus()
-        self.update_status_bar()
+        return show_window_from_tray_impl(self)
 
     def on_clipboard_change(self):
-        """클립보드 변경 감지 - v10.3: 디바운스 개선"""
-        # 프라이버시 모드나 내부 복사면 무시
-        if self.is_privacy_mode or self.is_internal_copy:
-            self.is_internal_copy = False # 내부 복사 플래그는 한 번 사용 후 초기화
-            return
-        
-        # v10.3: 이전 대기 중인 타이머 취소 (중복 호출 방지)
-        if self._clipboard_debounce_timer is not None:
-            self._clipboard_debounce_timer.stop()
-            self._clipboard_debounce_timer.deleteLater()
-        
-        # 새 타이머 생성
-        self._clipboard_debounce_timer = QTimer(self)
-        self._clipboard_debounce_timer.setSingleShot(True)
-        self._clipboard_debounce_timer.timeout.connect(self.process_clipboard)
-        self._clipboard_debounce_timer.start(100)
+        """Clipboard changed callback with debounce."""
+        return on_clipboard_change_impl(self, QTimer)
 
     def process_clipboard(self):
-        # v10.6: 모니터링 일시정지 상태면 무시
-        if self.is_monitoring_paused:
-            return
-            
-        try:
-            mime_data = self.clipboard.mimeData()
-            if mime_data.hasImage():
-                self._process_image_clipboard(mime_data)
-                return
-            
-            if mime_data.hasText():
-                self._process_text_clipboard(mime_data)
-        except Exception as e:
-            logger.exception("Clipboard access error")
+        return process_clipboard_impl(self, logger)
 
     def _process_image_clipboard(self, mime_data):
-        """v10.5: 이미지 클립보드 처리 로직 분리"""
-        try:
-            image = self.clipboard.image()
-            if image.isNull():
-                return
-
-            ba = QByteArray()
-            buffer = QBuffer(ba)
-            buffer.open(QBuffer.OpenModeFlag.WriteOnly)
-            image.save(buffer, "PNG")
-            blob_data = ba.data()
-            
-            # v10.2: 이미지 크기 제한 (5MB)
-            MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
-            if len(blob_data) > MAX_IMAGE_SIZE:
-                logger.warning(f"Image too large ({len(blob_data)} bytes), skipping")
-                ToastNotification.show_toast(
-                    self, f"⚠️ 이미지가 너무 큽니다 (최대 5MB)",
-                    duration=2500, toast_type="warning"
-                )
-                return
-            
-            # v10.0: 이미지 중복 체크 (해시 기반)
-            img_hash = hashlib.md5(blob_data).hexdigest()
-            if hasattr(self, '_last_image_hash') and self._last_image_hash == img_hash:
-                logger.debug("Duplicate image skipped")
-                return
-            self._last_image_hash = img_hash
-            
-            if self.db.add_item("[이미지 캡처됨]", blob_data, "IMAGE"):
-                # v10.4: UI 업데이트 최적화 (보이는 경우에만)
-                if self.isVisible():
-                    self.load_data()
-                    self.update_status_bar()
-                else:
-                    self.is_data_dirty = True
-        except Exception as e:
-            logger.exception("Image processing error")
+        return process_image_clipboard_impl(self, mime_data, logger, QByteArray, QBuffer, hashlib, ToastNotification)
 
     def _process_text_clipboard(self, mime_data):
-        """v10.5: 텍스트 클립보드 처리 로직 분리"""
-        try:
-            raw_text = mime_data.text()
-            if not raw_text:
-                return
-            
-            # 복사 규칙 적용 (원본 텍스트 기반)
-            text = self.apply_copy_rules(raw_text)
-            normalized_text = text.strip()
-            if not normalized_text:
-                return
-            
-            tag = self.analyze_text(normalized_text)
-            item_id = self.db.add_item(text, None, tag)
-            if item_id:
-                # v8.0: 클립보드 액션 자동화 실행
-                self._process_actions(normalized_text, item_id)
-                
-                # v10.4: UI 업데이트 최적화
-                if self.isVisible():
-                    self.load_data()
-                    self.update_status_bar()
-                else:
-                    self.is_data_dirty = True
-        except Exception as e:
-            logger.exception("Text processing error")
+        return process_text_clipboard_impl(self, mime_data, logger)
 
     def _process_actions(self, text, item_id):
-        """v10.5: 액션 처리 로직 분리"""
-        try:
-            # 성능 최적화: add_item이 반환한 ID 직접 사용 (get_items 호출 제거)
-            action_results = self.action_manager.process(text, item_id)
-            for action_name, result in action_results:
-                if result and result.get("type") == "notify":
-                    ToastNotification.show_toast(
-                        self, f"⚡ {action_name}: {result.get('message', '')}",
-                        duration=3000, toast_type="info"
-                    )
-                elif result and result.get("type") == "title":
-                    title = result.get("title")
-                    if title:
-                        ToastNotification.show_toast(
-                            self, f"🔗 {title[:50]}...",
-                            duration=2500, toast_type="info"
-                        )
-        except Exception as action_err:
-            logger.debug(f"Action processing error: {action_err}")
+        return process_actions_impl(self, text, item_id, logger, ToastNotification)
 
     def apply_copy_rules(self, text):
-        """활성화된 복사 규칙 적용 - 캐싱으로 성능 최적화"""
-        # v10.0: 캐싱으로 DB I/O 최소화
-        if self._rules_cache_dirty or self._rules_cache is None:
-            self._rules_cache = self.db.get_copy_rules()
-            self._rules_cache_dirty = False
-            logger.debug("Copy rules cache refreshed")
-        
-        for rule in self._rules_cache:
-            rid, name, pattern, action, replacement, enabled, priority = rule
-            if not enabled:
-                continue
-            if not pattern:
-                logger.warning(f"Empty pattern in copy rule '{name}' (id={rid}), skipping")
-                continue
-            try:
-                if re.search(pattern, text):
-                    if action == "trim":
-                        text = text.strip()
-                    elif action == "lowercase":
-                        text = text.lower()
-                    elif action == "uppercase":
-                        text = text.upper()
-                    elif action == "remove_newlines":
-                        text = text.replace('\n', ' ').replace('\r', '')
-                    elif action == "custom_replace":
-                        text = re.sub(pattern, replacement or "", text)
-                    logger.debug(f"Rule '{name}' applied")
-            except re.error as e:
-                logger.warning(f"Invalid regex in rule '{name}': {e}")
-        return text
+        return apply_copy_rules_impl(self, text, logger, re)
     
     def invalidate_rules_cache(self):
         """v10.0: 규칙 캐시 무효화 (규칙 변경 시 호출)"""
@@ -1711,21 +1384,7 @@ class MainWindow(QMainWindow):
         logger.debug("Copy rules cache invalidated")
 
     def analyze_text(self, text):
-        """텍스트 유형 분석 - 사전 컴파일된 정규식 사용 (성능 최적화)"""
-        # URL 패턴 (사전 컴파일된 정규식 사용)
-        if RE_URL.match(text): 
-            return "LINK"
-        # 확장된 색상 패턴 (사전 컴파일된 정규식 사용)
-        if RE_HEX_COLOR.match(text): 
-            return "COLOR"
-        if RE_RGB_COLOR.match(text):
-            return "COLOR"
-        if RE_HSL_COLOR.match(text):
-            return "COLOR"
-        # 코드 패턴 (전역 상수 사용)
-        if any(x in text for x in CODE_INDICATORS): 
-            return "CODE"
-        return "TEXT"
+        return analyze_text_impl(text, RE_URL, RE_HEX_COLOR, RE_RGB_COLOR, RE_HSL_COLOR, CODE_INDICATORS)
 
     def load_data(self):
         return load_data_impl(self, THEMES, logger)
@@ -1945,13 +1604,20 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("⚠️ 컬렉션 생성에 실패했습니다.", 2000)
     
     def move_to_collection(self, collection_id):
-        pid = self.get_selected_id()
-        if pid:
-            self.db.move_to_collection(pid, collection_id)
-            if collection_id:
-                self.statusBar().showMessage("📁 컬렉션으로 이동됨", 2000)
+        item_ids = self.get_selected_ids()
+        if item_ids:
+            moved_count = 0
+            if hasattr(self.db, "move_items_to_collection"):
+                moved_count = self.db.move_items_to_collection(item_ids, collection_id)
             else:
-                self.statusBar().showMessage("🚫 컬렉션에서 제거됨", 2000)
+                for item_id in item_ids:
+                    if self.db.move_to_collection(item_id, collection_id):
+                        moved_count += 1
+
+            if collection_id:
+                self.statusBar().showMessage(f"📁 {moved_count}개 항목을 컬렉션으로 이동했습니다.", 2000)
+            else:
+                self.statusBar().showMessage(f"🚫 {moved_count}개 항목을 컬렉션에서 제거했습니다.", 2000)
             self.refresh_collection_filter_options()
             self.load_data()
 
@@ -1970,9 +1636,24 @@ class MainWindow(QMainWindow):
             self.detail_text.clear()
             self.detail_image_lbl.clear()
 
+    def get_selected_ids(self):
+        selection_model = self.table.selectionModel()
+        if selection_model is None:
+            return []
+        rows = selection_model.selectedRows()
+        item_ids = []
+        for row in rows:
+            item = self.table.item(row.row(), 0)
+            if item is None:
+                continue
+            item_id = item.data(Qt.ItemDataRole.UserRole)
+            if item_id:
+                item_ids.append(item_id)
+        return item_ids
+
     def get_selected_id(self):
-        rows = self.table.selectionModel().selectedRows()
-        return self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole) if rows else None
+        item_ids = self.get_selected_ids()
+        return item_ids[0] if item_ids else None
 
     def show_context_menu(self, pos):
         return show_context_menu_impl(self, pos, THEMES, webbrowser)

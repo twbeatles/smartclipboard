@@ -126,7 +126,7 @@ python scripts/preflight_local.py
 ```
 
 `preflight_local.py`는 payload 재생성, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
-현재 회귀 범위에는 `test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`가 포함됩니다.
+현재 회귀 범위에는 `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`가 포함됩니다.
 `pyright`는 별도 단계이며 루트 `pyrightconfig.json` 기준으로 현행 유지보수 대상만 분석합니다.
 
 필요 시 payload 재생성 단계를 건너뛰려면:
@@ -134,6 +134,15 @@ python scripts/preflight_local.py
 ```powershell
 python scripts/preflight_local.py --skip-payload-build
 ```
+
+## 🤖 CI (GitHub Actions)
+
+- 워크플로우 파일: `.github/workflows/ci.yml`
+- 실행 환경: `windows-latest`
+- Python 매트릭스: `3.10`, `3.11`, `3.12`, `3.13`
+- 각 매트릭스에서 다음을 수행합니다.
+  - payload 빌드 + smoke import
+  - `python scripts/preflight_local.py --skip-payload-build`
 
 ## 🔎 정적 분석 (Pylance/Pyright)
 
@@ -341,6 +350,7 @@ smartclipboard/
 
 - `smartclipboard_app/legacy_main.py`는 레거시 런타임을 로드하는 하이브리드 모듈입니다.
 - 기본값(권장): payload 모드 (`smartclipboard_app/legacy_main_payload.marshal`) (env: 미설정 또는 `SMARTCLIPBOARD_LEGACY_IMPL=payload`)
+- payload 로딩 실패(파일 누락/파싱 실패/실행 실패) 시 `legacy_main_src.py`로 자동 폴백하며, `LEGACY_IMPL_ACTIVE`/`LEGACY_IMPL_FALLBACK_REASON` 상수로 상태를 확인할 수 있습니다.
 - 소스 모드(정적 분석/클래스/시그널 추적용): env `SMARTCLIPBOARD_LEGACY_IMPL=src`
 - 복원된 원본 소스: `smartclipboard_app/legacy_main_src.py` (원본: `legacy/클립모드 매니저 (legacy).py`)
 - Pylance/pyright는 루트 `pyrightconfig.json`을 기준으로 현행 유지보수 코드만 검사합니다.
@@ -389,5 +399,21 @@ MIT License
 ## 문서 정합성 기준 (2026-03-07)
 
 - 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `legacy/README (modular).md`는 동일 기준을 따릅니다.
-- 권장 회귀 테스트 기준은 `test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot` 4종입니다.
+- 권장 회귀 테스트 기준은 `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot` 5종입니다.
 - PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`) 포함과 함께 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집합니다.
+
+## Refactor Layout (2026-03-12)
+
+- `smartclipboard_core/database.py` is now a composition entrypoint.
+- Database implementation is split under `smartclipboard_core/db_parts/`:
+  - `schema_search.py`
+  - `history_ops.py`
+  - `rules_snippets_actions.py`
+  - `tags_collections.py`
+  - `vault_trash.py`
+- MainWindow helper logic in `smartclipboard_app/ui/mainwindow_parts/` is expanded:
+  - `theme_style_sections.py` (theme QSS builder split)
+  - `ui_init_sections.py`, `ui_dragdrop_ops.py` (`ui_ops.py` wrappers)
+  - `tray_hotkey_ops.py`, `status_lifecycle_ops.py`, `clipboard_runtime_ops.py`
+- `scripts/preflight_local.py` now compiles both `mainwindow_parts/*.py` and `db_parts/*.py`.
+- Added surface-guard test: `tests/test_public_surfaces.py` and baseline `tests/baseline/clipboarddb_public_methods.txt`.

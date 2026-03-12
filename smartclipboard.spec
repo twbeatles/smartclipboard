@@ -13,7 +13,8 @@ Notes:
     - Runtime behavior is restored via legacy marshal payload.
     - If legacy source changes, rebuild payload first and keep tests green
       (`test_payload_sync`, `test_migration_collections`,
-       `test_legacy_ui_contracts`, `test_signal_snapshot`).
+       `test_legacy_ui_contracts`, `test_signal_snapshot`,
+       `test_public_surfaces`).
 """
 
 from pathlib import Path
@@ -30,6 +31,7 @@ if not LEGACY_PAYLOAD.exists():
 
 # Keep refactor-safe module coverage for payload runtime imports.
 CORE_SUBMODULES = collect_submodules("smartclipboard_core")
+DB_PARTS_SUBMODULES = collect_submodules("smartclipboard_core.db_parts")
 MAINWINDOW_PARTS_SUBMODULES = collect_submodules("smartclipboard_app.ui.mainwindow_parts")
 
 EXCLUDES = [
@@ -97,7 +99,7 @@ HIDDEN_IMPORTS = [
     "requests", "bs4", "qrcode", "PIL", "PIL.ImageQt",
 ]
 
-for submodule in CORE_SUBMODULES + MAINWINDOW_PARTS_SUBMODULES:
+for submodule in CORE_SUBMODULES + DB_PARTS_SUBMODULES + MAINWINDOW_PARTS_SUBMODULES:
     if submodule not in HIDDEN_IMPORTS:
         HIDDEN_IMPORTS.append(submodule)
 

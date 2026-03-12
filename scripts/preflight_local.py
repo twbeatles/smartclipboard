@@ -43,6 +43,13 @@ def compile_targets() -> list[str]:
             for path in sorted(helper_dir.glob("*.py"))
         )
 
+    db_parts_dir = REPO_ROOT / "smartclipboard_core" / "db_parts"
+    if db_parts_dir.exists():
+        targets.extend(
+            str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+            for path in sorted(db_parts_dir.glob("*.py"))
+        )
+
     return targets
 
 
