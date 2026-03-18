@@ -1,4 +1,4 @@
-﻿# -*- mode: python ; coding: utf-8 -*-
+# -*- mode: python ; coding: utf-8 -*-
 """
 SmartClipboard Pro v10.6 - PyInstaller spec
 
@@ -23,7 +23,7 @@ from PyInstaller.utils.hooks import collect_submodules
 APP_NAME = "SmartClipboard"
 APP_VERSION = "10.6"
 MAIN_SCRIPT = "클립모드 매니저.py"
-ICON_FILE = None
+ICON_FILE = "smartclipboard.ico"
 LEGACY_PAYLOAD = Path("smartclipboard_app/legacy_main_payload.marshal")
 
 if not LEGACY_PAYLOAD.exists():
