@@ -2,7 +2,7 @@ from __future__ import annotations
 import datetime
 import sqlite3
 
-from .shared import logger
+from .shared import history_order_by, logger
 
 class TagsCollectionsMixin:
     def get_item_tags(self, item_id):
@@ -137,7 +137,8 @@ class TagsCollectionsMixin:
             try:
                 cursor = self.conn.cursor()
                 cursor.execute(
-                    "SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE collection_id = ? ORDER BY pinned DESC, pin_order ASC, id DESC",
+                    "SELECT id, content, type, timestamp, pinned, use_count, pin_order "
+                    f"FROM history WHERE collection_id = ? {history_order_by()}",
                     (collection_id,)
                 )
                 return cursor.fetchall()
@@ -152,7 +153,7 @@ class TagsCollectionsMixin:
                 cursor = self.conn.cursor()
                 cursor.execute(
                     "SELECT id, content, type, timestamp, pinned, use_count, pin_order "
-                    "FROM history WHERE collection_id IS NULL ORDER BY pinned DESC, pin_order ASC, id DESC"
+                    f"FROM history WHERE collection_id IS NULL {history_order_by()}"
                 )
                 return cursor.fetchall()
             except sqlite3.Error as e:
@@ -167,7 +168,7 @@ class TagsCollectionsMixin:
                     return []
                 cursor = self.conn.cursor()
                 cursor.execute(
-                    """
+                    f"""
                     SELECT id, content, type, timestamp, pinned, use_count, pin_order
                     FROM history
                     WHERE tags IS NOT NULL
@@ -176,7 +177,7 @@ class TagsCollectionsMixin:
                           ',' || REPLACE(REPLACE(REPLACE(tags, '，', ','), ', ', ','), ' ,', ',') || ',',
                           ',' || ? || ','
                       ) > 0
-                    ORDER BY pinned DESC, pin_order ASC, id DESC
+                    {history_order_by()}
                     """,
                     (normalized_tag,),
                 )

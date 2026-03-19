@@ -3,13 +3,17 @@
 SmartClipboard Pro v10.6 - PyInstaller spec
 
 Build:
-    pyright
     python scripts/preflight_local.py
     pyinstaller --clean smartclipboard.spec
+
+Optional:
+    pyright <touched-files>
 
 Notes:
     - Static analysis scope lives in pyrightconfig.json and intentionally
       excludes legacy archive/source snapshots from the default Pylance run.
+    - Repo-wide pyright still has db_parts mixin attribute-typing noise, so
+      targeted pyright is supplemental to preflight.
     - Runtime behavior is restored via legacy marshal payload.
     - If legacy source changes, rebuild payload first and keep tests green
       (`test_payload_sync`, `test_migration_collections`,
@@ -75,6 +79,7 @@ HIDDEN_IMPORTS = [
     "smartclipboard_app.legacy_main",
     "smartclipboard_app.legacy_main_src",
     "smartclipboard_app.ui.main_window",
+    "smartclipboard_app.ui.clipboard_guard",
     "smartclipboard_app.ui.widgets.toast",
     "smartclipboard_app.ui.widgets.floating_mini_window",
     "smartclipboard_app.ui.dialogs.settings",

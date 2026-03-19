@@ -21,7 +21,7 @@
 - 📝 항목별 메모 첨부 기능
 
 ### 🔒 보안 보관함
-- AES-256 암호화로 민감한 데이터 안전 보관
+- PBKDF2-HMAC-SHA256 + Fernet 기반 암호화로 민감한 데이터 안전 보관
 - 마스터 비밀번호 기반 잠금
 - **v10.2**: 비밀번호 강도 검증 (8자 이상, 숫자+특수문자)
 - 5분 자동 잠금 타이머
@@ -44,11 +44,12 @@
 - 자주 사용하는 텍스트 템플릿 저장
 - **v10.2**: 스니펫 수정 기능 추가
 - 카테고리별 정리
-- 단축키 할당 가능
+- 더블클릭/버튼으로 즉시 복사
 
 ### 📤 내보내기/가져오기
-- JSON, CSV, Markdown 포맷 지원
+- JSON, CSV, Markdown 내보내기 / JSON, CSV 가져오기 지원
 - 날짜 및 타입 필터링
+- JSON은 `IMAGE` 항목을 `image_data_b64`로 보존하며, CSV/Markdown은 이미지 BLOB를 제외
 - JSON 마이그레이션 모드 (태그/메모/북마크 + 컬렉션 정의/ID 매핑 정보 포함)
 - 백업 및 마이그레이션 용이
 
@@ -113,11 +114,17 @@ Pillow>=9.0.0           # 이미지 처리
 ## 🔨 빌드
 
 ```powershell
-python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
+python scripts/preflight_local.py
 pyinstaller --clean smartclipboard.spec
 ```
 
 결과물: `dist/SmartClipboard.exe` (~40MB, UPX 압축 적용 시)
+
+payload만 다시 생성해야 할 때는:
+
+```powershell
+python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
+```
 
 ## ✅ 로컬 프리플라이트
 
@@ -128,6 +135,7 @@ python scripts/preflight_local.py
 `preflight_local.py`는 payload 재생성, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
 현재 회귀 범위에는 `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`가 포함됩니다.
 `pyright`는 별도 단계이며 루트 `pyrightconfig.json` 기준으로 현행 유지보수 대상만 분석합니다.
+현재 repo-wide `pyright`에는 `smartclipboard_core/db_parts/*.py` mixin attribute typing 노이즈가 남아 있으므로, 로컬 게이트는 `preflight_local.py`이고 `pyright`는 변경 파일 기준 보조 검증으로 사용합니다.
 
 필요 시 payload 재생성 단계를 건너뛰려면:
 
@@ -223,6 +231,14 @@ pyright
 - `update_always_on_top()`에서 창 가시성 보존 가드 적용 (`--minimized` 시작 안정성 개선)
 - JSON 마이그레이션에 `collections` 메타데이터를 포함하고 import 시 컬렉션 ID remap 지원
 
+### 🛠️ 2026-03-19 구현 안정화 패치
+- `add_snippet()`의 런타임 `datetime` 누락을 수정해 신규 스니펫 저장 경로 복구
+- 동일 비이미지 텍스트를 다시 복사하면 기존 row의 메타데이터(tags/note/bookmark/collection/pin/use_count)를 유지한 채 `timestamp/content/type`만 갱신
+- 일반 히스토리/북마크/컬렉션/미분류/빈 검색 fallback의 unpinned 정렬을 `timestamp DESC, id DESC`로 통일
+- 보안 보관함 복사, 스니펫 사용, URL 복사 경로에서 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅
+- JSON export/import가 `IMAGE` 항목을 `image_data_b64`로 round-trip
+- pinned drag-drop helper의 `Qt` 참조 누락을 수정
+
 ---
 
 ## 📝 v10.3 변경사항
@@ -309,6 +325,7 @@ smartclipboard/
 │   ├── legacy_main_payload.marshal  # 런타임 payload
 │   ├── managers/
 │   └── ui/
+│       ├── clipboard_guard.py       # internal copy flag helper
 │       └── mainwindow_parts/        # MainWindow helper 분리 모듈
 ├── smartclipboard_core/
 │   ├── actions.py
@@ -354,6 +371,8 @@ smartclipboard/
 - 소스 모드(정적 분석/클래스/시그널 추적용): env `SMARTCLIPBOARD_LEGACY_IMPL=src`
 - 복원된 원본 소스: `smartclipboard_app/legacy_main_src.py` (원본: `legacy/클립모드 매니저 (legacy).py`)
 - Pylance/pyright는 루트 `pyrightconfig.json`을 기준으로 현행 유지보수 코드만 검사합니다.
+- 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 먼저 거쳐 자기 재수집 루프를 피합니다.
+- JSON export/import는 `IMAGE` 항목용 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 의도적으로 제외합니다.
 - 기존 모듈러 레이아웃 README는 `legacy/README (modular).md`에 보관되어 있습니다.
 
 ---
@@ -363,6 +382,7 @@ smartclipboard/
 - Windows 전용 (macOS/Linux 미지원)
 - 일부 애플리케이션에서 글로벌 핫키 충돌 가능
 - 이미지 히스토리는 크기에 따라 DB 용량 증가
+- 스니펫 `shortcut` 컬럼은 존재하지만, 사용자 할당 UI/실행 경로는 아직 노출되지 않음
 
 ---
 

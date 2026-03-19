@@ -24,20 +24,25 @@
 - 구조 인벤토리/시그널 스냅샷은 로더 구조 특성상 소스 본문 검증과 의미가 달라질 수 있습니다.
 - payload 반영 누락 방지를 위해 `tests/test_payload_sync.py`를 포함한 로컬 preflight를 우선 실행합니다.
 - `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
+- 동일 비이미지 재복사는 기존 history row를 갱신하는 정책이며 메타데이터를 유지해야 합니다.
+- 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅합니다.
 - JSON 마이그레이션(`include_metadata=True`)에는 top-level `collections` 메타데이터가 포함되며 import 시 컬렉션 ID remap이 수행됩니다.
+- JSON export/import는 `IMAGE` 항목의 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 제외합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
 
 ## 검증 커맨드
 
 ```powershell
-pyright
 python scripts/preflight_local.py
+pyright <touched-files>
 ```
+
+- 현재 repo-wide `pyright`는 `smartclipboard_core/db_parts/*.py` mixin attribute-access 노이즈가 남아 있으므로, 최소 게이트는 `preflight_local.py`이고 `pyright`는 변경 파일 기준으로 병행합니다.
 
 또는 단계별 실행:
 
 ```powershell
-pyright
+pyright <touched-files>
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_app/legacy_main_src.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
 python -m unittest discover -s tests -v

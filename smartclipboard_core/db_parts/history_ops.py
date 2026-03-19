@@ -3,36 +3,60 @@ import datetime
 import os
 import sqlite3
 
-from .shared import CLEANUP_INTERVAL, DEFAULT_MAX_HISTORY, FILTER_TAG_MAP, logger
+from .shared import CLEANUP_INTERVAL, DEFAULT_MAX_HISTORY, FILTER_TAG_MAP, history_order_by, logger
 
 class HistoryOpsMixin:
     def add_item(self, content: str, image_data: bytes | None, type_tag: str) -> int | bool:
-        """항목 추가 - 중복 텍스트는 끌어올리기"""
+        """항목 추가. 동일 텍스트는 기존 항목을 최신 상태로 갱신."""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                updated_existing = False
+
                 if type_tag != "IMAGE":
-                    cursor.execute("SELECT id FROM history WHERE content = ? AND pinned = 0", (content,))
+                    cursor.execute(
+                        "SELECT id FROM history WHERE content = ? AND type != 'IMAGE' "
+                        "ORDER BY timestamp DESC, id DESC LIMIT 1",
+                        (content,),
+                    )
                     existing = cursor.fetchone()
                     if existing:
-                        cursor.execute("DELETE FROM history WHERE id = ?", (existing[0],))
-                
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cursor.execute(
-                    "INSERT INTO history (content, image_data, type, timestamp) VALUES (?, ?, ?, ?)", 
-                    (content, image_data, type_tag, timestamp)
-                )
-                item_id = cursor.lastrowid
-                if item_id is None:
-                    raise sqlite3.Error("Inserted history row has no id")
+                        item_id = int(existing[0])
+                        cursor.execute(
+                            "UPDATE history SET content = ?, image_data = NULL, type = ?, timestamp = ? WHERE id = ?",
+                            (content, type_tag, timestamp, item_id),
+                        )
+                        updated_existing = True
+                    else:
+                        cursor.execute(
+                            "INSERT INTO history (content, image_data, type, timestamp) VALUES (?, ?, ?, ?)",
+                            (content, image_data, type_tag, timestamp),
+                        )
+                        item_id = cursor.lastrowid
+                        if item_id is None:
+                            raise sqlite3.Error("Inserted history row has no id")
+                else:
+                    cursor.execute(
+                        "INSERT INTO history (content, image_data, type, timestamp) VALUES (?, ?, ?, ?)",
+                        (content, image_data, type_tag, timestamp),
+                    )
+                    item_id = cursor.lastrowid
+                    if item_id is None:
+                        raise sqlite3.Error("Inserted history row has no id")
+
                 self.conn.commit()
-                # v10.0: cleanup 최적화 - 매번이 아닌 N회마다 실행
-                self.add_count += 1
-                if self.add_count >= CLEANUP_INTERVAL:
-                    self.cleanup()
-                    self.add_count = 0
-                logger.debug(f"항목 추가: {type_tag} (id={item_id})")
-                return item_id  # 삽입된 항목 ID 반환 (성능 최적화)
+
+                if updated_existing:
+                    logger.debug(f"항목 갱신: {type_tag} (id={item_id})")
+                else:
+                    # v10.0: cleanup 최적화 - 매번이 아닌 N회마다 실행
+                    self.add_count += 1
+                    if self.add_count >= CLEANUP_INTERVAL:
+                        self.cleanup()
+                        self.add_count = 0
+                    logger.debug(f"항목 추가: {type_tag} (id={item_id})")
+                return item_id
             except sqlite3.Error as e:
                 logger.exception("DB Add Error")
                 self.conn.rollback()
@@ -63,7 +87,7 @@ class HistoryOpsMixin:
                         sql += " AND type = ?"
                         params.append(legacy_map[type_filter])
 
-                sql += " ORDER BY pinned DESC, pin_order ASC, id DESC"
+                sql += f" {history_order_by()}"
                 cursor.execute(sql, params)
                 return cursor.fetchall()
             except sqlite3.Error as e:
@@ -180,7 +204,10 @@ class HistoryOpsMixin:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT content, timestamp FROM history WHERE type != 'IMAGE' ORDER BY id DESC")
+                cursor.execute(
+                    "SELECT content, timestamp FROM history WHERE type != 'IMAGE' "
+                    "ORDER BY timestamp DESC, id DESC"
+                )
                 return cursor.fetchall()
             except sqlite3.Error as e:
                 logger.error(f"DB Get All Text Error: {e}")
@@ -343,7 +370,10 @@ class HistoryOpsMixin:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT id, content, type, timestamp, pinned, use_count, pin_order FROM history WHERE bookmark = 1 ORDER BY id DESC")
+                cursor.execute(
+                    "SELECT id, content, type, timestamp, pinned, use_count, pin_order "
+                    f"FROM history WHERE bookmark = 1 {history_order_by()}"
+                )
                 return cursor.fetchall()
             except sqlite3.Error as e:
                 logger.error(f"Get Bookmarked Error: {e}")

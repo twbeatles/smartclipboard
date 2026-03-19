@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sqlite3
 
-from .shared import FILTER_TAG_MAP, logger
+from .shared import FILTER_TAG_MAP, history_order_by, logger
 
 class SchemaSearchMixin:
     def create_tables(self):
@@ -340,7 +340,7 @@ class SchemaSearchMixin:
                     elif uncategorized:
                         sql += " AND h.collection_id IS NULL"
 
-                    sql += " ORDER BY h.pinned DESC, h.pin_order ASC, bm25(history_fts) ASC, h.id DESC"
+                    sql += " ORDER BY h.pinned DESC, h.pin_order ASC, bm25(history_fts) ASC, h.timestamp DESC, h.id DESC"
                     if limit is not None:
                         sql += " LIMIT ?"
                         params.append(int(limit))
@@ -396,7 +396,7 @@ class SchemaSearchMixin:
             elif uncategorized:
                 sql += " AND collection_id IS NULL"
 
-            sql += " ORDER BY pinned DESC, pin_order ASC, id DESC"
+            sql += f" {history_order_by()}"
             if limit is not None:
                 sql += " LIMIT ?"
                 params2.append(int(limit))

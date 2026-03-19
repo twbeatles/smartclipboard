@@ -22,6 +22,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+
 T = TypeVar("T")
 
 
@@ -200,6 +202,7 @@ class SecureVaultDialog(QDialog):
             if clipboard is None:
                 QMessageBox.warning(self, "오류", "클립보드에 접근할 수 없습니다.")
                 return
+            mark_internal_copy(self.parent_window)
             clipboard.setText(decrypted)
             parent = _vault_parent(self.parent_window)
             if parent is not None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 import datetime
 import json
@@ -56,8 +58,6 @@ class ExportImportManager:
                 pid, content, ptype, timestamp, pinned, use_count, pin_order = item
                 if filter_type != "all" and filter_type != ptype:
                     continue
-                if ptype == "IMAGE":
-                    continue
                 if date_from and timestamp:
                     try:
                         item_date = datetime.datetime.strptime(timestamp.split()[0], "%Y-%m-%d").date()
@@ -74,6 +74,20 @@ class ExportImportManager:
                     "use_count": use_count,
                     "pin_order": pin_order,
                 }
+                if ptype == "IMAGE":
+                    try:
+                        with self.db.lock:
+                            cursor = self.db.conn.cursor()
+                            cursor.execute("SELECT image_data FROM history WHERE id = ?", (pid,))
+                            image_row = cursor.fetchone()
+                        image_data = image_row[0] if image_row else None
+                        if not image_data:
+                            self.logger.debug("Image export skipped for id=%s: missing blob", pid)
+                            continue
+                        payload["image_data_b64"] = base64.b64encode(image_data).decode("ascii")
+                    except Exception as exc:
+                        self.logger.debug("Image export skipped for id=%s: %s", pid, exc)
+                        continue
                 if include_metadata:
                     try:
                         with self.db.lock:
@@ -189,9 +203,20 @@ class ExportImportManager:
                 ptype = item.get("type", "TEXT")
                 if ptype not in valid_types:
                     ptype = "TEXT"
-                if not content:
+                image_data = None
+                if ptype == "IMAGE":
+                    image_data_b64 = item.get("image_data_b64")
+                    if not image_data_b64:
+                        continue
+                    try:
+                        image_data = base64.b64decode(image_data_b64, validate=True)
+                    except (ValueError, TypeError, binascii.Error) as exc:
+                        self.logger.debug("Image import skipped for content=%r: %s", content, exc)
+                        continue
+                    content = content or "[이미지 캡처]"
+                elif not content:
                     continue
-                item_id = self.db.add_item(content, None, ptype)
+                item_id = self.db.add_item(content, image_data, ptype)
                 if not item_id:
                     continue
                 imported += 1

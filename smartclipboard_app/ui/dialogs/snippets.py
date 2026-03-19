@@ -23,6 +23,8 @@ from PyQt6.QtCore import Qt
 
 import datetime
 
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+
 
 class SnippetDialog(QDialog):
     def __init__(self, parent, db, snippet=None):
@@ -195,6 +197,7 @@ class SnippetManagerDialog(QDialog):
                 clipboard = QApplication.clipboard()
                 if clipboard is None:
                     return
+                mark_internal_copy(self.parent_window)
                 clipboard.setText(content)
                 if self.parent_window:
                     status_bar_getter = cast(

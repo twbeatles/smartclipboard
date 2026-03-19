@@ -1,10 +1,12 @@
-﻿import datetime
+import datetime
+import json
 import os
 import tempfile
 import unittest
 
 from PyQt6.QtWidgets import QApplication
 
+from smartclipboard_app.managers.export_import import ExportImportManager
 from smartclipboard_core.actions import ClipboardActionManager, extract_first_url
 from smartclipboard_core.database import ClipboardDB
 
@@ -67,6 +69,13 @@ class CoreDatabaseTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
         self.tmpdir.cleanup()
+
+    def test_add_snippet_success(self):
+        self.assertTrue(self.db.add_snippet("greeting", "hello world"))
+        snippets = self.db.get_snippets()
+        self.assertEqual(len(snippets), 1)
+        self.assertEqual(snippets[0][1], "greeting")
+        self.assertEqual(snippets[0][2], "hello world")
 
     def test_cleanup_respects_max_history_and_keeps_pinned(self):
         self.db.set_setting("max_history", 10)
@@ -261,6 +270,76 @@ class CoreDatabaseTests(unittest.TestCase):
             assigned = cursor.fetchone()[0]
         self.assertEqual(assigned, 3)
 
+    def test_duplicate_text_updates_existing_row_and_preserves_metadata(self):
+        item_id = self.db.add_item("duplicate-text", None, "TEXT")
+        other_id = self.db.add_item("other-text", None, "TEXT")
+        collection_id = self.db.add_collection("duplicates")
+        self.assertTrue(collection_id)
+
+        self.db.set_item_tags(item_id, "alpha")
+        self.db.set_note(item_id, "keep this note")
+        self.db.toggle_bookmark(item_id)
+        self.assertTrue(self.db.assign_to_collection(item_id, collection_id))
+        self.db.increment_use_count(item_id)
+        self.db.increment_use_count(item_id)
+        self.assertTrue(self.db.set_item_metadata(item_id, timestamp="2000-01-01 00:00:00"))
+        self.assertTrue(self.db.set_item_metadata(other_id, timestamp="2000-01-02 00:00:00"))
+
+        updated_id = self.db.add_item("duplicate-text", None, "LINK")
+
+        self.assertEqual(updated_id, item_id)
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT type, tags, note, bookmark, collection_id, use_count FROM history WHERE id = ?",
+                (item_id,),
+            )
+            row = cursor.fetchone()
+        self.assertEqual(row, ("LINK", "alpha", "keep this note", 1, collection_id, 2))
+
+        items = self.db.get_items("", "전체")
+        self.assertEqual(items[0][0], item_id)
+        self.assertEqual(items[1][0], other_id)
+
+    def test_export_import_json_round_trip_preserves_image_item(self):
+        image_bytes = b"fake-image-payload"
+        item_id = self.db.add_item("[이미지 캡처]", image_bytes, "IMAGE")
+        self.assertTrue(item_id)
+
+        export_manager = ExportImportManager(self.db)
+        export_path = os.path.join(self.tmpdir.name, "clipboard_export.json")
+        exported = export_manager.export_json(export_path, include_metadata=True)
+
+        self.assertEqual(exported, 1)
+        with open(export_path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        self.assertEqual(payload["items"][0]["type"], "IMAGE")
+        self.assertIn("image_data_b64", payload["items"][0])
+
+        dst_tmp = tempfile.TemporaryDirectory()
+        dst_db = None
+        try:
+            dst_db = ClipboardDB(
+                db_file=os.path.join(dst_tmp.name, "clipboard_history_v6.db"),
+                app_dir=dst_tmp.name,
+            )
+            imported = ExportImportManager(dst_db).import_json(export_path)
+            self.assertEqual(imported, 1)
+
+            items = dst_db.get_items("", "전체")
+            self.assertEqual(len(items), 1)
+            restored = dst_db.get_content(items[0][0])
+            if restored is None:
+                self.fail("Imported image item could not be loaded from the destination DB")
+            content, blob, ptype = restored
+            self.assertEqual(content, "[이미지 캡처]")
+            self.assertEqual(blob, image_bytes)
+            self.assertEqual(ptype, "IMAGE")
+        finally:
+            if dst_db is not None:
+                dst_db.close()
+            dst_tmp.cleanup()
+
 
 class CoreDatabaseSearchTests(unittest.TestCase):
     def setUp(self):
@@ -381,7 +460,19 @@ class CoreDatabaseSearchTests(unittest.TestCase):
         self.assertNotIn(unbookmarked_id, ids)
         self.assertNotIn(wrong_tag_id, ids)
 
+    def test_search_items_empty_query_uses_updated_timestamp_order(self):
+        target_id = self.db.add_item("search-duplicate", None, "TEXT")
+        other_id = self.db.add_item("search-other", None, "TEXT")
+
+        self.assertTrue(self.db.set_item_metadata(target_id, timestamp="2000-01-01 00:00:00"))
+        self.assertTrue(self.db.set_item_metadata(other_id, timestamp="2000-01-02 00:00:00"))
+        self.assertEqual(self.db.search_items("")[0][0], other_id)
+
+        updated_id = self.db.add_item("search-duplicate", None, "TEXT")
+
+        self.assertEqual(updated_id, target_id)
+        self.assertEqual(self.db.search_items("")[0][0], target_id)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-

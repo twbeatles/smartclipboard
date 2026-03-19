@@ -96,6 +96,8 @@ pyinstaller --clean smartclipboard.spec
 - `pyright`/Pylance는 현행 유지보수 코드만 기본 분석 대상으로 보며, `smartclipboard_app/legacy_main_src.py`와 `legacy/` 보관본은 제외됩니다.
 - 구조 리팩토링을 재개하려면 신뢰 가능한 원본 `legacy_main.py` 소스 복원이 선행되어야 합니다.
 - 2026-03 정합성 패치로 fetch_title 액션의 첫 URL 추출 경로, 복합 필터 검색 경로, 휴지통 다중선택, minimized 시작 안정성, JSON 컬렉션 remap이 보강되었습니다.
+- 2026-03-19 안정화 패치로 비이미지 중복 캡처 시 메타데이터 보존, JSON `IMAGE` round-trip(`image_data_b64`), 보안 보관함/스니펫/URL 복사의 internal copy guard, `add_snippet()` 런타임 오류 수정이 반영되었습니다.
+- 스니펫 `shortcut` 컬럼은 유지되지만 사용자 할당 UI/실행 경로는 아직 노출되지 않습니다.
 
 ## 문서 정합성 기준 (2026-03-07)
 

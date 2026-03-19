@@ -26,3 +26,11 @@ FILTER_TAG_MAP = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+def history_order_by(alias: str = "") -> str:
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"ORDER BY {prefix}pinned DESC, {prefix}pin_order ASC, "
+        f"{prefix}timestamp DESC, {prefix}id DESC"
+    )

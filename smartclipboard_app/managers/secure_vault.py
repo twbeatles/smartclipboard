@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class SecureVaultManager:
-    """AES-256 encrypted secure vault."""
+    """Fernet-encrypted secure vault with PBKDF2-derived keys."""
 
     def __init__(self, db, logger_=None):
         self.db = db

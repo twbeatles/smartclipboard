@@ -36,6 +36,13 @@ def compile_targets() -> list[str]:
         "smartclipboard_core/worker.py",
     ]
 
+    ui_dir = REPO_ROOT / "smartclipboard_app" / "ui"
+    if ui_dir.exists():
+        targets.extend(
+            str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+            for path in sorted(ui_dir.glob("*.py"))
+        )
+
     helper_dir = REPO_ROOT / "smartclipboard_app" / "ui" / "mainwindow_parts"
     if helper_dir.exists():
         targets.extend(

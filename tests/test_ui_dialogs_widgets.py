@@ -7,7 +7,10 @@ from PyQt6.QtWidgets import QApplication, QListWidgetItem, QWidget
 
 from smartclipboard_app.ui.dialogs.clipboard_actions import ClipboardActionsDialog
 from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS, HotkeySettingsDialog
+from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
+from smartclipboard_app.ui.dialogs.snippets import SnippetManagerDialog
+from smartclipboard_app.ui.mainwindow_parts.ui_dragdrop_ops import handle_drop_event_body
 from smartclipboard_app.ui.widgets.floating_mini_window import FloatingMiniWindow
 
 
@@ -77,6 +80,131 @@ class _FakeMiniParent(QWidget):
 
     def activateWindow(self):
         return None
+
+    def statusBar(self):
+        return None
+
+
+class _FakeVaultDB:
+    def get_vault_items(self):
+        return []
+
+
+class _FakeVaultManager:
+    is_unlocked = True
+
+    def decrypt(self, _encrypted_data):
+        return "vault-secret"
+
+    def has_master_password(self):
+        return True
+
+    def lock(self):
+        return None
+
+
+class _FakeSnippetDB:
+    def get_snippets(self, category=""):
+        return [(1, "welcome", "snippet-text", "", "일반")]
+
+
+class _FakeDragItem:
+    def __init__(self, text, item_id):
+        self._text = text
+        self._item_id = item_id
+
+    def text(self):
+        return self._text
+
+    def data(self, _role):
+        return self._item_id
+
+
+class _FakeDragIndex:
+    def __init__(self, row):
+        self._row = row
+
+    def row(self):
+        return self._row
+
+
+class _FakeDragSelectionModel:
+    def __init__(self, selected_row):
+        self._selected_row = selected_row
+
+    def selectedRows(self):
+        return [_FakeDragIndex(self._selected_row)]
+
+
+class _FakeDragTable:
+    def __init__(self):
+        self._items = {
+            0: _FakeDragItem("📌", 100),
+            1: _FakeDragItem("📌", 101),
+        }
+
+    def rowAt(self, _y):
+        return 0
+
+    def selectionModel(self):
+        return _FakeDragSelectionModel(1)
+
+    def item(self, row, _column):
+        return self._items.get(row)
+
+    def rowCount(self):
+        return len(self._items)
+
+
+class _FakeDragDB:
+    def __init__(self):
+        self.ordered_ids = None
+
+    def update_pin_orders(self, ordered_ids):
+        self.ordered_ids = list(ordered_ids)
+        return True
+
+
+class _FakeDragStatusBar:
+    def __init__(self):
+        self.messages = []
+
+    def showMessage(self, message, _duration):
+        self.messages.append(message)
+
+
+class _FakeDragPosition:
+    def y(self):
+        return 0
+
+
+class _FakeDragEvent:
+    def __init__(self):
+        self.accepted = False
+        self.ignored = False
+
+    def position(self):
+        return _FakeDragPosition()
+
+    def accept(self):
+        self.accepted = True
+
+    def ignore(self):
+        self.ignored = True
+
+
+class _FakeDragWindow:
+    def __init__(self):
+        self.table = _FakeDragTable()
+        self.db = _FakeDragDB()
+        self._status_bar = _FakeDragStatusBar()
+        self.load_calls = 0
+
+    def statusBar(self):
+        return self._status_bar
+
+    def load_data(self):
+        self.load_calls += 1
 
 
 class UiDialogsWidgetsTests(unittest.TestCase):
@@ -151,6 +279,38 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             self.assertEqual(db.incremented, [7])
         finally:
             window.close()
+
+    def test_secure_vault_copy_marks_internal_copy_flag(self):
+        parent = _FakeMiniParent()
+        dialog = SecureVaultDialog(parent, _FakeVaultDB(), _FakeVaultManager())
+        try:
+            dialog.copy_item(1, b"encrypted")
+            self.assertTrue(parent.is_internal_copy)
+        finally:
+            dialog.close()
+            parent.close()
+
+    def test_snippet_manager_use_snippet_marks_internal_copy_flag(self):
+        parent = _FakeMiniParent()
+        dialog = SnippetManagerDialog(parent, _FakeSnippetDB())
+        try:
+            dialog.table.selectRow(0)
+            dialog.use_snippet()
+            self.assertTrue(parent.is_internal_copy)
+        finally:
+            dialog.close()
+            parent.close()
+
+    def test_dragdrop_helper_updates_pin_order_without_qt_name_error(self):
+        window = _FakeDragWindow()
+        event = _FakeDragEvent()
+        with mock.patch("smartclipboard_app.ui.mainwindow_parts.ui_dragdrop_ops.QTimer.singleShot") as single_shot:
+            result = handle_drop_event_body(window, event, {}, mock.Mock())
+
+        self.assertTrue(result)
+        self.assertEqual(window.db.ordered_ids, [101, 100])
+        self.assertTrue(event.accepted)
+        single_shot.assert_called_once_with(50, window.load_data)
 
 
 if __name__ == "__main__":

@@ -24,7 +24,10 @@
 - `pyright`/Pylance 진단은 기본적으로 `legacy/클립모드 매니저 (legacy).py`와 `smartclipboard_app/legacy_main_src.py`를 제외한 현행 코드 기준으로 맞춥니다.
 - UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`을 재생성한 뒤 빌드해야 합니다.
 - `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
+- 동일 비이미지 재복사는 기존 history row를 갱신하는 정책이며, 메타데이터(tags/note/bookmark/collection/pin/use_count)를 유지해야 합니다.
+- 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅합니다.
 - JSON 마이그레이션 포맷(`include_metadata=True`)은 `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color)를 포함하며, import 시 컬렉션 ID remap을 수행합니다.
+- JSON export/import는 `IMAGE` 항목의 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 제외합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
@@ -35,14 +38,16 @@
 ## 4. 필수 검증
 
 ```powershell
-pyright
 python scripts/preflight_local.py
+pyright <touched-files>
 ```
+
+- 현재 repo-wide `pyright`는 `smartclipboard_core/db_parts/*.py` mixin attribute-access 노이즈가 남아 있으므로, 최소 게이트는 `preflight_local.py`이고 `pyright`는 변경 파일 기준으로 병행합니다.
 
 또는 단계별 실행:
 
 ```powershell
-pyright
+pyright <touched-files>
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_app/legacy_main_src.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
 python -m unittest discover -s tests -v

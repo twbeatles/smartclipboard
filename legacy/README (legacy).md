@@ -25,7 +25,7 @@
 - 📝 항목별 메모 첨부 기능
 
 ### 🔒 보안 보관함
-- AES-256 암호화로 민감한 데이터 안전 보관
+- PBKDF2-HMAC-SHA256 + Fernet 기반 암호화로 민감한 데이터 안전 보관
 - 마스터 비밀번호 기반 잠금
 - **v10.2**: 비밀번호 강도 검증 (8자 이상, 숫자+특수문자)
 - 5분 자동 잠금 타이머
@@ -48,11 +48,12 @@
 - 자주 사용하는 텍스트 템플릿 저장
 - **v10.2**: 스니펫 수정 기능 추가
 - 카테고리별 정리
-- 단축키 할당 가능
+- 더블클릭/버튼으로 즉시 복사
 
 ### 📤 내보내기/가져오기
-- JSON, CSV, Markdown 포맷 지원
+- JSON, CSV, Markdown 내보내기 / JSON, CSV 가져오기 지원
 - 날짜 및 타입 필터링
+- JSON은 `IMAGE` 항목을 `image_data_b64`로 보존하며, CSV/Markdown은 이미지 BLOB를 제외
 - JSON 마이그레이션 모드 (태그/메모/북마크/컬렉션 메타데이터 포함)
 - 백업 및 마이그레이션 용이
 
@@ -203,6 +204,13 @@ pyright
 - 미니 창 더블클릭 복사 시 `is_internal_copy`를 설정해 자기 재수집 루프 방지
 - `update_always_on_top()`에서 창 가시성 보존 가드 적용 (`--minimized` 시작 안정성 개선)
 - JSON 마이그레이션에 `collections` 메타데이터를 포함하고 import 시 컬렉션 ID remap 지원
+
+### 🛠️ 2026-03-19 구현 안정화 패치
+- `add_snippet()`의 런타임 `datetime` 누락을 수정해 신규 스니펫 저장 경로 복구
+- 동일 비이미지 텍스트 재복사 시 메타데이터를 유지한 채 기존 row를 갱신
+- 보안 보관함 복사, 스니펫 사용, URL 복사 경로에서 내부 복사 플래그를 공통 helper로 세팅
+- JSON export/import가 `IMAGE` 항목을 `image_data_b64`로 round-trip
+- pinned drag-drop helper의 `Qt` 참조 누락 수정
 
 ---
 

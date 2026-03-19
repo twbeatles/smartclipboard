@@ -7,12 +7,19 @@ from typing import TypeVar
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QMenu
 
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+
 T = TypeVar("T")
 
 
 def _ensure(value: T | None) -> T:
     assert value is not None
     return value
+
+
+def _copy_text(self, text: str) -> None:
+    mark_internal_copy(self)
+    self.clipboard.setText(text)
 
 
 def init_menu_impl(self, THEMES):
@@ -199,7 +206,7 @@ def show_context_menu_impl(self, pos, THEMES, webbrowser):
             open_menu.addSeparator()
             
             copy_url = _ensure(open_menu.addAction("📋 URL 복사"))
-            copy_url.triggered.connect(lambda: self.clipboard.setText(url))
+            copy_url.triggered.connect(lambda: _copy_text(self, url))
             
             search_action = _ensure(open_menu.addAction("🔍 Google에서 검색"))
             search_action.triggered.connect(lambda: webbrowser.open(f"https://www.google.com/search?q={url}"))

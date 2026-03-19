@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QTimer
+from PyQt6.QtCore import QEvent, QTimer, Qt
 
 def event_filter_body(self, source, event, fallback_event_filter):
     """드래그 앤 드롭 이벤트 처리 (고정 항목 순서 변경)"""
