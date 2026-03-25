@@ -68,6 +68,61 @@ class SecureVaultManager:
         self.last_activity = time.time()
         return True
 
+    def change_master_password(self, current_password, new_password):
+        if not HAS_CRYPTO or Fernet is None:
+            return False
+        if not current_password or not new_password:
+            return False
+        if not self.unlock(current_password):
+            return False
+
+        old_fernet = self.fernet
+        if old_fernet is None:
+            return False
+
+        salt = os.urandom(16)
+        new_key = self.derive_key(new_password, salt)
+        if new_key is None:
+            return False
+        new_fernet = Fernet(new_key)
+        verification = new_fernet.encrypt(b"VAULT_VERIFIED").decode()
+
+        with self.db.lock:
+            try:
+                cursor = self.db.conn.cursor()
+                cursor.execute("SELECT id, encrypted_content FROM secure_vault ORDER BY id")
+                vault_rows = cursor.fetchall()
+
+                reencrypted: list[tuple[bytes, int]] = []
+                for item_id, encrypted_content in vault_rows:
+                    decrypted = old_fernet.decrypt(encrypted_content).decode()
+                    reencrypted.append((new_fernet.encrypt(decrypted.encode()), item_id))
+
+                cursor.execute("BEGIN")
+                for encrypted_content, item_id in reencrypted:
+                    cursor.execute(
+                        "UPDATE secure_vault SET encrypted_content = ? WHERE id = ?",
+                        (encrypted_content, item_id),
+                    )
+                cursor.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                    ("vault_salt", base64.b64encode(salt).decode()),
+                )
+                cursor.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                    ("vault_verification", verification),
+                )
+                self.db.conn.commit()
+            except Exception as exc:
+                self.db.conn.rollback()
+                self.logger.debug("Vault password change failed: %s", exc)
+                return False
+
+        self.fernet = new_fernet
+        self.is_unlocked = True
+        self.last_activity = time.time()
+        return True
+
     def unlock(self, password):
         if not HAS_CRYPTO or Fernet is None:
             return False

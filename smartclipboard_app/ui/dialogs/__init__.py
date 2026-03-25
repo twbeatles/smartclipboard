@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .clipboard_actions import ClipboardActionsDialog
+    from .collections import CollectionEditDialog, CollectionManagerDialog
     from .copy_rules import CopyRulesDialog
     from .export_dialog import ExportDialog
     from .hotkeys import HotkeySettingsDialog
@@ -19,6 +20,8 @@ __all__ = [
     "SettingsDialog",
     "SecureVaultDialog",
     "ClipboardActionsDialog",
+    "CollectionEditDialog",
+    "CollectionManagerDialog",
     "ExportDialog",
     "ImportDialog",
     "TrashDialog",
@@ -44,6 +47,14 @@ def __getattr__(name: str):
         from .clipboard_actions import ClipboardActionsDialog
 
         return ClipboardActionsDialog
+    if name == "CollectionEditDialog":
+        from .collections import CollectionEditDialog
+
+        return CollectionEditDialog
+    if name == "CollectionManagerDialog":
+        from .collections import CollectionManagerDialog
+
+        return CollectionManagerDialog
     if name == "ExportDialog":
         from .export_dialog import ExportDialog
 

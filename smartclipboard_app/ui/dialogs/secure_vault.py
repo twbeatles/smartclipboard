@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol, TypeVar, cast
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -89,9 +89,12 @@ class SecureVaultDialog(QDialog):
         toolbar = QHBoxLayout()
         btn_add = QPushButton("➕ 새 항목")
         btn_add.clicked.connect(self.add_item)
+        btn_change_password = QPushButton("🔁 비밀번호 변경")
+        btn_change_password.clicked.connect(self.change_master_password)
         btn_lock = QPushButton("🔒 잠금")
         btn_lock.clicked.connect(self.lock_vault)
         toolbar.addWidget(btn_add)
+        toolbar.addWidget(btn_change_password)
         toolbar.addStretch()
         toolbar.addWidget(btn_lock)
         items_layout.addLayout(toolbar)
@@ -209,8 +212,65 @@ class SecureVaultDialog(QDialog):
                 status_bar = parent.statusBar()
                 if status_bar is not None:
                     status_bar.showMessage("✅ 복호화된 내용이 클립보드에 복사되었습니다.", 3000)
+            self._schedule_clipboard_clear(decrypted)
         else:
             QMessageBox.warning(self, "오류", "복호화에 실패했습니다. 보관함을 다시 열어주세요.")
+
+    def _schedule_clipboard_clear(self, text):
+        QTimer.singleShot(30000, lambda expected=text: self._clear_clipboard_if_unchanged(expected))
+
+    def _clear_clipboard_if_unchanged(self, expected_text):
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            return
+        try:
+            if clipboard.text() != expected_text:
+                return
+        except Exception:
+            return
+        mark_internal_copy(self.parent_window)
+        clipboard.setText("")
+
+    def change_master_password(self):
+        if not self.vault.is_unlocked:
+            QMessageBox.warning(self, "경고", "보관함을 먼저 잠금 해제하세요.")
+            return
+
+        current_password, ok = QInputDialog.getText(
+            self,
+            "현재 비밀번호 확인",
+            "현재 마스터 비밀번호:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok:
+            return
+        new_password, ok = QInputDialog.getText(
+            self,
+            "새 비밀번호",
+            "새 마스터 비밀번호:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok:
+            return
+        is_valid, error_msg = self.validate_password_strength(new_password)
+        if not is_valid:
+            QMessageBox.warning(self, "비밀번호 강도 부족", error_msg)
+            return
+        confirm_password, ok = QInputDialog.getText(
+            self,
+            "새 비밀번호 확인",
+            "새 마스터 비밀번호 확인:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok:
+            return
+        if new_password != confirm_password:
+            QMessageBox.warning(self, "경고", "새 비밀번호 확인이 일치하지 않습니다.")
+            return
+        if not self.vault.change_master_password(current_password, new_password):
+            QMessageBox.warning(self, "오류", "마스터 비밀번호 변경에 실패했습니다.")
+            return
+        QMessageBox.information(self, "완료", "마스터 비밀번호가 변경되었습니다.")
 
     def delete_item(self, vid):
         reply = QMessageBox.question(

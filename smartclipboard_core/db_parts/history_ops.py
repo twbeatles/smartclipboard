@@ -190,6 +190,68 @@ class HistoryOpsMixin:
                 logger.error(f"DB Clear Error: {e}")
                 self.conn.rollback()
 
+    def soft_delete_unpinned(self) -> int:
+        """Move all unpinned items to trash while preserving metadata."""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM history WHERE pinned = 0")
+                row = cursor.fetchone()
+                count = int(row[0]) if row else 0
+                if count <= 0:
+                    return 0
+
+                deleted_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                expires_at = (
+                    datetime.datetime.now() + datetime.timedelta(days=7)
+                ).strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute(
+                    """
+                    INSERT INTO deleted_history (
+                        original_id,
+                        content,
+                        image_data,
+                        type,
+                        original_timestamp,
+                        tags,
+                        note,
+                        bookmark,
+                        collection_id,
+                        pinned,
+                        pin_order,
+                        use_count,
+                        deleted_at,
+                        expires_at
+                    )
+                    SELECT
+                        id,
+                        content,
+                        image_data,
+                        type,
+                        timestamp,
+                        COALESCE(tags, ''),
+                        COALESCE(note, ''),
+                        COALESCE(bookmark, 0),
+                        collection_id,
+                        COALESCE(pinned, 0),
+                        COALESCE(pin_order, 0),
+                        COALESCE(use_count, 0),
+                        ?,
+                        ?
+                    FROM history
+                    WHERE pinned = 0
+                    """,
+                    (deleted_at, expires_at),
+                )
+                cursor.execute("DELETE FROM history WHERE pinned = 0")
+                self.conn.commit()
+                logger.info("고정되지 않은 항목 %s개를 휴지통으로 이동", count)
+                return count
+            except sqlite3.Error as e:
+                logger.error(f"Bulk Soft Delete Error: {e}")
+                self.conn.rollback()
+                return 0
+
     def get_content(self, item_id):
         with self.lock:
             try:
@@ -255,7 +317,17 @@ class HistoryOpsMixin:
                 if img_count > max_image_history:
                     diff = img_count - max_image_history
                     cursor.execute(
-                        f"DELETE FROM history WHERE id IN (SELECT id FROM history WHERE type='IMAGE' AND pinned=0 ORDER BY id ASC LIMIT {diff})"
+                        """
+                        DELETE FROM history
+                        WHERE id IN (
+                            SELECT id
+                            FROM history
+                            WHERE type = 'IMAGE' AND pinned = 0
+                            ORDER BY timestamp ASC, id ASC
+                            LIMIT ?
+                        )
+                        """,
+                        (diff,),
                     )
                     logger.info(f"오래된 이미지 {diff}개 정리됨")
 
@@ -271,7 +343,17 @@ class HistoryOpsMixin:
                 if count > effective_max_history:
                     diff = count - effective_max_history
                     cursor.execute(
-                        f"DELETE FROM history WHERE id IN (SELECT id FROM history WHERE pinned = 0 ORDER BY id ASC LIMIT {diff})"
+                        """
+                        DELETE FROM history
+                        WHERE id IN (
+                            SELECT id
+                            FROM history
+                            WHERE pinned = 0
+                            ORDER BY timestamp ASC, id ASC
+                            LIMIT ?
+                        )
+                        """,
+                        (diff,),
                     )
                     self.conn.commit()
                     logger.info(f"오래된 항목 {diff}개 정리")

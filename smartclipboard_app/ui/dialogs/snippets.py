@@ -1,14 +1,20 @@
 """Snippet dialogs module."""
 
-from typing import Callable, cast
+from __future__ import annotations
 
+import datetime
+import json
+from typing import Callable, Protocol, TypeVar, cast
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
-    QHeaderView,
     QComboBox,
     QDialog,
     QFormLayout,
+    QHeaderView,
     QHBoxLayout,
     QLineEdit,
     QMessageBox,
@@ -19,11 +25,122 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
 )
-from PyQt6.QtCore import Qt
-
-import datetime
 
 from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS
+
+T = TypeVar("T")
+
+APP_LOCAL_SHORTCUTS = {
+    "escape_hide": "Escape",
+    "search_focus": "Ctrl+F",
+    "pin_toggle": "Ctrl+P",
+    "delete_selected": "Delete",
+    "multi_delete": "Shift+Delete",
+    "paste_selected": "Return",
+    "copy_selected": "Ctrl+C",
+    "quit": "Ctrl+Q",
+}
+
+
+class _SnippetWindow(Protocol):
+    def statusBar(self) -> QStatusBar | None: ...
+
+    def refresh_snippet_shortcuts(self) -> None: ...
+
+
+def _canonical_shortcut_text(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    sequence = QKeySequence(raw)
+    canonical = sequence.toString(QKeySequence.SequenceFormat.PortableText).strip()
+    return canonical
+
+
+def _load_global_hotkeys(db) -> dict[str, str]:
+    raw = db.get_setting("hotkeys", json.dumps(DEFAULT_HOTKEYS))
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError("hotkeys must be a JSON object")
+    except Exception:
+        parsed = dict(DEFAULT_HOTKEYS)
+    return {
+        "show_main": str(parsed.get("show_main", DEFAULT_HOTKEYS["show_main"])),
+        "show_mini": str(parsed.get("show_mini", DEFAULT_HOTKEYS["show_mini"])),
+        "paste_last": str(parsed.get("paste_last", DEFAULT_HOTKEYS["paste_last"])),
+    }
+
+
+def validate_snippet_shortcut(db, shortcut: str, exclude_snippet_id=None) -> str | None:
+    canonical = _canonical_shortcut_text(shortcut)
+    if not shortcut:
+        return None
+    if not canonical:
+        return "유효한 단축키 형식이 아닙니다."
+
+    reserved = {
+        _canonical_shortcut_text(value): label
+        for label, value in APP_LOCAL_SHORTCUTS.items()
+    }
+    reserved.update(
+        {
+            _canonical_shortcut_text(value): f"글로벌 핫키 ({label})"
+            for label, value in _load_global_hotkeys(db).items()
+        }
+    )
+    if canonical in reserved:
+        return f"'{canonical}' 단축키는 이미 {reserved[canonical]}에 사용 중입니다."
+
+    for snippet_id, name, _content, other_shortcut, _category in db.get_snippets():
+        if exclude_snippet_id is not None and snippet_id == exclude_snippet_id:
+            continue
+        other_canonical = _canonical_shortcut_text(other_shortcut)
+        if other_canonical and other_canonical == canonical:
+            return f"'{canonical}' 단축키는 이미 스니펫 '{name}'에 사용 중입니다."
+    return None
+
+
+def process_snippet_template(text: str) -> str:
+    import random
+    import re
+    import string
+
+    now = datetime.datetime.now()
+    text = text.replace("{{date}}", now.strftime("%Y-%m-%d"))
+    text = text.replace("{{time}}", now.strftime("%H:%M:%S"))
+    text = text.replace("{{datetime}}", now.strftime("%Y-%m-%d %H:%M:%S"))
+
+    if "{{clipboard}}" in text:
+        clipboard = QApplication.clipboard()
+        current_clip = clipboard.text() if clipboard is not None else ""
+        text = text.replace("{{clipboard}}", current_clip)
+
+    random_pattern = r"\{\{random:(\d+)\}\}"
+    matches = re.findall(random_pattern, text)
+    for match in matches:
+        length = int(match)
+        random_str = "".join(random.choices(string.ascii_letters + string.digits, k=length))
+        text = re.sub(r"\{\{random:" + match + r"\}\}", random_str, text, count=1)
+
+    return text
+
+
+def _snippet_window(value: object | None) -> _SnippetWindow | None:
+    if value is not None and hasattr(value, "statusBar") and hasattr(value, "refresh_snippet_shortcuts"):
+        return cast(_SnippetWindow, value)
+    return None
+
+
+def _refresh_snippet_shortcuts(parent_window: object | None) -> None:
+    window = _snippet_window(parent_window)
+    if window is None:
+        return
+    try:
+        window.refresh_snippet_shortcuts()
+    except Exception:
+        pass
 
 
 class SnippetDialog(QDialog):
@@ -32,7 +149,7 @@ class SnippetDialog(QDialog):
         self.db = db
         self.snippet = snippet
         self.setWindowTitle("📝 스니펫 추가" if not snippet else "📝 스니펫 편집")
-        self.setMinimumSize(400, 300)
+        self.setMinimumSize(420, 320)
         self.init_ui()
 
     def init_ui(self):
@@ -48,6 +165,10 @@ class SnippetDialog(QDialog):
         self.category_input.addItems(["일반", "코드", "이메일", "메모"])
         form.addRow("카테고리:", self.category_input)
 
+        self.shortcut_input = QLineEdit()
+        self.shortcut_input.setPlaceholderText("예: Ctrl+Alt+1 (선택)")
+        form.addRow("단축키:", self.shortcut_input)
+
         layout.addLayout(form)
 
         self.content_input = QTextEdit()
@@ -57,6 +178,7 @@ class SnippetDialog(QDialog):
         if self.snippet:
             self.name_input.setText(self.snippet[1])
             self.content_input.setPlainText(self.snippet[2])
+            self.shortcut_input.setText(self.snippet[3] or "")
             self.category_input.setCurrentText(self.snippet[4])
 
         btn_layout = QHBoxLayout()
@@ -73,19 +195,29 @@ class SnippetDialog(QDialog):
         """v10.2: 스니펫 저장 (생성/편집 모드 지원)"""
         name = self.name_input.text().strip()
         content = self.content_input.toPlainText().strip()
-        category = self.category_input.currentText()
+        category = self.category_input.currentText().strip() or "일반"
+        shortcut = _canonical_shortcut_text(self.shortcut_input.text())
 
         if not name or not content:
             QMessageBox.warning(self, "경고", "이름과 내용을 입력해주세요.")
             return
 
+        conflict = validate_snippet_shortcut(
+            self.db,
+            shortcut,
+            exclude_snippet_id=self.snippet[0] if self.snippet else None,
+        )
+        if conflict:
+            QMessageBox.warning(self, "단축키 충돌", conflict)
+            return
+
         if self.snippet:
-            if self.db.update_snippet(self.snippet[0], name, content, "", category):
+            if self.db.update_snippet(self.snippet[0], name, content, shortcut, category):
                 self.accept()
             else:
                 QMessageBox.critical(self, "오류", "스니펫 수정에 실패했습니다.")
         else:
-            if self.db.add_snippet(name, content, "", category):
+            if self.db.add_snippet(name, content, shortcut, category):
                 self.accept()
             else:
                 QMessageBox.critical(self, "오류", "스니펫 저장에 실패했습니다.")
@@ -97,7 +229,7 @@ class SnippetManagerDialog(QDialog):
         self.db = db
         self.parent_window = parent
         self.setWindowTitle("📝 스니펫 관리")
-        self.setMinimumSize(550, 450)
+        self.setMinimumSize(640, 460)
         self.init_ui()
         self.load_snippets()
 
@@ -113,16 +245,18 @@ class SnippetManagerDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["이름", "카테고리", "내용 미리보기"])
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["이름", "카테고리", "단축키", "내용 미리보기"])
 
         header = self.table.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
             header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(0, 120)
-        self.table.setColumnWidth(1, 80)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 140)
+        self.table.setColumnWidth(1, 90)
+        self.table.setColumnWidth(2, 130)
 
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -166,13 +300,18 @@ class SnippetManagerDialog(QDialog):
             cat_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row_idx, 1, cat_item)
 
+            shortcut_item = QTableWidgetItem(shortcut or "-")
+            shortcut_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row_idx, 2, shortcut_item)
+
             preview = content.replace("\n", " ")[:50] + ("..." if len(content) > 50 else "")
-            self.table.setItem(row_idx, 2, QTableWidgetItem(preview))
+            self.table.setItem(row_idx, 3, QTableWidgetItem(preview))
 
     def add_snippet(self):
         dialog = SnippetDialog(self, self.db)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.load_snippets()
+            _refresh_snippet_shortcuts(self.parent_window)
 
     def get_selected_id(self):
         selection_model = self.table.selectionModel()
@@ -192,8 +331,7 @@ class SnippetManagerDialog(QDialog):
         snippets = self.db.get_snippets()
         for s in snippets:
             if s[0] == sid:
-                content = s[2]
-                content = self.process_template(content)
+                content = process_snippet_template(s[2])
                 clipboard = QApplication.clipboard()
                 if clipboard is None:
                     return
@@ -213,28 +351,7 @@ class SnippetManagerDialog(QDialog):
 
     def process_template(self, text):
         """템플릿 변수 치환"""
-        import random
-        import re
-        import string
-
-        now = datetime.datetime.now()
-        text = text.replace("{{date}}", now.strftime("%Y-%m-%d"))
-        text = text.replace("{{time}}", now.strftime("%H:%M:%S"))
-        text = text.replace("{{datetime}}", now.strftime("%Y-%m-%d %H:%M:%S"))
-
-        if "{{clipboard}}" in text:
-            clipboard = QApplication.clipboard()
-            current_clip = clipboard.text() if clipboard is not None else ""
-            text = text.replace("{{clipboard}}", current_clip)
-
-        random_pattern = r"\{\{random:(\d+)\}\}"
-        matches = re.findall(random_pattern, text)
-        for match in matches:
-            length = int(match)
-            random_str = "".join(random.choices(string.ascii_letters + string.digits, k=length))
-            text = re.sub(r"\{\{random:" + match + r"\}\}", random_str, text, count=1)
-
-        return text
+        return process_snippet_template(text)
 
     def delete_snippet(self):
         sid = self.get_selected_id()
@@ -248,6 +365,7 @@ class SnippetManagerDialog(QDialog):
             if reply == QMessageBox.StandardButton.Yes:
                 self.db.delete_snippet(sid)
                 self.load_snippets()
+                _refresh_snippet_shortcuts(self.parent_window)
 
     def edit_snippet(self):
         """v10.2: 스니펫 편집"""
@@ -261,7 +379,14 @@ class SnippetManagerDialog(QDialog):
                 dialog = SnippetDialog(self, self.db, snippet=s)
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     self.load_snippets()
+                    _refresh_snippet_shortcuts(self.parent_window)
                 break
 
 
-__all__ = ["SnippetDialog", "SnippetManagerDialog"]
+__all__ = [
+    "APP_LOCAL_SHORTCUTS",
+    "SnippetDialog",
+    "SnippetManagerDialog",
+    "process_snippet_template",
+    "validate_snippet_shortcut",
+]

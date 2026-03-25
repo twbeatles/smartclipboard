@@ -51,9 +51,9 @@ class ExportDialog(QDialog):
         filter_group = QGroupBox("🔍 필터")
         filter_layout = QFormLayout(filter_group)
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["전체", "텍스트만", "링크만", "코드만"])
+        self.type_combo.addItems(["전체", "텍스트만", "링크만", "이미지만", "코드만", "색상만"])
         filter_layout.addRow("유형:", self.type_combo)
-        self.date_filter_enabled = QCheckBox("시작일 이후 항목만 내보내기 (JSON)")
+        self.date_filter_enabled = QCheckBox("시작일 이후 항목만 내보내기")
         self.date_from_input = QDateEdit()
         self.date_from_input.setDate(QDate.currentDate())
         self.date_from_input.setCalendarPopup(True)
@@ -74,10 +74,21 @@ class ExportDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def do_export(self):
-        type_map = {"전체": "all", "텍스트만": "TEXT", "링크만": "LINK", "코드만": "CODE"}
+        type_map = {
+            "전체": "all",
+            "텍스트만": "TEXT",
+            "링크만": "LINK",
+            "이미지만": "IMAGE",
+            "코드만": "CODE",
+            "색상만": "COLOR",
+        }
         filter_type = type_map.get(self.type_combo.currentText(), "all")
         date_from = self.date_from_input.date().toPyDate() if self.date_filter_enabled.isChecked() else None
         exported_count = 0
+
+        if not any([self.format_json.isChecked(), self.format_csv.isChecked(), self.format_md.isChecked()]):
+            QMessageBox.warning(self, "경고", "하나 이상의 내보내기 형식을 선택하세요.")
+            return
 
         if self.format_json.isChecked():
             path, _ = QFileDialog.getSaveFileName(
@@ -104,7 +115,7 @@ class ExportDialog(QDialog):
                 "CSV Files (*.csv)",
             )
             if path:
-                count = self.export_manager.export_csv(path, filter_type)
+                count = self.export_manager.export_csv(path, filter_type, date_from=date_from)
                 if count >= 0:
                     exported_count += count
 
@@ -116,13 +127,15 @@ class ExportDialog(QDialog):
                 "Markdown Files (*.md)",
             )
             if path:
-                count = self.export_manager.export_markdown(path, filter_type)
+                count = self.export_manager.export_markdown(path, filter_type, date_from=date_from)
                 if count >= 0:
                     exported_count += count
 
         if exported_count > 0:
             QMessageBox.information(self, "완료", "내보내기가 완료되었습니다.")
             self.accept()
+        else:
+            QMessageBox.information(self, "안내", "내보낼 항목이 없거나 파일이 선택되지 않았습니다.")
 
 
 __all__ = ["ExportDialog"]

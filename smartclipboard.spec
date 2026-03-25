@@ -22,6 +22,7 @@ Notes:
 """
 
 from pathlib import Path
+from importlib.util import find_spec
 from PyInstaller.utils.hooks import collect_submodules
 
 APP_NAME = "SmartClipboard"
@@ -65,8 +66,6 @@ EXCLUDES = [
 HIDDEN_IMPORTS = [
     "PyQt6.QtCore", "PyQt6.QtGui", "PyQt6.QtWidgets",
     "logging.handlers", "hashlib",
-    # loaded via legacy_main_payload.marshal (runtime exec); PyInstaller can't see these statically
-    "keyboard",
     # stdlib modules used inside the legacy payload
     "uuid",
     "winreg",
@@ -93,16 +92,40 @@ HIDDEN_IMPORTS = [
     "smartclipboard_app.ui.dialogs.tags",
     "smartclipboard_app.ui.dialogs.statistics",
     "smartclipboard_app.ui.dialogs.copy_rules",
+    "smartclipboard_app.ui.dialogs.collections",
     "smartclipboard_app.ui.controllers.clipboard_controller",
     "smartclipboard_app.ui.controllers.table_controller",
     "smartclipboard_app.ui.controllers.tray_hotkey_controller",
     "smartclipboard_app.ui.controllers.lifecycle_controller",
     "smartclipboard_app.managers.secure_vault",
     "smartclipboard_app.managers.export_import",
-    "cryptography", "cryptography.fernet",
-    "cryptography.hazmat.primitives.kdf.pbkdf2",
-    "requests", "bs4", "qrcode", "PIL", "PIL.ImageQt",
 ]
+
+OPTIONAL_HIDDEN_IMPORTS = [
+    # loaded via legacy_main_payload.marshal (runtime exec); import only if available locally
+    "keyboard",
+    "cryptography",
+    "cryptography.fernet",
+    "cryptography.hazmat.primitives.kdf.pbkdf2",
+    "requests",
+    "bs4",
+    "qrcode",
+    "PIL",
+    "PIL.ImageQt",
+]
+
+
+def _append_hidden_import(module_name: str) -> None:
+    try:
+        available = find_spec(module_name) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        available = False
+    if available and module_name not in HIDDEN_IMPORTS:
+        HIDDEN_IMPORTS.append(module_name)
+
+
+for optional_module in OPTIONAL_HIDDEN_IMPORTS:
+    _append_hidden_import(optional_module)
 
 for submodule in CORE_SUBMODULES + DB_PARTS_SUBMODULES + MAINWINDOW_PARTS_SUBMODULES:
     if submodule not in HIDDEN_IMPORTS:

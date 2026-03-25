@@ -7,6 +7,7 @@ import unittest
 from PyQt6.QtWidgets import QApplication
 
 from smartclipboard_app.managers.export_import import ExportImportManager
+from smartclipboard_app.managers.secure_vault import HAS_CRYPTO, SecureVaultManager
 from smartclipboard_core.actions import ClipboardActionManager, extract_first_url
 from smartclipboard_core.database import ClipboardDB
 
@@ -339,6 +340,179 @@ class CoreDatabaseTests(unittest.TestCase):
             if dst_db is not None:
                 dst_db.close()
             dst_tmp.cleanup()
+
+    def test_cleanup_uses_timestamp_order_for_refreshed_duplicates(self):
+        first_id = self.db.add_item("duplicate-cleanup", None, "TEXT")
+        second_id = self.db.add_item("keep-or-delete", None, "TEXT")
+        self.assertTrue(self.db.set_item_metadata(first_id, timestamp="2000-01-01 00:00:00"))
+        self.assertTrue(self.db.set_item_metadata(second_id, timestamp="2000-01-02 00:00:00"))
+
+        refreshed_id = self.db.add_item("duplicate-cleanup", None, "TEXT")
+        self.assertEqual(refreshed_id, first_id)
+
+        self.db.cleanup(max_history=1)
+
+        remaining = self.db.get_items("", "전체")
+        self.assertEqual([row[0] for row in remaining], [first_id])
+
+    def test_soft_delete_unpinned_moves_items_to_trash_with_metadata(self):
+        pinned_id = self.db.add_item("pinned-keep", None, "TEXT")
+        trash_id = self.db.add_item("trash-target", None, "TEXT")
+        self.db.toggle_pin(pinned_id)
+        self.db.set_item_tags(trash_id, "alpha")
+        self.db.set_note(trash_id, "keep meta")
+        self.db.toggle_bookmark(trash_id)
+        self.db.increment_use_count(trash_id)
+
+        moved = self.db.soft_delete_unpinned()
+        self.assertEqual(moved, 1)
+
+        items = self.db.get_items("", "전체")
+        self.assertEqual([row[0] for row in items], [pinned_id])
+
+        deleted_rows = self.db.get_deleted_items()
+        self.assertEqual(len(deleted_rows), 1)
+        deleted_id = deleted_rows[0][0]
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT original_id, tags, note, bookmark, pinned, use_count "
+                "FROM deleted_history WHERE id = ?",
+                (deleted_id,),
+            )
+            row = cursor.fetchone()
+        self.assertEqual(row, (trash_id, "alpha", "keep meta", 1, 0, 1))
+
+    def test_import_json_reuses_existing_collection_names_across_reimports(self):
+        source_collection_id = self.db.add_collection("work", "📁", "#123456")
+        self.assertTrue(source_collection_id)
+        item_id = self.db.add_item("collection-item", None, "TEXT")
+        self.assertTrue(item_id)
+        self.db.set_item_metadata(item_id, collection_id=source_collection_id)
+
+        export_path = os.path.join(self.tmpdir.name, "collections-export.json")
+        exported = ExportImportManager(self.db).export_json(export_path, include_metadata=True)
+        self.assertEqual(exported, 1)
+
+        dst_tmp = tempfile.TemporaryDirectory()
+        dst_db = None
+        try:
+            dst_db = ClipboardDB(
+                db_file=os.path.join(dst_tmp.name, "clipboard_history_v6.db"),
+                app_dir=dst_tmp.name,
+            )
+            dst_manager = ExportImportManager(dst_db)
+            existing_id = dst_db.add_collection(" work ", "📂", "#abcdef")
+            self.assertTrue(existing_id)
+
+            self.assertEqual(dst_manager.import_json(export_path), 1)
+            self.assertEqual(dst_manager.import_json(export_path), 1)
+
+            collections = dst_db.get_collections()
+            self.assertEqual(len(collections), 1)
+            self.assertEqual(collections[0][0], existing_id)
+
+            with dst_db.lock:
+                cursor = dst_db.conn.cursor()
+                cursor.execute(
+                    "SELECT DISTINCT collection_id FROM history WHERE content = ?",
+                    ("collection-item",),
+                )
+                mapped_ids = {row[0] for row in cursor.fetchall()}
+            self.assertEqual(mapped_ids, {existing_id})
+        finally:
+            if dst_db is not None:
+                dst_db.close()
+            dst_tmp.cleanup()
+
+    def test_export_filters_match_across_formats_and_keep_image_binary_only_in_json(self):
+        old_image_id = self.db.add_item("[이미지 캡처]", b"old-image", "IMAGE")
+        new_image_id = self.db.add_item("[이미지 캡처]", b"new-image", "IMAGE")
+        text_id = self.db.add_item("visible-text", None, "TEXT")
+
+        self.assertTrue(self.db.set_item_metadata(old_image_id, timestamp="2026-03-20 09:00:00"))
+        self.assertTrue(self.db.set_item_metadata(new_image_id, timestamp="2026-03-25 09:00:00"))
+        self.assertTrue(self.db.set_item_metadata(text_id, timestamp="2026-03-25 10:00:00"))
+
+        manager = ExportImportManager(self.db)
+        date_from = datetime.date(2026, 3, 25)
+        json_path = os.path.join(self.tmpdir.name, "filtered.json")
+        csv_path = os.path.join(self.tmpdir.name, "filtered.csv")
+        md_path = os.path.join(self.tmpdir.name, "filtered.md")
+
+        self.assertEqual(manager.export_json(json_path, filter_type="IMAGE", date_from=date_from), 1)
+        self.assertEqual(manager.export_csv(csv_path, filter_type="IMAGE", date_from=date_from), 1)
+        self.assertEqual(manager.export_markdown(md_path, filter_type="IMAGE", date_from=date_from), 1)
+
+        with open(json_path, "r", encoding="utf-8") as fh:
+            json_payload = json.load(fh)
+        self.assertEqual(len(json_payload["items"]), 1)
+        self.assertEqual(json_payload["items"][0]["timestamp"], "2026-03-25 09:00:00")
+        self.assertIn("image_data_b64", json_payload["items"][0])
+
+        with open(csv_path, "r", encoding="utf-8-sig") as fh:
+            csv_text = fh.read()
+        with open(md_path, "r", encoding="utf-8") as fh:
+            md_text = fh.read()
+        self.assertIn("IMAGE", csv_text)
+        self.assertIn("[이미지 캡처]", csv_text)
+        self.assertNotIn("image_data_b64", csv_text)
+        self.assertIn("[이미지 캡처]", md_text)
+        self.assertNotIn("image_data_b64", md_text)
+        self.assertNotIn("visible-text", csv_text)
+        self.assertNotIn("visible-text", md_text)
+
+    def test_rule_and_action_updates_respect_priority_order(self):
+        self.assertTrue(self.db.add_copy_rule("trim", r"\s+", "trim"))
+        self.assertTrue(self.db.add_copy_rule("replace", r"foo", "custom_replace", "bar"))
+        rules = self.db.get_copy_rules()
+        trim_id = next(rule[0] for rule in rules if rule[1] == "trim")
+        replace_id = next(rule[0] for rule in rules if rule[1] == "replace")
+
+        self.assertTrue(self.db.update_copy_rule(replace_id, "replace-updated", r"foo+", "custom_replace", "baz"))
+        self.assertTrue(self.db.update_copy_rule_priorities([replace_id, trim_id]))
+        ordered_rules = self.db.get_copy_rules()
+        self.assertEqual([rule[0] for rule in ordered_rules[:2]], [replace_id, trim_id])
+        updated_rule = next(rule for rule in ordered_rules if rule[0] == replace_id)
+        self.assertEqual(updated_rule[1:5], ("replace-updated", r"foo+", "custom_replace", "baz"))
+
+        self.assertTrue(self.db.add_clipboard_action("notify", r"foo", "notify", '{"message":"hello"}'))
+        self.assertTrue(self.db.add_clipboard_action("format", r"bar", "format_email", "{}"))
+        actions = self.db.get_clipboard_actions()
+        notify_id = next(action[0] for action in actions if action[1] == "notify")
+        format_id = next(action[0] for action in actions if action[1] == "format")
+
+        self.assertTrue(
+            self.db.update_clipboard_action(
+                format_id,
+                "format-updated",
+                r"bar+",
+                "transform",
+                '{"mode":"lower"}',
+            )
+        )
+        self.assertTrue(self.db.update_clipboard_action_priorities([format_id, notify_id]))
+        ordered_actions = self.db.get_clipboard_actions()
+        self.assertEqual([action[0] for action in ordered_actions[:2]], [format_id, notify_id])
+        updated_action = next(action for action in ordered_actions if action[0] == format_id)
+        self.assertEqual(updated_action[1:5], ("format-updated", r"bar+", "transform", '{"mode":"lower"}'))
+
+    @unittest.skipUnless(HAS_CRYPTO, "cryptography not installed")
+    def test_change_master_password_reencrypts_existing_vault_items(self):
+        manager = SecureVaultManager(self.db)
+        self.assertTrue(manager.set_master_password("OldPass!1"))
+        encrypted = manager.encrypt("vault-secret")
+        self.assertIsNotNone(encrypted)
+        self.assertTrue(self.db.add_vault_item(encrypted, "secret"))
+
+        self.assertTrue(manager.change_master_password("OldPass!1", "NewPass!2"))
+        manager.lock()
+
+        self.assertFalse(manager.unlock("OldPass!1"))
+        self.assertTrue(manager.unlock("NewPass!2"))
+        vault_items = self.db.get_vault_items()
+        self.assertEqual(len(vault_items), 1)
+        self.assertEqual(manager.decrypt(vault_items[0][1]), "vault-secret")
 
 
 class CoreDatabaseSearchTests(unittest.TestCase):

@@ -116,6 +116,14 @@
       ]
     },
     {
+      "name": "CollectionEditDialog",
+      "methods": []
+    },
+    {
+      "name": "CollectionManagerDialog",
+      "methods": []
+    },
+    {
       "name": "CopyRulesDialog",
       "methods": []
     },
@@ -727,6 +735,21 @@
           }
         },
         {
+          "name": "insert_snippet_by_id",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "snippet_id"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
           "name": "invalidate_rules_cache",
           "signature": {
             "posonly": [],
@@ -1018,7 +1041,7 @@
           }
         },
         {
-          "name": "register_hotkeys",
+          "name": "refresh_snippet_shortcuts",
           "signature": {
             "posonly": [],
             "args": [
@@ -1028,6 +1051,22 @@
             "kwonly": [],
             "kwarg": null,
             "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "register_hotkeys",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self",
+              "hotkeys_override",
+              "persist"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 2,
             "kw_defaults_count": 0
           }
         },
@@ -1174,6 +1213,20 @@
         },
         {
           "name": "show_clipboard_actions",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "show_collection_manager",
           "signature": {
             "posonly": [],
             "args": [

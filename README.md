@@ -25,6 +25,8 @@
 - 마스터 비밀번호 기반 잠금
 - **v10.2**: 비밀번호 강도 검증 (8자 이상, 숫자+특수문자)
 - 5분 자동 잠금 타이머
+- 마스터 비밀번호 변경 시 기존 보관 항목 전체 재암호화
+- 복호화 후 클립보드로 복사한 텍스트는 30초 뒤 자동 삭제
 
 ### ⚡ 클립보드 액션 자동화
 - 패턴 매칭 기반 자동 처리
@@ -39,17 +41,20 @@
 - **v10.2**: 휴지통 다이얼로그 다중 선택 지원
 - 원클릭 복원 및 영구 삭제
 - 실행 취소 가능한 안전한 삭제
+- 전체 기록 삭제도 고정 항목을 제외하고 휴지통 이동으로 처리
 
 ### 📄 텍스트 스니펫
 - 자주 사용하는 텍스트 템플릿 저장
 - **v10.2**: 스니펫 수정 기능 추가
 - 카테고리별 정리
 - 더블클릭/버튼으로 즉시 복사
+- 앱 내부 전용 단축키(`shortcut`) 등록 및 실행 지원
+- 기본 단축키/글로벌 핫키/다른 스니펫과의 충돌 검증
 
 ### 📤 내보내기/가져오기
 - JSON, CSV, Markdown 내보내기 / JSON, CSV 가져오기 지원
 - 날짜 및 타입 필터링
-- JSON은 `IMAGE` 항목을 `image_data_b64`로 보존하며, CSV/Markdown은 이미지 BLOB를 제외
+- JSON은 `IMAGE` 항목을 `image_data_b64`로 보존하며, CSV/Markdown은 이미지 플레이스홀더만 기록
 - JSON 마이그레이션 모드 (태그/메모/북마크 + 컬렉션 정의/ID 매핑 정보 포함)
 - 백업 및 마이그레이션 용이
 
@@ -223,6 +228,17 @@ pyright
 - 핫키 설정 저장 즉시 `register_hotkeys()` 재등록 (재시작 불필요)
 - 자동 백업을 "앱 시작 1회"에서 "실질적 일 1회"로 보강 (1시간 주기 날짜 변경 감시)
 
+### 🛠️ 2026-03-25 구현 반영
+- `cleanup()`이 `timestamp ASC, id ASC` 기준으로 가장 오래된 항목부터 정리되도록 수정
+- 전체 기록 삭제가 영구 삭제가 아니라 고정 제외 후 휴지통 이동으로 동작
+- JSON 재-import 시 컬렉션 이름을 정규화해 기존 컬렉션을 재사용하고 중복 생성을 방지
+- CSV/Markdown 내보내기도 JSON과 동일한 날짜·타입 필터를 적용하고 이미지 항목은 플레이스홀더로 기록
+- 스니펫 `shortcut` UI와 앱 내부 단축키 실행 경로를 연결
+- 복사 규칙/클립보드 액션 다이얼로그에 생성·수정·삭제·우선순위 이동을 모두 반영
+- 컬렉션 관리 다이얼로그를 추가하고 이름 중복/빈 값 검증을 적용
+- 보안 보관함 마스터 비밀번호 변경과 복호화 클립보드 30초 자동 삭제를 추가
+- 핫키 저장 실패 시 이전 글로벌 핫키 상태로 롤백되도록 보강
+
 ### 🛠️ 2026-03 정합성 패치
 - `fetch_title` 액션 경로가 텍스트 전체가 아닌 **첫 URL만 추출**해 제목 요청하도록 보강
 - 빈 검색(`q == ""`)에서도 태그/북마크/컬렉션/미분류 **복합 필터를 동시 적용**하도록 검색 경로 통합
@@ -382,7 +398,7 @@ smartclipboard/
 - Windows 전용 (macOS/Linux 미지원)
 - 일부 애플리케이션에서 글로벌 핫키 충돌 가능
 - 이미지 히스토리는 크기에 따라 DB 용량 증가
-- 스니펫 `shortcut` 컬럼은 존재하지만, 사용자 할당 UI/실행 경로는 아직 노출되지 않음
+- 스니펫 단축키는 앱이 활성화된 상태에서만 동작하는 앱 내부 단축키로 제한
 
 ---
 
@@ -420,7 +436,7 @@ MIT License
 
 - 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `legacy/README (modular).md`는 동일 기준을 따릅니다.
 - 권장 회귀 테스트 기준은 `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot` 5종입니다.
-- PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`) 포함과 함께 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집합니다.
+- PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`) 포함과 함께 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하고, payload에서 직접 참조하는 대화상자 모듈(`smartclipboard_app.ui.dialogs.collections` 포함)을 명시적으로 유지합니다.
 
 ## Refactor Layout (2026-03-12)
 

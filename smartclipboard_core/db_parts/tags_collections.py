@@ -5,6 +5,10 @@ import sqlite3
 from .shared import history_order_by, logger
 
 class TagsCollectionsMixin:
+    @staticmethod
+    def _normalize_collection_name(name: str) -> str:
+        return " ".join(str(name or "").split()).strip()
+
     def get_item_tags(self, item_id):
         with self.lock:
             try:
@@ -58,13 +62,21 @@ class TagsCollectionsMixin:
 
     def add_collection(self, name: str, icon: str = "📁", color: str = "#6366f1") -> int | bool:
         """컬렉션 추가"""
+        normalized_name = self._normalize_collection_name(name)
+        if not normalized_name:
+            return False
         with self.lock:
             try:
                 cursor = self.conn.cursor()
+                cursor.execute("SELECT id FROM collections WHERE name = ?", (normalized_name,))
+                existing = cursor.fetchone()
+                if existing:
+                    logger.warning("Collection Add Error: duplicate name '%s'", normalized_name)
+                    return False
                 created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 cursor.execute(
                     "INSERT INTO collections (name, icon, color, created_at) VALUES (?, ?, ?, ?)",
-                    (name, icon, color, created_at)
+                    (normalized_name, icon, color, created_at)
                 )
                 collection_row_id = cursor.lastrowid
                 if collection_row_id is None:
@@ -87,17 +99,65 @@ class TagsCollectionsMixin:
                 logger.error(f"Collection Get Error: {e}")
                 return []
 
-    def update_collection(self, collection_id: int, name: str, icon: str = "📁", color: str = "#6366f1") -> bool:
-        """컬렉션 수정"""
+    def get_collection_by_name(self, name: str):
+        normalized_name = self._normalize_collection_name(name)
+        if not normalized_name:
+            return None
         with self.lock:
             try:
                 cursor = self.conn.cursor()
                 cursor.execute(
+                    "SELECT id, name, icon, color, created_at FROM collections WHERE name = ?",
+                    (normalized_name,),
+                )
+                return cursor.fetchone()
+            except sqlite3.Error as e:
+                logger.error(f"Collection Lookup Error: {e}")
+                return None
+
+    def is_duplicate_collection_name(self, name: str, exclude_id: int | None = None) -> bool:
+        normalized_name = self._normalize_collection_name(name)
+        if not normalized_name:
+            return False
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                if exclude_id is None:
+                    cursor.execute(
+                        "SELECT 1 FROM collections WHERE name = ? LIMIT 1",
+                        (normalized_name,),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT 1 FROM collections WHERE name = ? AND id != ? LIMIT 1",
+                        (normalized_name, exclude_id),
+                    )
+                return cursor.fetchone() is not None
+            except sqlite3.Error as e:
+                logger.error(f"Collection Duplicate Check Error: {e}")
+                return False
+
+    def update_collection(self, collection_id: int, name: str, icon: str = "📁", color: str = "#6366f1") -> bool:
+        """컬렉션 수정"""
+        normalized_name = self._normalize_collection_name(name)
+        if not normalized_name:
+            return False
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "SELECT 1 FROM collections WHERE name = ? AND id != ? LIMIT 1",
+                    (normalized_name, collection_id),
+                )
+                if cursor.fetchone() is not None:
+                    logger.warning("Collection Update Error: duplicate name '%s'", normalized_name)
+                    return False
+                cursor.execute(
                     "UPDATE collections SET name = ?, icon = ?, color = ? WHERE id = ?",
-                    (name, icon, color, collection_id)
+                    (normalized_name, icon, color, collection_id)
                 )
                 self.conn.commit()
-                return True
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Collection Update Error: {e}")
                 self.conn.rollback()

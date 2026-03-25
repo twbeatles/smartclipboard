@@ -1,15 +1,18 @@
+import json
 import re
 import unittest
 from unittest import mock
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QListWidgetItem, QWidget
+from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMessageBox, QWidget
 
 from smartclipboard_app.ui.dialogs.clipboard_actions import ClipboardActionsDialog
+from smartclipboard_app.ui.dialogs.collections import CollectionManagerDialog
 from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS, HotkeySettingsDialog
 from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
-from smartclipboard_app.ui.dialogs.snippets import SnippetManagerDialog
+from smartclipboard_app.ui.dialogs.snippets import SnippetDialog, SnippetManagerDialog, validate_snippet_shortcut
+from smartclipboard_app.ui.mainwindow_parts.tray_hotkey_ops import register_hotkeys_impl
 from smartclipboard_app.ui.mainwindow_parts.ui_dragdrop_ops import handle_drop_event_body
 from smartclipboard_app.ui.widgets.floating_mini_window import FloatingMiniWindow
 
@@ -106,6 +109,88 @@ class _FakeVaultManager:
 class _FakeSnippetDB:
     def get_snippets(self, category=""):
         return [(1, "welcome", "snippet-text", "", "일반")]
+
+
+class _FakeSnippetSaveDB(_FakeSettingsDB):
+    def __init__(self):
+        super().__init__({"hotkeys": json.dumps(DEFAULT_HOTKEYS)})
+        self.snippets = [(1, "existing", "text", "Ctrl+Alt+2", "일반")]
+        self.added = []
+
+    def get_snippets(self, category=""):
+        return list(self.snippets)
+
+    def add_snippet(self, name, content, shortcut="", category="일반"):
+        self.added.append((name, content, shortcut, category))
+        return True
+
+    def update_snippet(self, snippet_id, name, content, shortcut="", category="일반"):
+        self.added.append((snippet_id, name, content, shortcut, category))
+        return True
+
+
+class _FakeCollectionParent(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.refresh_calls = 0
+        self.load_calls = 0
+
+    def refresh_collection_filter_options(self):
+        self.refresh_calls += 1
+
+    def load_data(self):
+        self.load_calls += 1
+
+
+class _FakeCollectionsDB:
+    def __init__(self):
+        self.collections = [
+            (10, "Work", "📁", "#123456", "2026-03-25 10:00:00"),
+            (11, "Ideas", "💡", "#654321", "2026-03-25 11:00:00"),
+        ]
+        self.deleted = []
+
+    def get_collections(self):
+        return list(self.collections)
+
+    def delete_collection(self, collection_id):
+        self.deleted.append(collection_id)
+        self.collections = [row for row in self.collections if row[0] != collection_id]
+        return True
+
+
+class _FakeSignal:
+    def __init__(self):
+        self.calls = 0
+
+    def emit(self):
+        self.calls += 1
+
+
+class _FakeHotkeyWindow:
+    def __init__(self):
+        self.db = _FakeSettingsDB({"hotkeys": json.dumps(DEFAULT_HOTKEYS), "mini_window_enabled": "true"})
+        self.show_main_signal = _FakeSignal()
+        self.toggle_mini_signal = _FakeSignal()
+        self.paste_last_signal = _FakeSignal()
+        self._registered_hotkeys = ["old-main", "old-mini", "old-paste"]
+        self._last_hotkey_error = ""
+
+
+class _FailingKeyboard:
+    def __init__(self):
+        self.handles = []
+        self.removed = []
+
+    def add_hotkey(self, hotkey, callback):
+        if hotkey == "bad-hotkey":
+            raise RuntimeError("registration failed")
+        handle = f"handle:{hotkey}:{len(self.handles)}"
+        self.handles.append((hotkey, callback, handle))
+        return handle
+
+    def remove_hotkey(self, handle):
+        self.removed.append(handle)
 
 
 class _FakeDragItem:
@@ -311,6 +396,85 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertEqual(window.db.ordered_ids, [101, 100])
         self.assertTrue(event.accepted)
         single_shot.assert_called_once_with(50, window.load_data)
+
+    def test_register_hotkeys_impl_restores_previous_handles_on_failure(self):
+        window = _FakeHotkeyWindow()
+        keyboard = _FailingKeyboard()
+        logger = mock.Mock()
+
+        ok = register_hotkeys_impl(
+            window,
+            logger,
+            keyboard,
+            json,
+            DEFAULT_HOTKEYS,
+            hotkeys_override={
+                "show_main": "ctrl+alt+1",
+                "show_mini": "bad-hotkey",
+                "paste_last": "ctrl+alt+3",
+            },
+            persist=True,
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("registration failed", window._last_hotkey_error)
+        self.assertEqual(len(window._registered_hotkeys), 3)
+        self.assertTrue(window._registered_hotkeys[0].startswith("handle:ctrl+shift+v"))
+        self.assertIn("old-main", keyboard.removed)
+        self.assertIn("old-mini", keyboard.removed)
+        self.assertIn("old-paste", keyboard.removed)
+        self.assertNotIn("hotkeys", window.db.saved)
+
+    def test_snippet_shortcut_validation_and_save_uses_canonical_text(self):
+        db = _FakeSnippetSaveDB()
+        self.assertIsNotNone(validate_snippet_shortcut(db, "Ctrl+F"))
+        self.assertIsNone(validate_snippet_shortcut(db, "ctrl+alt+1"))
+
+        dialog = SnippetDialog(None, db)
+        try:
+            dialog.name_input.setText("greeting")
+            dialog.content_input.setPlainText("hello")
+            dialog.shortcut_input.setText("ctrl+alt+1")
+            dialog.save_snippet()
+            self.assertEqual(db.added, [("greeting", "hello", "Ctrl+Alt+1", "일반")])
+        finally:
+            dialog.close()
+
+    def test_collection_manager_delete_refreshes_parent_filters(self):
+        parent = _FakeCollectionParent()
+        db = _FakeCollectionsDB()
+        dialog = CollectionManagerDialog(parent, db)
+        try:
+            dialog.table.selectRow(0)
+            with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+                dialog.delete_collection()
+            self.assertEqual(db.deleted, [10])
+            self.assertEqual(parent.refresh_calls, 1)
+            self.assertEqual(parent.load_calls, 1)
+        finally:
+            dialog.close()
+            parent.close()
+
+    def test_secure_vault_clipboard_clear_is_delayed_and_conditional(self):
+        parent = _FakeMiniParent()
+        dialog = SecureVaultDialog(parent, _FakeVaultDB(), _FakeVaultManager())
+        clipboard = QApplication.clipboard()
+        try:
+            with mock.patch("smartclipboard_app.ui.dialogs.secure_vault.QTimer.singleShot") as single_shot:
+                dialog.copy_item(1, b"encrypted")
+            single_shot.assert_called_once()
+            self.assertEqual(single_shot.call_args[0][0], 30000)
+
+            clipboard.setText("different-text")
+            dialog._clear_clipboard_if_unchanged("vault-secret")
+            self.assertEqual(clipboard.text(), "different-text")
+
+            clipboard.setText("vault-secret")
+            dialog._clear_clipboard_if_unchanged("vault-secret")
+            self.assertEqual(clipboard.text(), "")
+        finally:
+            dialog.close()
+            parent.close()
 
 
 if __name__ == "__main__":

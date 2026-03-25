@@ -125,6 +125,10 @@ def init_menu_impl(self, THEMES):
     action_rules = QAction("⚙️ 복사 규칙 관리...", self)
     action_rules.triggered.connect(self.show_copy_rules)
     settings_menu.addAction(action_rules)
+
+    action_collections = QAction("📁 컬렉션 관리...", self)
+    action_collections.triggered.connect(self.show_collection_manager)
+    settings_menu.addAction(action_collections)
     
     # v8.0: 클립보드 액션 자동화
     action_actions = QAction("⚡ 액션 자동화...", self)
@@ -237,6 +241,8 @@ def show_context_menu_impl(self, pos, THEMES, webbrowser):
         collection_menu.addSeparator()
     new_col_action = _ensure(collection_menu.addAction("➕ 새 컬렉션 만들기"))
     new_col_action.triggered.connect(self.create_collection)
+    manage_col_action = _ensure(collection_menu.addAction("⚙️ 컬렉션 관리..."))
+    manage_col_action.triggered.connect(self.show_collection_manager)
     remove_col_action = _ensure(collection_menu.addAction("🚫 컬렉션에서 제거"))
     remove_col_action.triggered.connect(lambda: self.move_to_collection(None))
     

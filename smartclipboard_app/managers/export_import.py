@@ -29,9 +29,31 @@ class ExportImportManager:
         self.type_icons = type_icons or DEFAULT_TYPE_ICONS
         self.logger = logger_ or logger
 
+    @staticmethod
+    def _matches_date_filter(timestamp, date_from) -> bool:
+        if not date_from or not timestamp:
+            return True
+        try:
+            item_date = datetime.datetime.strptime(timestamp.split()[0], "%Y-%m-%d").date()
+        except (ValueError, IndexError, AttributeError):
+            return True
+        return item_date >= date_from
+
+    def _get_filtered_items(self, filter_type="all", date_from=None):
+        items = self.db.get_items("", "전체")
+        filtered = []
+        for item in items:
+            _pid, _content, ptype, timestamp, *_rest = item
+            if filter_type != "all" and filter_type != ptype:
+                continue
+            if not self._matches_date_filter(timestamp, date_from):
+                continue
+            filtered.append(item)
+        return filtered
+
     def export_json(self, path, filter_type="all", date_from=None, include_metadata=False):
         try:
-            items = self.db.get_items("", "전체")
+            items = self._get_filtered_items(filter_type, date_from=date_from)
             export_data = {
                 "app": "SmartClipboard Pro",
                 "version": self.version,
@@ -56,15 +78,6 @@ class ExportImportManager:
                         self.logger.debug("Collection export skipped: %s", exc)
             for item in items:
                 pid, content, ptype, timestamp, pinned, use_count, pin_order = item
-                if filter_type != "all" and filter_type != ptype:
-                    continue
-                if date_from and timestamp:
-                    try:
-                        item_date = datetime.datetime.strptime(timestamp.split()[0], "%Y-%m-%d").date()
-                        if item_date < date_from:
-                            continue
-                    except (ValueError, IndexError):
-                        pass
 
                 payload = {
                     "content": content,
@@ -122,29 +135,30 @@ class ExportImportManager:
             self.logger.error("JSON Export Error: %s", exc)
             return -1
 
-    def export_csv(self, path, filter_type="all"):
+    def export_csv(self, path, filter_type="all", date_from=None):
         try:
-            items = self.db.get_items("", "전체")
+            items = self._get_filtered_items(filter_type, date_from=date_from)
             with open(path, "w", encoding="utf-8-sig", newline="") as fh:
                 writer = csv.writer(fh)
                 writer.writerow(["내용", "유형", "시간", "고정", "사용횟수"])
                 count = 0
                 for item in items:
                     _, content, ptype, timestamp, pinned, use_count, _pin_order = item
-                    if filter_type != "all" and filter_type != ptype:
+                    export_content = content or ("[이미지 항목 - 바이너리 제외]" if ptype == "IMAGE" else "")
+                    if ptype == "IMAGE" and not export_content:
+                        export_content = "[이미지 항목 - 바이너리 제외]"
+                    if not export_content:
                         continue
-                    if ptype == "IMAGE":
-                        continue
-                    writer.writerow([content, ptype, timestamp, "예" if pinned else "아니오", use_count])
+                    writer.writerow([export_content, ptype, timestamp, "예" if pinned else "아니오", use_count])
                     count += 1
             return count
         except Exception as exc:
             self.logger.error("CSV Export Error: %s", exc)
             return -1
 
-    def export_markdown(self, path, filter_type="all"):
+    def export_markdown(self, path, filter_type="all", date_from=None):
         try:
-            items = self.db.get_items("", "전체")
+            items = self._get_filtered_items(filter_type, date_from=date_from)
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write("# SmartClipboard Pro 히스토리\n\n")
                 fh.write(f"내보낸 날짜: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
@@ -153,15 +167,15 @@ class ExportImportManager:
                 count = 0
                 for item in items:
                     _, content, ptype, timestamp, pinned, _use_count, _pin_order = item
-                    if filter_type != "all" and filter_type != ptype:
-                        continue
-                    if ptype == "IMAGE":
-                        continue
 
                     pin_mark = "[PIN] " if pinned else ""
                     type_icon = self.type_icons.get(ptype, "[T]")
                     fh.write(f"### {pin_mark}{type_icon} {timestamp}\n\n")
-                    if ptype == "CODE":
+                    if ptype == "IMAGE":
+                        placeholder = content or "[이미지 항목]"
+                        fh.write(f"{placeholder}\n\n")
+                        fh.write("> 이미지 바이너리 데이터는 Markdown 내보내기에서 제외됩니다.\n\n")
+                    elif ptype == "CODE":
                         fh.write(f"```\n{content}\n```\n\n")
                     elif ptype == "LINK":
                         fh.write(f"[{content}]({content})\n\n")
@@ -188,10 +202,16 @@ class ExportImportManager:
                     name = (entry.get("name") or "").strip()
                     if not name:
                         continue
-                    icon = entry.get("icon") or "📁"
-                    color = entry.get("color") or "#6366f1"
                     try:
-                        new_id = self.db.add_collection(name, icon, color)
+                        existing = None
+                        if hasattr(self.db, "get_collection_by_name"):
+                            existing = self.db.get_collection_by_name(name)
+                        if existing:
+                            new_id = existing[0]
+                        else:
+                            icon = entry.get("icon") or "📁"
+                            color = entry.get("color") or "#6366f1"
+                            new_id = self.db.add_collection(name, icon, color)
                         if isinstance(new_id, int) and not isinstance(new_id, bool) and legacy_id is not None:
                             collection_id_map[int(legacy_id)] = new_id
                     except Exception as exc:
@@ -225,7 +245,7 @@ class ExportImportManager:
                 for key in ("tags", "note", "bookmark", "collection_id", "pinned", "pin_order", "use_count", "timestamp"):
                     if key in item:
                         metadata[key] = item.get(key)
-                if collection_id_map and "collection_id" in metadata:
+                if collections_payload and "collection_id" in metadata:
                     legacy_collection_id = metadata.get("collection_id")
                     lookup_key = legacy_collection_id
                     if legacy_collection_id is not None and not isinstance(legacy_collection_id, bool):
@@ -235,6 +255,8 @@ class ExportImportManager:
                             pass
                     if lookup_key in collection_id_map:
                         metadata["collection_id"] = collection_id_map[lookup_key]
+                    else:
+                        metadata["collection_id"] = None
                 if metadata and hasattr(self.db, "set_item_metadata"):
                     self.db.set_item_metadata(item_id, **metadata)
             return imported

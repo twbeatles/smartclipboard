@@ -27,7 +27,9 @@ DEFAULT_HOTKEYS = {
 
 
 class _HotkeyParent(Protocol):
-    def register_hotkeys(self) -> None: ...
+    _last_hotkey_error: str
+
+    def register_hotkeys(self, hotkeys_override=None, persist: bool = False) -> bool: ...
 
 
 def _hotkey_parent(value: object | None) -> _HotkeyParent | None:
@@ -114,16 +116,20 @@ class HotkeySettingsDialog(QDialog):
             "show_mini": self.input_mini.text().strip().lower(),
             "paste_last": self.input_paste.text().strip().lower(),
         }
-        self.db.set_setting("hotkeys", json.dumps(hotkeys))
         parent = _hotkey_parent(self.parent())
         if parent is not None:
             try:
-                parent.register_hotkeys()
+                ok = parent.register_hotkeys(hotkeys_override=hotkeys, persist=True)
+                if not ok:
+                    message = getattr(parent, "_last_hotkey_error", "") or "핫키 적용에 실패했습니다."
+                    QMessageBox.warning(self, "설정 실패", message)
+                    return
             except Exception as exc:
                 self.logger.warning("Hotkey apply error: %s", exc)
-                QMessageBox.warning(self, "부분 적용", f"설정은 저장되었지만 즉시 적용에 실패했습니다.\n{exc}")
-                self.accept()
+                QMessageBox.warning(self, "설정 실패", f"핫키 적용에 실패했습니다.\n{exc}")
                 return
+        else:
+            self.db.set_setting("hotkeys", json.dumps(hotkeys))
         self.accept()
 
 

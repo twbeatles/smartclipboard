@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 
-def register_hotkeys_impl(self, logger, keyboard, json, default_hotkeys):
-    """Register global hotkeys from persisted settings."""
-    try:
+def _normalized_hotkey_value(value, fallback: str) -> str:
+    normalized = str(value or fallback).strip().lower()
+    return normalized or fallback
+
+
+def _load_hotkeys(self, logger, json, default_hotkeys, hotkeys_override=None):
+    if hotkeys_override is not None:
+        raw_hotkeys = hotkeys_override
+    else:
         raw_hotkeys = self.db.get_setting("hotkeys", json.dumps(default_hotkeys))
+
+    if isinstance(raw_hotkeys, dict):
+        hotkeys = dict(raw_hotkeys)
+    else:
         try:
             hotkeys = json.loads(raw_hotkeys)
             if not isinstance(hotkeys, dict):
@@ -14,37 +24,98 @@ def register_hotkeys_impl(self, logger, keyboard, json, default_hotkeys):
         except Exception as parse_exc:
             logger.warning(f"Invalid hotkeys setting; resetting to defaults: {parse_exc}")
             hotkeys = dict(default_hotkeys)
+            if hotkeys_override is None:
+                self.db.set_setting("hotkeys", json.dumps(hotkeys))
+
+    return {
+        "show_main": _normalized_hotkey_value(hotkeys.get("show_main"), default_hotkeys["show_main"]),
+        "show_mini": _normalized_hotkey_value(hotkeys.get("show_mini"), default_hotkeys["show_mini"]),
+        "paste_last": _normalized_hotkey_value(hotkeys.get("paste_last"), default_hotkeys["paste_last"]),
+    }
+
+
+def _validate_hotkeys(hotkeys: dict[str, str]) -> str | None:
+    for label, value in hotkeys.items():
+        if not value.strip():
+            return f"'{label}' 단축키가 비어 있습니다."
+
+    values = list(hotkeys.values())
+    if len(values) != len(set(values)):
+        return "단축키 조합이 서로 중복됩니다."
+
+    return None
+
+
+def _remove_hotkeys(keyboard, handles):
+    for hk in handles:
+        try:
+            keyboard.remove_hotkey(hk)
+        except Exception:
+            pass
+
+
+def _register_hotkey_handles(self, keyboard, hotkeys, mini_enabled):
+    handles = []
+    handles.append(keyboard.add_hotkey(hotkeys["show_main"], lambda: self.show_main_signal.emit()))
+    if mini_enabled:
+        handles.append(keyboard.add_hotkey(hotkeys["show_mini"], lambda: self.toggle_mini_signal.emit()))
+    handles.append(keyboard.add_hotkey(hotkeys["paste_last"], lambda: self.paste_last_signal.emit()))
+    return handles
+
+
+def register_hotkeys_impl(
+    self,
+    logger,
+    keyboard,
+    json,
+    default_hotkeys,
+    hotkeys_override=None,
+    persist=False,
+):
+    """Register global hotkeys from persisted settings."""
+    self._last_hotkey_error = ""
+    mini_enabled = self.db.get_setting("mini_window_enabled", "true").lower() == "true"
+    old_handles = list(getattr(self, "_registered_hotkeys", []) or [])
+    old_hotkeys = _load_hotkeys(self, logger, json, default_hotkeys)
+    hotkeys = _load_hotkeys(self, logger, json, default_hotkeys, hotkeys_override=hotkeys_override)
+
+    validation_error = _validate_hotkeys(hotkeys)
+    if validation_error:
+        self._last_hotkey_error = validation_error
+        logger.warning("Hotkey validation error: %s", validation_error)
+        return False
+
+    _remove_hotkeys(keyboard, old_handles)
+    new_handles = []
+    try:
+        new_handles = _register_hotkey_handles(self, keyboard, hotkeys, mini_enabled)
+        self._registered_hotkeys = new_handles
+        if persist:
             self.db.set_setting("hotkeys", json.dumps(hotkeys))
 
-        if hasattr(self, "_registered_hotkeys") and self._registered_hotkeys:
-            for hk in self._registered_hotkeys:
-                try:
-                    keyboard.remove_hotkey(hk)
-                except Exception:
-                    pass
-        self._registered_hotkeys = []
-
-        main_key = hotkeys.get("show_main", "ctrl+shift+v")
-        hk1 = keyboard.add_hotkey(main_key, lambda: self.show_main_signal.emit())
-        self._registered_hotkeys.append(hk1)
-
-        mini_enabled = self.db.get_setting("mini_window_enabled", "true").lower() == "true"
+        mini_label = hotkeys["show_mini"] if mini_enabled else "(비활성화)"
         if mini_enabled:
-            mini_key = hotkeys.get("show_mini", "alt+v")
-            hk2 = keyboard.add_hotkey(mini_key, lambda: self.toggle_mini_signal.emit())
-            self._registered_hotkeys.append(hk2)
-            logger.info(f"Mini window hotkey registered: {mini_key}")
+            logger.info(f"Mini window hotkey registered: {hotkeys['show_mini']}")
         else:
-            mini_key = "(비활성화)"
             logger.info("Mini window hotkey disabled by user setting")
-
-        paste_key = hotkeys.get("paste_last", "ctrl+shift+z")
-        hk3 = keyboard.add_hotkey(paste_key, lambda: self.paste_last_signal.emit())
-        self._registered_hotkeys.append(hk3)
-
-        logger.info(f"Hotkeys registered: {main_key}, {mini_key}, {paste_key}")
+        logger.info(
+            "Hotkeys registered: %s, %s, %s",
+            hotkeys["show_main"],
+            mini_label,
+            hotkeys["paste_last"],
+        )
+        return True
     except Exception as hotkey_exc:
+        _remove_hotkeys(keyboard, new_handles)
+        try:
+            restored_handles = _register_hotkey_handles(self, keyboard, old_hotkeys, mini_enabled)
+        except Exception as restore_exc:
+            restored_handles = []
+            logger.warning(f"Hotkey restore error: {restore_exc}")
+        self._registered_hotkeys = restored_handles
+        self._last_hotkey_error = str(hotkey_exc)
         logger.warning(f"Hotkey registration error: {hotkey_exc}")
+        return False
 
 
 def toggle_mini_window_slot_impl(self, logger):

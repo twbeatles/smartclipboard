@@ -19,6 +19,7 @@
 5. [데이터베이스 스키마](#5-데이터베이스-스키마)
 6. [클립보드 액션 시스템](#6-클립보드-액션-시스템)
 7. [현재 구현된 기능 목록](#7-현재-구현된-기능-목록)
+8.1 [2026-03-25 구현 동기화 메모](#81-2026-03-25-구현-동기화-메모)
 8. [기능 추가 가이드](#8-기능-추가-가이드)
 9. [주요 클래스 관계도](#9-주요-클래스-관계도)
 10. [알려진 제한사항 및 미구현 항목](#10-알려진-제한사항-및-미구현-항목)
@@ -127,7 +128,7 @@ smartclipboard/
 │   ├── test_core.py
 │   ├── test_symbol_inventory.py
 │   └── baseline/
-│       ├── clipboarddb_public_methods.txt   ← 65개 공개 메서드 기준선
+│       ├── clipboarddb_public_methods.txt   ← 71개 공개 메서드 기준선
 │       ├── mainwindow_signal_connects.txt
 │       └── symbol_inventory_v10_6.json      ← 심볼 인벤토리 (39KB)
 │
@@ -226,7 +227,7 @@ class ClipboardDB(
 - SQLite WAL 모드, `synchronous=NORMAL`
 - `threading.RLock()` — 재진입 가능 스레드 안전
 
-**65개 공개 메서드** (기준선: `tests/baseline/clipboarddb_public_methods.txt`)
+**71개 공개 메서드** (기준선: `tests/baseline/clipboarddb_public_methods.txt`)
 
 #### `smartclipboard_core/db_parts/`
 
@@ -329,14 +330,14 @@ class Worker(QRunnable):
 | `secure_vault.py` | 마스터 비밀번호, 보관함 항목 관리 |
 | `clipboard_actions.py` | 자동화 액션 규칙 생성·편집 |
 | `copy_rules.py` | 레거시 텍스트 변환 규칙 |
-| `export_dialog.py` | JSON/CSV/MD 내보내기 |
+| `export_dialog.py` | JSON/CSV/MD 내보내기 (공통 날짜·타입 필터) |
 | `import_dialog.py` | JSON/CSV 가져오기 |
 | `trash_dialog.py` | 휴지통 복원·영구 삭제 (다중 선택) |
-| `hotkeys.py` | 글로벌 핫키 구성 |
-| `snippets.py` | 스니펫 생성·편집·관리자 |
+| `hotkeys.py` | 글로벌 핫키 구성·검증·저장 실패 롤백 |
+| `snippets.py` | 스니펫 생성·편집·관리자·app-local shortcut |
 | `tags.py` | 태그 편집 |
 | `statistics.py` | 히스토리 통계 대시보드 |
-| `collections.py` | 컬렉션 생성·편집 |
+| `collections.py` | 컬렉션 생성·편집·삭제·관리 |
 
 #### 위젯 (`smartclipboard_app/ui/widgets/`)
 
@@ -354,8 +355,8 @@ class Worker(QRunnable):
 |------|------|
 | JSON (내보내기) | 메타데이터 포함 (`include_metadata=True`): tags/note/bookmark/collections/use_count |
 | JSON (가져오기) | 컬렉션 ID remap, IMAGE는 `image_data_b64` round-trip |
-| CSV | 텍스트 항목만 (이미지 제외), 날짜 필터 지원 |
-| Markdown | 가독성 높은 마크다운 형식, 이미지 제외 |
+| CSV | 날짜·타입 필터 공통 적용, IMAGE는 플레이스홀더 행으로 기록 |
+| Markdown | 날짜·타입 필터 공통 적용, IMAGE는 설명용 플레이스홀더만 기록 |
 
 **JSON 마이그레이션 포맷** — `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color) 포함.
 
@@ -366,6 +367,8 @@ class Worker(QRunnable):
 - **Salt:** 16바이트 랜덤, base64 저장
 - **자동 잠금:** 5분 비활성 타임아웃
 - **검증:** 암호화된 "VAULT_VERIFIED" 토큰
+- **비밀번호 변경:** 기존 보관 항목 전체 재암호화 후 salt/verification 갱신
+- **클립보드 보호:** 복호화 복사 텍스트 30초 후 조건부 자동 삭제
 
 ---
 
@@ -480,6 +483,8 @@ clipboard.setText(text)
 - [x] PBKDF2-HMAC-SHA256 + Fernet 암호화 보관함
 - [x] 마스터 비밀번호 (8자+숫자+특수문자)
 - [x] 5분 자동 잠금
+- [x] 마스터 비밀번호 변경 + 전체 보관 항목 재암호화
+- [x] 복호화 클립보드 30초 자동 삭제
 
 ### 자동화
 - [x] URL 제목 자동 가져오기 (비동기)
@@ -487,6 +492,7 @@ clipboard.setText(text)
 - [x] 이메일 정규화
 - [x] 텍스트 변환 (대소문자/트림)
 - [x] 패턴 기반 토스트 알림
+- [x] 액션/규칙 생성·수정·삭제·우선순위 이동 UI
 
 ### UI/UX
 - [x] 5가지 테마 (다크/라이트/오션/퍼플/미드나잇)
@@ -494,6 +500,9 @@ clipboard.setText(text)
 - [x] 플로팅 미니 창 (Alt+V)
 - [x] 시스템 트레이 최소화
 - [x] 글로벌 핫키 (Ctrl+Shift+V / Alt+V / Ctrl+Shift+Z)
+- [x] 핫키 저장 실패 시 이전 상태 롤백
+- [x] 컬렉션 관리 다이얼로그
+- [x] 앱 내부 스니펫 단축키
 - [x] 토스트 알림 (슬라이드 애니메이션)
 - [x] 드래그앤드롭 파일 지원
 
@@ -502,12 +511,26 @@ clipboard.setText(text)
 - [x] JSON/CSV 가져오기
 - [x] 이미지 base64 round-trip (JSON)
 - [x] 컬렉션 메타데이터 마이그레이션
+- [x] JSON/CSV/Markdown 공통 날짜·타입 필터
+- [x] 전체 기록 삭제 시 휴지통 이동
 
 ### 기타
 - [x] 텍스트 스니펫 (카테고리별 저장)
 - [x] 통계 다이얼로그
 - [x] 레거시 복사 규칙 (copy_rules)
 - [x] QR 코드 생성 (선택적 의존성)
+
+---
+
+## 8.1 2026-03-25 구현 동기화 메모
+
+- `history_ops.cleanup()`은 이제 `timestamp ASC, id ASC` 순으로 가장 오래된 항목부터 정리한다.
+- `clear_all_history()` 경로는 영구 삭제 대신 `soft_delete_unpinned()`를 사용해 휴지통 정책과 일치한다.
+- JSON 재-import는 컬렉션 이름을 정규화해서 기존 컬렉션을 재사용하며, 중복 이름의 컬렉션을 새로 만들지 않는다.
+- `copy_rules` / `clipboard_actions`는 `priority` 컬럼을 실제 UI 순서와 동기화한다.
+- `ExportImportManager`는 JSON/CSV/Markdown에 동일한 날짜·타입 필터를 적용하고, CSV/Markdown의 IMAGE는 플레이스홀더만 기록한다.
+- `SecureVaultManager`는 마스터 비밀번호 변경과 클립보드 30초 자동 정리 흐름을 지원한다.
+- `smartclipboard.spec`는 payload 경로에서 누락되지 않도록 `smartclipboard_app.ui.dialogs.collections`를 hidden import에 포함한다.
 
 ---
 
@@ -598,8 +621,7 @@ QApplication (bootstrap.py)
 | 항목 | 상태 | 비고 |
 |------|------|------|
 | macOS/Linux 지원 | 미지원 | Windows 전용 (`keyboard` 라이브러리) |
-| 스니펫 `shortcut` 단축키 | DB 컬럼만 존재 | UI/실행 경로 미노출 |
-| `copy_rules` (레거시) | 별도 다이얼로그 존재 | `clipboard_actions`과 이원화됨 |
+| 스니펫 `shortcut` 단축키 | 지원됨 | 앱 활성 상태에서만 동작하는 app-local 단축키 |
 | 일부 앱에서 글로벌 핫키 충돌 | 알려진 제한 | `keyboard` 라이브러리 한계 |
 | repo-wide pyright 노이즈 | `db_parts/*.py` mixin | 변경 파일 기준으로만 실행 |
 | `legacy_main.py` 소스 복원 | 장기 목표 | 현재는 payload+src 하이브리드 |

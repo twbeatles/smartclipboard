@@ -95,9 +95,16 @@ from smartclipboard_core import (
 from smartclipboard_core.actions import extract_first_url as core_extract_first_url
 from smartclipboard_app.managers.export_import import ExportImportManager as AppExportImportManager
 from smartclipboard_app.managers.secure_vault import SecureVaultManager as AppSecureVaultManager
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+from smartclipboard_app.ui.dialogs.collections import (
+    CollectionEditDialog as AppCollectionEditDialog,
+    CollectionManagerDialog as AppCollectionManagerDialog,
+)
 from smartclipboard_app.ui.dialogs.snippets import (
+    APP_LOCAL_SHORTCUTS as SNIPPET_APP_LOCAL_SHORTCUTS,
     SnippetDialog as AppSnippetDialog,
     SnippetManagerDialog as AppSnippetManagerDialog,
+    process_snippet_template as app_process_snippet_template,
 )
 from smartclipboard_app.ui.dialogs.clipboard_actions import ClipboardActionsDialog as AppClipboardActionsDialog
 from smartclipboard_app.ui.dialogs.copy_rules import CopyRulesDialog as AppCopyRulesDialog
@@ -502,6 +509,15 @@ class SnippetManagerDialog(AppSnippetManagerDialog):
     """Compatibility export backed by smartclipboard_app.ui.dialogs.snippets."""
 
 
+# --- 컬렉션 관리 다이얼로그 ---
+class CollectionEditDialog(AppCollectionEditDialog):
+    """Compatibility export backed by smartclipboard_app.ui.dialogs.collections."""
+
+
+class CollectionManagerDialog(AppCollectionManagerDialog):
+    """Compatibility export backed by smartclipboard_app.ui.dialogs.collections."""
+
+
 # --- 태그 편집 다이얼로그 ---
 class TagEditDialog(AppTagEditDialog):
     """Compatibility export backed by smartclipboard_app.ui.dialogs.tags."""
@@ -564,6 +580,9 @@ class MainWindow(QMainWindow):
             # v10.0: 복사 규칙 캐싱 (성능 최적화)
             self._rules_cache = None
             self._rules_cache_dirty = True
+            self._last_hotkey_error = ""
+            self._base_shortcuts = []
+            self._snippet_shortcuts = []
             
             # v10.3: 클립보드 디바운스 타이머 (중복 호출 방지)
             self._clipboard_debounce_timer = None
@@ -640,9 +659,17 @@ class MainWindow(QMainWindow):
         except Exception as log_level_exc:
             logger.debug(f"Failed to apply saved log level: {log_level_exc}")
 
-    def register_hotkeys(self):
+    def register_hotkeys(self, hotkeys_override=None, persist=False):
         """v10.2: custom hotkey registration."""
-        return register_hotkeys_impl(self, logger, keyboard, json, DEFAULT_HOTKEYS)
+        return register_hotkeys_impl(
+            self,
+            logger,
+            keyboard,
+            json,
+            DEFAULT_HOTKEYS,
+            hotkeys_override=hotkeys_override,
+            persist=persist,
+        )
     
     def toggle_mini_window(self):
         """미니 창 토글 (외부에서 호출 시 시그널 사용)"""
@@ -875,6 +902,11 @@ class MainWindow(QMainWindow):
     def show_snippet_manager(self):
         """스니펫 관리 창 표시"""
         dialog = SnippetManagerDialog(self, self.db)
+        dialog.exec()
+
+    def show_collection_manager(self):
+        """컬렉션 관리 창 표시"""
+        dialog = CollectionManagerDialog(self, self.db)
         dialog.exec()
 
     def show_statistics(self):
@@ -1137,33 +1169,85 @@ class MainWindow(QMainWindow):
 
     def init_shortcuts(self):
         """앱 내 키보드 단축키 설정"""
+        self._base_shortcuts = []
+
         # Escape: 창 숨기기
         shortcut_escape = QShortcut(QKeySequence("Escape"), self)
         shortcut_escape.activated.connect(self.hide)
+        self._base_shortcuts.append(shortcut_escape)
         
         # Ctrl+F: 검색창 포커스
         shortcut_search = QShortcut(QKeySequence("Ctrl+F"), self)
         shortcut_search.activated.connect(lambda: self.search_input.setFocus())
+        self._base_shortcuts.append(shortcut_search)
         
         # Ctrl+P: 고정 토글
         shortcut_pin = QShortcut(QKeySequence("Ctrl+P"), self)
         shortcut_pin.activated.connect(self.toggle_pin)
+        self._base_shortcuts.append(shortcut_pin)
         
         # Delete: 삭제
         shortcut_delete = QShortcut(QKeySequence("Delete"), self)
         shortcut_delete.activated.connect(self.delete_item)
+        self._base_shortcuts.append(shortcut_delete)
         
         # Shift+Delete: 다중 삭제
         shortcut_multi_delete = QShortcut(QKeySequence("Shift+Delete"), self)
         shortcut_multi_delete.activated.connect(self.delete_selected_items)
+        self._base_shortcuts.append(shortcut_multi_delete)
         
         # Return: 붙여넣기
         shortcut_paste = QShortcut(QKeySequence("Return"), self)
         shortcut_paste.activated.connect(self.paste_selected)
+        self._base_shortcuts.append(shortcut_paste)
         
         # Ctrl+C: 복사
         shortcut_copy = QShortcut(QKeySequence("Ctrl+C"), self)
         shortcut_copy.activated.connect(self.copy_item)
+        self._base_shortcuts.append(shortcut_copy)
+
+        self.refresh_snippet_shortcuts()
+
+    def refresh_snippet_shortcuts(self):
+        """Register app-local snippet shortcuts for the main window."""
+        reserved = {
+            QKeySequence(value).toString(QKeySequence.SequenceFormat.PortableText).strip()
+            for value in SNIPPET_APP_LOCAL_SHORTCUTS.values()
+        }
+
+        for shortcut in getattr(self, "_snippet_shortcuts", []):
+            try:
+                shortcut.activated.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                shortcut.setParent(None)
+                shortcut.deleteLater()
+            except RuntimeError:
+                pass
+
+        self._snippet_shortcuts = []
+        for snippet_id, _name, _content, shortcut_text, _category in self.db.get_snippets():
+            normalized = QKeySequence(shortcut_text or "").toString(
+                QKeySequence.SequenceFormat.PortableText
+            ).strip()
+            if not normalized or normalized in reserved:
+                continue
+            shortcut = QShortcut(QKeySequence(normalized), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(lambda sid=snippet_id: self.insert_snippet_by_id(sid))
+            self._snippet_shortcuts.append(shortcut)
+
+    def insert_snippet_by_id(self, snippet_id):
+        """Copy a snippet template result to the clipboard."""
+        for sid, name, content, _shortcut, _category in self.db.get_snippets():
+            if sid != snippet_id:
+                continue
+            processed = app_process_snippet_template(content)
+            mark_internal_copy(self)
+            self.clipboard.setText(processed)
+            self.statusBar().showMessage(f"✅ 스니펫 '{name}'이 클립보드에 복사되었습니다.", 2000)
+            return
 
     def update_tray_theme(self):
         """Apply active theme to tray menu."""
@@ -1265,11 +1349,17 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.db.clear_all()
+            moved_count = self.db.soft_delete_unpinned() if hasattr(self.db, "soft_delete_unpinned") else 0
+            if moved_count == 0 and not hasattr(self.db, "soft_delete_unpinned"):
+                self.db.clear_all()
             self.load_data()
-            self.update_ui_state(False)
+            if getattr(self, "_last_display_count", 0) == 0:
+                self.update_ui_state(False)
             self.update_status_bar()
-            self.statusBar().showMessage("✅ 기록이 삭제되었습니다.", 2000)
+            if moved_count:
+                self.statusBar().showMessage(f"✅ {moved_count}개 기록을 휴지통으로 이동했습니다.", 2000)
+            else:
+                self.statusBar().showMessage("ℹ️ 휴지통으로 이동할 일반 기록이 없습니다.", 2000)
             
     def export_history(self):
         data = self.db.get_all_text_content()
@@ -1588,20 +1678,24 @@ class MainWindow(QMainWindow):
     
     # --- v10.0: 컬렉션 ---
     def create_collection(self):
-        name, ok = QInputDialog.getText(self, "📁 새 컬렉션", "컬렉션 이름:")
-        if ok and name:
-            icons = ["📁", "📂", "🗂️", "📦", "💼", "🎯", "⭐", "❤️", "🔖", "📌"]
-            icon, _ = QInputDialog.getItem(self, "아이콘 선택", "아이콘:", icons, 0, False)
-            created_id = self.db.add_collection(name, icon or "📁")
-            if created_id:
-                self.refresh_collection_filter_options()
-                if hasattr(self, "collection_filter_combo"):
-                    idx = self.collection_filter_combo.findData(created_id)
-                    if idx >= 0:
-                        self.collection_filter_combo.setCurrentIndex(idx)
-                self.statusBar().showMessage(f"📁 '{name}' 컬렉션이 생성되었습니다.", 2000)
-            else:
-                self.statusBar().showMessage("⚠️ 컬렉션 생성에 실패했습니다.", 2000)
+        before_ids = {row[0] for row in self.db.get_collections()}
+        dialog = CollectionEditDialog(self, self.db)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        self.refresh_collection_filter_options()
+        self.load_data()
+
+        created_id = getattr(dialog, "saved_collection_id", None)
+        if not created_id:
+            after_ids = {row[0] for row in self.db.get_collections()}
+            new_ids = list(after_ids - before_ids)
+            created_id = new_ids[0] if new_ids else None
+        if hasattr(self, "collection_filter_combo") and created_id:
+            idx = self.collection_filter_combo.findData(created_id)
+            if idx >= 0:
+                self.collection_filter_combo.setCurrentIndex(idx)
+        self.statusBar().showMessage("📁 컬렉션이 생성되었습니다.", 2000)
     
     def move_to_collection(self, collection_id):
         item_ids = self.get_selected_ids()
