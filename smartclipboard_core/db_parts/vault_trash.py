@@ -93,6 +93,13 @@ class VaultTrashMixin:
                 item = cursor.fetchone()
                 if item:
                     timestamp = item[3] or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    collection_id = item[7]
+                    if collection_id is not None and hasattr(self, "_collection_exists"):
+                        try:
+                            if not self._collection_exists(cursor, int(collection_id)):
+                                collection_id = None
+                        except (TypeError, ValueError):
+                            collection_id = None
                     cursor.execute(
                         "INSERT INTO history (content, image_data, type, timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -104,7 +111,7 @@ class VaultTrashMixin:
                             item[4] or "",
                             item[5] or "",
                             item[6] or 0,
-                            item[7],
+                            collection_id,
                             item[8] or 0,
                             item[9] or 0,
                             item[10] or 0,

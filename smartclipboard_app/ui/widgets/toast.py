@@ -5,18 +5,34 @@ from PyQt6.QtGui import QColor, QShowEvent
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel
 
 
+def _normalize_duration(duration) -> int:
+    try:
+        duration_ms = int(duration)
+    except (TypeError, ValueError):
+        return 2000
+    return duration_ms if duration_ms > 0 else 2000
+
+
+def _compose_message(message, detail) -> str:
+    title_text = str(message or "").strip()
+    detail_text = str(detail or "").strip()
+    if title_text and detail_text:
+        return f"{title_text}\n{detail_text}"
+    return title_text or detail_text
+
+
 class ToastNotification(QFrame):
     """플로팅 토스트 알림 위젯 (슬라이드 애니메이션 + 스택 지원)"""
 
     _active_toasts = []
 
-    def __init__(self, parent, message, duration=2000, toast_type="info"):
+    def __init__(self, parent, message, detail=None, duration=2000, toast_type="info"):
         super().__init__(parent)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.duration = duration
+        self.duration = _normalize_duration(duration)
         self.parent_window = parent
 
         colors = {
@@ -53,8 +69,9 @@ class ToastNotification(QFrame):
         icon_label.setStyleSheet("font-size: 16px; background: transparent;")
         layout.addWidget(icon_label)
 
-        msg_label = QLabel(message)
+        msg_label = QLabel(_compose_message(message, detail))
         msg_label.setStyleSheet("background: transparent;")
+        msg_label.setWordWrap(True)
         layout.addWidget(msg_label)
 
         self.adjustSize()
@@ -88,7 +105,7 @@ class ToastNotification(QFrame):
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.opacity_effect.setOpacity(1.0)
 
-        QTimer.singleShot(duration, self.fade_out)
+        QTimer.singleShot(self.duration, self.fade_out)
 
     def showEvent(self, a0: QShowEvent | None) -> None:
         super().showEvent(a0)
@@ -112,8 +129,8 @@ class ToastNotification(QFrame):
         self.deleteLater()
 
     @staticmethod
-    def show_toast(parent, message, duration=2000, toast_type="info"):
-        toast = ToastNotification(parent, message, duration, toast_type)
+    def show_toast(parent, message, detail=None, duration=2000, toast_type="info"):
+        toast = ToastNotification(parent, message, detail=detail, duration=duration, toast_type=toast_type)
         toast.show()
         return toast
 

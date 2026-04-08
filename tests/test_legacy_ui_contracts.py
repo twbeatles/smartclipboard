@@ -1,6 +1,9 @@
 import pathlib
 import re
 import unittest
+from unittest import mock
+
+import smartclipboard_app.legacy_main_src as legacy_main_src
 
 
 LEGACY_SRC = pathlib.Path("smartclipboard_app/legacy_main_src.py")
@@ -46,6 +49,47 @@ class LegacyUiContractsTests(unittest.TestCase):
 
     def test_get_selected_ids_exists(self):
         self.assertIn("def get_selected_ids(self):", self.source)
+
+
+class _FakeClipboardSignal:
+    def __init__(self):
+        self.disconnected = []
+        self.connected = []
+
+    def disconnect(self, callback):
+        self.disconnected.append(callback)
+
+    def connect(self, callback):
+        self.connected.append(callback)
+
+
+class _FakeClipboard:
+    def __init__(self):
+        self.dataChanged = _FakeClipboardSignal()
+
+
+class _FakeSearchInput:
+    def hasFocus(self):
+        return False
+
+
+class LegacyUiRuntimeSafetyTests(unittest.TestCase):
+    def test_on_action_completed_reconnects_clipboard_when_toast_raises(self):
+        fake_window = type("FakeWindow", (), {})()
+        fake_window.clipboard = _FakeClipboard()
+        fake_window.search_input = _FakeSearchInput()
+        fake_window.on_clipboard_change = object()
+        fake_window.load_data = lambda: None
+
+        with mock.patch.object(legacy_main_src.ToastNotification, "show_toast", side_effect=RuntimeError("toast boom")):
+            legacy_main_src.MainWindow.on_action_completed(
+                fake_window,
+                "fetch",
+                {"type": "title", "title": "Example Title"},
+            )
+
+        self.assertEqual(fake_window.clipboard.dataChanged.disconnected, [fake_window.on_clipboard_change])
+        self.assertEqual(fake_window.clipboard.dataChanged.connected, [fake_window.on_clipboard_change])
 
 
 if __name__ == "__main__":

@@ -46,6 +46,7 @@ class ClipboardActionManager(QObject):
         super().__init__()
         self.db = db
         self.actions_cache = []
+        self._is_shutting_down = False
         self.reload_actions()
         threadpool = QThreadPool.globalInstance()
         if threadpool is None:
@@ -129,6 +130,8 @@ class ClipboardActionManager(QObject):
 
     def fetch_url_title_async(self, url, item_id, action_name):
         """URL 제목 비동기 요청."""
+        if self._is_shutting_down:
+            return
         if not HAS_WEB:
             self.action_completed.emit(action_name, {"type": "notify", "message": "웹 요청 라이브러리가 없어 URL 제목을 가져올 수 없습니다."})
             return
@@ -155,15 +158,34 @@ class ClipboardActionManager(QObject):
 
     def _handle_title_result(self, result, action_name):
         """비동기 결과 처리 (메인 스레드)."""
+        if self._is_shutting_down or not self._db_is_available():
+            logger.debug("Ignoring title result after shutdown or DB close")
+            return
         title = result.get("title")
         item_id = result.get("item_id")
 
         if title and item_id:
-            self.db.update_url_title(item_id, title)
-            self.action_completed.emit(action_name, {"type": "title", "title": title})
+            if self.db.update_url_title(item_id, title):
+                self.action_completed.emit(action_name, {"type": "title", "title": title})
+            else:
+                self.action_completed.emit(action_name, {"type": "notify", "message": "URL 제목을 저장하지 못했습니다."})
             return
 
         self.action_completed.emit(action_name, {"type": "notify", "message": "URL 제목을 가져오지 못했습니다."})
+
+    def _db_is_available(self) -> bool:
+        if self.db is None:
+            return False
+        if hasattr(self.db, "conn"):
+            return getattr(self.db, "conn", None) is not None
+        return True
+
+    def shutdown(self, wait_timeout_ms: int = 2000) -> None:
+        self._is_shutting_down = True
+        try:
+            self.threadpool.waitForDone(wait_timeout_ms)
+        except TypeError:
+            self.threadpool.waitForDone()
 
     def format_phone(self, text):
         """전화번호 포맷팅."""

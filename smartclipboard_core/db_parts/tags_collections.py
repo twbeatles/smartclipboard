@@ -9,6 +9,11 @@ class TagsCollectionsMixin:
     def _normalize_collection_name(name: str) -> str:
         return " ".join(str(name or "").split()).strip()
 
+    @staticmethod
+    def _collection_exists(cursor, collection_id: int) -> bool:
+        cursor.execute("SELECT 1 FROM collections WHERE id = ? LIMIT 1", (collection_id,))
+        return cursor.fetchone() is not None
+
     def get_item_tags(self, item_id):
         with self.lock:
             try:
@@ -170,6 +175,7 @@ class TagsCollectionsMixin:
                 cursor = self.conn.cursor()
                 # 해당 컬렉션의 항목들 연결 해제
                 cursor.execute("UPDATE history SET collection_id = NULL WHERE collection_id = ?", (collection_id,))
+                cursor.execute("UPDATE deleted_history SET collection_id = NULL WHERE collection_id = ?", (collection_id,))
                 cursor.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
                 self.conn.commit()
                 return True
@@ -183,6 +189,9 @@ class TagsCollectionsMixin:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
+                if collection_id is not None and not self._collection_exists(cursor, collection_id):
+                    logger.warning("Assign Collection Error: invalid collection_id=%s", collection_id)
+                    return False
                 cursor.execute("UPDATE history SET collection_id = ? WHERE id = ?", (collection_id, item_id))
                 self.conn.commit()
                 return True
@@ -273,6 +282,9 @@ class TagsCollectionsMixin:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
+                if collection_id is not None and not self._collection_exists(cursor, collection_id):
+                    logger.warning("Move Items to Collection Error: invalid collection_id=%s", collection_id)
+                    return 0
                 cursor.execute(
                     f"UPDATE history SET collection_id = ? WHERE id IN ({placeholders})",
                     [collection_id, *unique_ids],

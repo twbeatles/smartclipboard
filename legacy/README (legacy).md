@@ -71,7 +71,7 @@
 |--------|------|
 | `Ctrl+Shift+V` | 메인 창 표시 |
 | `Alt+V` | 미니 창 토글 |
-| `Ctrl+Shift+Z` | 마지막 항목 즉시 붙여넣기 |
+| `Ctrl+Shift+Z` | 가장 최근 복사 항목 즉시 붙여넣기 |
 
 ---
 
@@ -211,6 +211,14 @@ pyright
 - 보안 보관함 복사, 스니펫 사용, URL 복사 경로에서 내부 복사 플래그를 공통 helper로 세팅
 - JSON export/import가 `IMAGE` 항목을 `image_data_b64`로 round-trip
 - pinned drag-drop helper의 `Qt` 참조 누락 수정
+
+### 🛠️ 2026-04-08 구현 리스크 보강
+- 토스트 호출/클립보드 재연결 예외 안전성 보강
+- `Ctrl+Shift+Z`가 가장 최근 복사 항목을 기준으로 동작하도록 정합성 수정
+- 내림차순 사용자 정렬에서도 pinned-first 유지
+- 컬렉션 삭제/휴지통 복원 시 orphan `collection_id` 방지
+- 보안 보관함 비밀번호 변경 직후 최신 암호문 기준으로 복사 버튼 유지
+- 종료 중 late worker 결과가 닫힌 DB에 반영되지 않도록 정리
 
 ---
 

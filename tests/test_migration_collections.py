@@ -7,9 +7,17 @@ from smartclipboard_app.legacy_main_src import ExportImportManager
 from smartclipboard_core.database import ClipboardDB
 
 
+TEST_TMP_ROOT = os.path.join(os.getcwd(), ".tmp-unittest")
+os.makedirs(TEST_TMP_ROOT, exist_ok=True)
+
+
+def _workspace_tempdir():
+    return tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT)
+
+
 class MigrationCollectionsTests(unittest.TestCase):
     def setUp(self):
-        self.tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = _workspace_tempdir()
         self.src_dir = os.path.join(self.tmpdir.name, "src")
         self.dst_dir = os.path.join(self.tmpdir.name, "dst")
         os.makedirs(self.src_dir, exist_ok=True)

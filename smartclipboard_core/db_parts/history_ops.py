@@ -545,5 +545,6 @@ class HistoryOpsMixin:
     def close(self):
         if self.conn:
             self.conn.close()
+            self.conn = None
             logger.info("DB 연결 종료")
 

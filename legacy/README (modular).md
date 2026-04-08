@@ -19,7 +19,7 @@ Windows용 PyQt6 기반 클립보드 매니저입니다.
 - 클립보드 히스토리 저장/검색
 - 고정, 북마크, 태그, 컬렉션
 - 상단 컬렉션 필터(전체/미분류/개별 컬렉션)
-- 보안 보관함(AES)
+- 보안 보관함(PBKDF2-HMAC-SHA256 + Fernet)
 - 클립보드 액션 자동화
 - 스니펫/휴지통/미니 윈도우
 - JSON/CSV/Markdown 내보내기
@@ -73,10 +73,13 @@ python -m unittest discover -s tests -v
 ```
 
 권장 회귀 테스트:
+- `tests/test_core.py`
+- `tests/test_ui_dialogs_widgets.py`
 - `tests/test_payload_sync.py`
 - `tests/test_migration_collections.py`
 - `tests/test_legacy_ui_contracts.py`
 - `tests/test_signal_snapshot.py`
+- `tests/test_public_surfaces.py`
 
 ## 빌드
 
@@ -97,6 +100,7 @@ pyinstaller --clean smartclipboard.spec
 - 구조 리팩토링을 재개하려면 신뢰 가능한 원본 `legacy_main.py` 소스 복원이 선행되어야 합니다.
 - 2026-03 정합성 패치로 fetch_title 액션의 첫 URL 추출 경로, 복합 필터 검색 경로, 휴지통 다중선택, minimized 시작 안정성, JSON 컬렉션 remap이 보강되었습니다.
 - 2026-03-19 안정화 패치로 비이미지 중복 캡처 시 메타데이터 보존, JSON `IMAGE` round-trip(`image_data_b64`), 보안 보관함/스니펫/URL 복사의 internal copy guard, `add_snippet()` 런타임 오류 수정이 반영되었습니다.
+- 2026-04-08 리스크 보강으로 paste-last semantics, pinned-first 내림차순 정렬, 컬렉션 삭제/복원 무결성, 보안 보관함 비밀번호 변경 직후 복사, 종료 중 비동기 worker 정리가 보강되었습니다.
 - 스니펫 `shortcut` 컬럼은 유지되지만 사용자 할당 UI/실행 경로는 아직 노출되지 않습니다.
 
 ## 문서 정합성 기준 (2026-03-07)

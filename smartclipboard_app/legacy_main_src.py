@@ -167,14 +167,15 @@ APP_DIR = get_app_directory()
 from logging.handlers import RotatingFileHandler
 
 LOG_FILE = os.path.join(APP_DIR, "clipboard_manager.log")
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        RotatingFileHandler(LOG_FILE, maxBytes=1*1024*1024, backupCount=3, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            RotatingFileHandler(LOG_FILE, maxBytes=1*1024*1024, backupCount=3, encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
 logger = logging.getLogger(__name__)
 
 # --- 설정 ---
@@ -805,7 +806,12 @@ class MainWindow(QMainWindow):
         if file_name:
             try:
                 # DB 연결 종료 시도 (안전한 복사를 위해)
-                self.db.conn.close()
+                try:
+                    self.action_manager.action_completed.disconnect(self.on_action_completed)
+                except Exception:
+                    pass
+                self.action_manager.shutdown()
+                self.db.close()
                 import shutil
                 target_db_file = getattr(self.db, "db_file", DB_FILE)
                 shutil.copy2(file_name, target_db_file)
@@ -1032,7 +1038,7 @@ class MainWindow(QMainWindow):
         
         if contents:
             merged = separator.join(contents)
-            self.is_internal_copy = True
+            mark_internal_copy(self)
             self.clipboard.setText(merged)
             self.statusBar().showMessage(f"✅ {len(contents)}개 항목 병합 완료", 2000)
 
@@ -1136,15 +1142,32 @@ class MainWindow(QMainWindow):
             if res_type == "title":
                 title = result.get("title")
                 if title:
+                    clipboard_disconnected = False
                     try:
-                        self.clipboard.dataChanged.disconnect(self.on_clipboard_change)  # 일시적 연결 해제
-                    except (TypeError, RuntimeError):
-                        pass  # 이미 연결 해제된 경우
-                    ToastNotification.show_toast(self, "🔗 링크 제목 발견", f"{title}")
-                    # UI 입력 중이 아닐 때만 데이터 다시 로드
-                    if not self.search_input.hasFocus():
-                        self.load_data()
-                    self.clipboard.dataChanged.connect(self.on_clipboard_change)
+                        try:
+                            self.clipboard.dataChanged.disconnect(self.on_clipboard_change)  # 일시적 연결 해제
+                            clipboard_disconnected = True
+                        except (TypeError, RuntimeError):
+                            pass  # 이미 연결 해제된 경우
+                        try:
+                            ToastNotification.show_toast(
+                                self,
+                                "🔗 링크 제목 발견",
+                                detail=title,
+                                duration=2500,
+                                toast_type="info",
+                            )
+                        except Exception as toast_error:
+                            logger.error(f"Toast display failed: {toast_error}")
+                        # UI 입력 중이 아닐 때만 데이터 다시 로드
+                        if not self.search_input.hasFocus():
+                            self.load_data()
+                    finally:
+                        if clipboard_disconnected:
+                            try:
+                                self.clipboard.dataChanged.connect(self.on_clipboard_change)
+                            except (TypeError, RuntimeError):
+                                pass
         except Exception as e:
             logger.error(f"Action Handler Error: {e}")
 
@@ -1159,10 +1182,22 @@ class MainWindow(QMainWindow):
         self.tray_pause_action.setChecked(self.is_monitoring_paused)
         
         if self.is_monitoring_paused:
-            ToastNotification.show_toast(self, "⏸ 모니터링 일시정지", "클립보드 수집이 잠시 중단됩니다.")
+            ToastNotification.show_toast(
+                self,
+                "⏸ 모니터링 일시정지",
+                detail="클립보드 수집이 잠시 중단됩니다.",
+                duration=2000,
+                toast_type="info",
+            )
             self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION} (일시정지됨)")
         else:
-            ToastNotification.show_toast(self, "▶ 모니터링 재개", "클립보드 수집을 다시 시작합니다.")
+            ToastNotification.show_toast(
+                self,
+                "▶ 모니터링 재개",
+                detail="클립보드 수집을 다시 시작합니다.",
+                duration=2000,
+                toast_type="success",
+            )
             self.tray_icon.setToolTip(f"스마트 클립보드 프로 v{VERSION}")
             
         self.update_status_bar()
@@ -1558,7 +1593,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("❌ 유효한 JSON이 아닙니다", 2000)
                 return
         
-        self.is_internal_copy = True
+        mark_internal_copy(self)
         self.clipboard.setText(new_text)
         self.detail_text.setPlainText(new_text)
         
@@ -1571,7 +1606,7 @@ class MainWindow(QMainWindow):
         data = self.db.get_content(pid)
         if data:
             content, blob, ptype = data
-            self.is_internal_copy = True
+            mark_internal_copy(self)
             if ptype == "IMAGE" and blob:
                 pixmap = QPixmap()
                 pixmap.loadFromData(blob)

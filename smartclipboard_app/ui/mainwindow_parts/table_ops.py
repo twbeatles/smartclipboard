@@ -90,16 +90,21 @@ def get_display_items_impl(self):
     # 2. 정렬 (고정 항목은 항상 상단)
     if items and self.sort_column > 0:
         def get_sort_key(item):
-            pid, content, ptype, timestamp, pinned, use_count, pin_order = item
+            _pid, content, ptype, timestamp, _pinned, use_count, _pin_order = item
             col = self.sort_column
-            if col == 1: return (not pinned, ptype or "")
-            elif col == 2: return (not pinned, (content or "").lower())
-            elif col == 3: return (not pinned, timestamp or "")
-            elif col == 4: return (not pinned, use_count or 0)
-            return (not pinned, 0)
+            if col == 1: return ptype or ""
+            elif col == 2: return (content or "").lower()
+            elif col == 3: return timestamp or ""
+            elif col == 4: return use_count or 0
+            return 0
         
         reverse = self.sort_order == Qt.SortOrder.DescendingOrder
-        items = sorted(items, key=get_sort_key, reverse=reverse)
+        pinned_items = [item for item in items if item[4]]
+        unpinned_items = [item for item in items if not item[4]]
+        items = (
+            sorted(pinned_items, key=get_sort_key, reverse=reverse)
+            + sorted(unpinned_items, key=get_sort_key, reverse=reverse)
+        )
         
     return items
 

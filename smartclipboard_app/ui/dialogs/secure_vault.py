@@ -176,7 +176,7 @@ class SecureVaultDialog(QDialog):
 
             btn_copy = QPushButton("📋")
             btn_copy.setToolTip("복호화하여 복사")
-            btn_copy.clicked.connect(lambda checked, v=vid, e=encrypted: self.copy_item(v, e))
+            btn_copy.clicked.connect(lambda checked, v=vid: self.copy_item(v))
             btn_delete = QPushButton("🗑")
             btn_delete.setToolTip("삭제")
             btn_delete.clicked.connect(lambda checked, v=vid: self.delete_item(v))
@@ -198,7 +198,14 @@ class SecureVaultDialog(QDialog):
             else:
                 QMessageBox.warning(self, "오류", "암호화에 실패했습니다.")
 
-    def copy_item(self, _vid, encrypted_data):
+    def copy_item(self, vid, encrypted_data=None):
+        for item_id, current_encrypted, _label, _created_at in self.db.get_vault_items():
+            if item_id == vid:
+                encrypted_data = current_encrypted
+                break
+        if encrypted_data is None:
+            QMessageBox.warning(self, "오류", "선택한 보관함 항목을 찾을 수 없습니다.")
+            return
         decrypted = self.vault.decrypt(encrypted_data)
         if decrypted:
             clipboard = QApplication.clipboard()
@@ -270,6 +277,7 @@ class SecureVaultDialog(QDialog):
         if not self.vault.change_master_password(current_password, new_password):
             QMessageBox.warning(self, "오류", "마스터 비밀번호 변경에 실패했습니다.")
             return
+        self.load_items()
         QMessageBox.information(self, "완료", "마스터 비밀번호가 변경되었습니다.")
 
     def delete_item(self, vid):

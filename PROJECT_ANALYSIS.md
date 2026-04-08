@@ -293,7 +293,7 @@ class Worker(QRunnable):
 |--------|------|
 | `Ctrl+Shift+V` | 메인 창 표시 |
 | `Alt+V` | 미니 창 토글 |
-| `Ctrl+Shift+Z` | 마지막 항목 즉시 붙여넣기 |
+| `Ctrl+Shift+Z` | 가장 최근 복사 항목 즉시 붙여넣기 |
 
 **앱 내 단축키:**
 
@@ -532,6 +532,16 @@ clipboard.setText(text)
 - `SecureVaultManager`는 마스터 비밀번호 변경과 클립보드 30초 자동 정리 흐름을 지원한다.
 - `smartclipboard.spec`는 payload 경로에서 누락되지 않도록 `smartclipboard_app.ui.dialogs.collections`를 hidden import에 포함한다.
 
+## 8.2 2026-04-08 구현 리스크 보강 메모
+
+- `ToastNotification.show_toast()` 호출은 `detail`/`duration`/`toast_type` 키워드 기준으로 정리되었고, URL 제목 처리 중 토스트 실패가 나도 클립보드 시그널 재연결은 보장된다.
+- `paste_last_item_slot_impl()`는 pinned 정렬 결과가 아니라 실제 최근 복사 항목(`timestamp DESC`, `id DESC`)을 기준으로 붙여넣는다.
+- `table_ops.get_display_items_impl()`의 사용자 정렬은 pinned/unpinned를 분리한 뒤 각 그룹 내부만 정렬해 내림차순에서도 pinned-first를 유지한다.
+- `delete_collection()`은 `deleted_history.collection_id`도 함께 `NULL` 처리하고, `restore_item()`은 존재하지 않는 컬렉션 참조를 `NULL`로 복원한다.
+- `SecureVaultDialog.copy_item()`은 버튼 생성 시점의 암호문을 신뢰하지 않고 최신 보관 row를 다시 읽는다.
+- `ClipboardActionManager.shutdown()`은 종료 시 threadpool 완료를 기다리고, late result는 닫힌 DB에 반영하지 않는다.
+- Windows 테스트는 시스템 temp ACL 이슈를 피하려고 repo-local `.tmp-unittest/` 경로를 사용한다.
+
 ---
 
 ## 8. 기능 추가 가이드
@@ -667,6 +677,8 @@ python -m unittest discover -s tests -v
 | `test_payload_sync.py` | payload/src 시그니처 동기화 |
 | `test_legacy_loader.py` | payload 폴백 동작 |
 | `test_migration_collections.py` | JSON 마이그레이션·컬렉션 remap |
+| `test_core.py` | DB/액션 회귀 |
+| `test_ui_dialogs_widgets.py` | 정렬/보관함/핫키 UI 회귀 |
 | `test_legacy_ui_contracts.py` | 토스트·선택모드·가시성 가드 |
 | `test_signal_snapshot.py` | MainWindow 시그널 스냅샷 |
 | `test_public_surfaces.py` | ClipboardDB 공개 API 회귀 |

@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+
 logger = logging.getLogger(__name__)
 
 FALLBACK_THEMES = {
@@ -206,8 +208,7 @@ class FloatingMiniWindow(QWidget):
             data = self.db.get_content(pid)
             if data:
                 content, blob, ptype = data
-                if self.parent_window is not None and hasattr(self.parent_window, "is_internal_copy"):
-                    setattr(self.parent_window, "is_internal_copy", True)
+                mark_internal_copy(self.parent_window)
                 clipboard = QApplication.clipboard()
                 if clipboard is None:
                     return

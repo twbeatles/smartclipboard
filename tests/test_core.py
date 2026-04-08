@@ -12,6 +12,14 @@ from smartclipboard_core.actions import ClipboardActionManager, extract_first_ur
 from smartclipboard_core.database import ClipboardDB
 
 
+TEST_TMP_ROOT = os.path.join(os.getcwd(), ".tmp-unittest")
+os.makedirs(TEST_TMP_ROOT, exist_ok=True)
+
+
+def _workspace_tempdir():
+    return tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT)
+
+
 class FakeActionDB:
     def __init__(self, actions):
         self._actions = actions
@@ -60,10 +68,22 @@ class CoreActionTests(unittest.TestCase):
         self.assertEqual(results[0][1]["type"], "notify")
         self.assertIn("URL", results[0][1]["message"])
 
+    def test_handle_title_result_ignores_updates_after_shutdown(self):
+        db = FakeActionDB([(1, "fetch", r".*", "fetch_title", "{}", 1, 0)])
+        manager = ClipboardActionManager(db)
+        emitted = []
+        manager.action_completed.connect(lambda action_name, result: emitted.append((action_name, result)))
+
+        manager.shutdown(wait_timeout_ms=1)
+        manager._handle_title_result({"title": "Example", "item_id": 9}, "fetch")
+
+        self.assertEqual(db.updated_titles, [])
+        self.assertEqual(emitted, [])
+
 
 class CoreDatabaseTests(unittest.TestCase):
     def setUp(self):
-        self.tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = _workspace_tempdir()
         self.db_path = os.path.join(self.tmpdir.name, "clipboard_history_v6.db")
         self.db = ClipboardDB(db_file=self.db_path, app_dir=self.tmpdir.name)
 
@@ -226,6 +246,31 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertGreaterEqual(restored[5], 0)
         self.assertEqual(restored[6], 2)
 
+    def test_restore_item_clears_deleted_collection_reference(self):
+        collection_id = self.db.add_collection("restore-target")
+        self.assertTrue(collection_id)
+
+        item_id = self.db.add_item("orphan-collection-item", None, "TEXT")
+        self.assertTrue(self.db.assign_to_collection(item_id, collection_id))
+        self.assertTrue(self.db.soft_delete(item_id))
+
+        deleted_id = self.db.get_deleted_items()[0][0]
+        self.assertTrue(self.db.delete_collection(collection_id))
+        self.assertTrue(self.db.restore_item(deleted_id))
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT collection_id FROM history WHERE content = ?",
+                ("orphan-collection-item",),
+            )
+            row = cursor.fetchone()
+
+        self.assertIsNotNone(row)
+        self.assertIsNone(row[0])
+        uncategorized_contents = {row[1] for row in self.db.get_items_uncategorized()}
+        self.assertIn("orphan-collection-item", uncategorized_contents)
+
     def test_cleanup_vacuum_uses_separate_counter(self):
         calls = {"vacuum": 0}
 
@@ -317,7 +362,7 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertEqual(payload["items"][0]["type"], "IMAGE")
         self.assertIn("image_data_b64", payload["items"][0])
 
-        dst_tmp = tempfile.TemporaryDirectory()
+        dst_tmp = _workspace_tempdir()
         dst_db = None
         try:
             dst_db = ClipboardDB(
@@ -394,7 +439,7 @@ class CoreDatabaseTests(unittest.TestCase):
         exported = ExportImportManager(self.db).export_json(export_path, include_metadata=True)
         self.assertEqual(exported, 1)
 
-        dst_tmp = tempfile.TemporaryDirectory()
+        dst_tmp = _workspace_tempdir()
         dst_db = None
         try:
             dst_db = ClipboardDB(
@@ -517,7 +562,7 @@ class CoreDatabaseTests(unittest.TestCase):
 
 class CoreDatabaseSearchTests(unittest.TestCase):
     def setUp(self):
-        self.tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = _workspace_tempdir()
         self.db_path = os.path.join(self.tmpdir.name, "clipboard_history_v6.db")
         self.db = ClipboardDB(db_file=self.db_path, app_dir=self.tmpdir.name)
 

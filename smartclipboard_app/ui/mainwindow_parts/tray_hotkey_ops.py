@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+
 
 def _normalized_hotkey_value(value, fallback: str) -> str:
     normalized = str(value or fallback).strip().lower()
@@ -142,13 +144,13 @@ def paste_last_item_slot_impl(self, logger, qpixmap_cls, qtimer_cls, keyboard):
         if not items:
             return
 
-        pid, content, ptype, *_ = items[0]
+        pid, content, ptype, *_ = max(items, key=lambda item: (item[3] or "", item[0]))
         data = self.db.get_content(pid)
         if not data:
             return
 
         content, blob, ptype = data
-        self.is_internal_copy = True
+        mark_internal_copy(self)
         if ptype == "IMAGE" and blob:
             pixmap = qpixmap_cls()
             pixmap.loadFromData(blob)

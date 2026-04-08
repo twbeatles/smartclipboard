@@ -28,6 +28,11 @@
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅합니다.
 - JSON 마이그레이션(`include_metadata=True`)에는 top-level `collections` 메타데이터가 포함되며 import 시 컬렉션 ID remap이 수행됩니다.
 - JSON export/import는 `IMAGE` 항목의 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 제외합니다.
+- `Ctrl+Shift+Z` paste-last는 pinned 정렬과 무관하게 가장 최근 복사된 항목을 사용해야 합니다.
+- 사용자 정렬은 오름/내림차순과 무관하게 pinned-first 정책을 유지해야 합니다.
+- 컬렉션 삭제는 휴지통 row의 `collection_id`도 같이 정리하고, 복원 시 없는 컬렉션 참조는 `NULL`로 복원해야 합니다.
+- 보안 보관함 복사 버튼은 비밀번호 변경 직후에도 최신 DB row를 다시 읽어 복호화해야 합니다.
+- Windows 테스트 임시 경로는 repo-local `.tmp-unittest/`를 사용합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
 
 ## 검증 커맨드
@@ -49,14 +54,18 @@ python -m unittest discover -s tests -v
 ```
 
 권장 회귀 테스트:
+- `tests/test_core.py`
+- `tests/test_ui_dialogs_widgets.py`
 - `tests/test_payload_sync.py`
 - `tests/test_migration_collections.py`
 - `tests/test_legacy_ui_contracts.py`
 - `tests/test_signal_snapshot.py`
+- `tests/test_public_surfaces.py`
 
 ## 빌드
 
 ```powershell
+python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 pyinstaller --clean smartclipboard.spec
 ```
 

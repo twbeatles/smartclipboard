@@ -72,7 +72,7 @@
 |--------|------|
 | `Ctrl+Shift+V` | 메인 창 표시 |
 | `Alt+V` | 미니 창 토글 |
-| `Ctrl+Shift+Z` | 마지막 항목 즉시 붙여넣기 |
+| `Ctrl+Shift+Z` | 가장 최근 복사 항목 즉시 붙여넣기 |
 
 ---
 
@@ -138,9 +138,10 @@ python scripts/preflight_local.py
 ```
 
 `preflight_local.py`는 payload 재생성, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
-현재 회귀 범위에는 `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`가 포함됩니다.
+현재 핵심 회귀 범위에는 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`가 포함됩니다.
 `pyright`는 별도 단계이며 루트 `pyrightconfig.json` 기준으로 현행 유지보수 대상만 분석합니다.
 현재 repo-wide `pyright`에는 `smartclipboard_core/db_parts/*.py` mixin attribute typing 노이즈가 남아 있으므로, 로컬 게이트는 `preflight_local.py`이고 `pyright`는 변경 파일 기준 보조 검증으로 사용합니다.
+Windows 로컬 테스트는 시스템 temp 권한 이슈를 피하기 위해 repo 루트의 `.tmp-unittest/` 하위 임시 디렉터리를 사용합니다.
 
 필요 시 payload 재생성 단계를 건너뛰려면:
 
@@ -254,6 +255,14 @@ pyright
 - 보안 보관함 복사, 스니펫 사용, URL 복사 경로에서 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅
 - JSON export/import가 `IMAGE` 항목을 `image_data_b64`로 round-trip
 - pinned drag-drop helper의 `Qt` 참조 누락을 수정
+
+### 🛠️ 2026-04-08 구현 리스크 보강
+- 토스트 호출을 `detail`/`duration`/`toast_type` 키워드 기준으로 정리하고, URL 제목 처리 중 예외가 나도 `clipboard.dataChanged`가 반드시 재연결되도록 보강
+- `Ctrl+Shift+Z`가 표시 순서가 아닌 실제 최근 복사 항목(`timestamp DESC`, `id DESC`)을 붙여넣도록 정합성 수정
+- 테이블 사용자 정렬이 내림차순이어도 pinned-first 정책이 깨지지 않도록 pinned/unpinned 그룹을 분리 정렬
+- 컬렉션 삭제 시 `deleted_history.collection_id`도 `NULL`로 정리하고, 복원 시 삭제된 컬렉션 참조는 자동으로 `NULL` 복원
+- 보안 보관함은 마스터 비밀번호 변경 직후 열린 다이얼로그에서도 최신 암호문을 다시 조회해 복사 버튼이 계속 동작하도록 수정
+- 종료/복원 시 비동기 URL 제목 worker 결과가 닫힌 DB로 들어오지 않도록 `ClipboardActionManager.shutdown()` 경로를 추가
 
 ---
 
@@ -435,7 +444,7 @@ MIT License
 ## 문서 정합성 기준 (2026-03-07)
 
 - 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `legacy/README (modular).md`는 동일 기준을 따릅니다.
-- 권장 회귀 테스트 기준은 `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot` 5종입니다.
+- 권장 회귀 테스트 기준은 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`입니다.
 - PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`) 포함과 함께 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하고, payload에서 직접 참조하는 대화상자 모듈(`smartclipboard_app.ui.dialogs.collections` 포함)을 명시적으로 유지합니다.
 
 ## Refactor Layout (2026-03-12)

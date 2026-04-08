@@ -31,6 +31,11 @@
 - 스니펫 `shortcut`은 app-local 단축키이며 기본 앱 단축키·글로벌 핫키·다른 스니펫과 충돌하면 저장되지 않아야 합니다.
 - 전체 기록 삭제는 영구 삭제가 아니라 고정 제외 후 휴지통 이동 정책을 유지합니다.
 - 보안 보관함은 마스터 비밀번호 변경과 복호화 클립보드 30초 자동 삭제 흐름을 포함합니다.
+- `Ctrl+Shift+Z` paste-last는 pinned 정렬과 무관하게 가장 최근 복사된 항목(`timestamp DESC`, tie-break `id DESC`)을 사용해야 합니다.
+- UI 사용자 정렬은 오름/내림차순과 무관하게 pinned-first 정책을 유지해야 합니다.
+- 컬렉션 삭제는 `history`뿐 아니라 `deleted_history`의 `collection_id`도 정리해야 하고, 복원 시 존재하지 않는 컬렉션 참조는 `NULL`로 떨어져야 합니다.
+- 보안 보관함 복사 버튼은 비밀번호 변경 직후에도 최신 DB row를 다시 조회해 복호화해야 합니다.
+- Windows 테스트 임시 경로는 시스템 temp 대신 repo-local `.tmp-unittest/`를 사용합니다.
 - 핫키 저장 경로는 등록 실패 시 이전 글로벌 핫키 상태로 롤백되어야 합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지하고, payload에서 직접 참조하는 `smartclipboard_app.ui.dialogs.collections`도 명시적으로 포함합니다.
 - 구조 검증 스크립트:
@@ -58,11 +63,14 @@ python -m unittest discover -s tests -v
 ```
 
 권장 회귀 포인트:
+- `tests/test_core.py` (코어 DB/액션 회귀)
+- `tests/test_ui_dialogs_widgets.py` (정렬/보관함/핫키 UI 회귀)
 - `tests/test_payload_sync.py` (payload 런타임 시그니처/URL 액션)
 - `tests/test_migration_collections.py` (JSON 마이그레이션 컬렉션 메타/ID remap)
 - `tests/test_legacy_ui_contracts.py` (레거시 UI 계약: 토스트 호출/선택모드/가시성 가드)
 - `tests/test_signal_snapshot.py` (MainWindow 분할 구조 시그널 스냅샷)
 - `tests/test_legacy_loader.py` (payload 실패 시 src 폴백/활성 구현 상수)
+- `tests/test_public_surfaces.py` (공개 API/시그니처 회귀)
 
 ## 5. 빌드
 

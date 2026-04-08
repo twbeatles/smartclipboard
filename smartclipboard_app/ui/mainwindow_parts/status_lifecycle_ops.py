@@ -93,6 +93,9 @@ def run_periodic_cleanup_impl(self, logger):
 def quit_app_impl(self, logger, keyboard, qapplication_cls):
     logger.info("앱 종료 시작...")
     try:
+        if hasattr(self, "settings"):
+            self.settings.setValue("geometry", self.saveGeometry())
+
         if hasattr(self, "_registered_hotkeys") and self._registered_hotkeys:
             for hk in self._registered_hotkeys:
                 try:
@@ -117,6 +120,14 @@ def quit_app_impl(self, logger, keyboard, qapplication_cls):
         if hasattr(self, "mini_window") and self.mini_window:
             self.mini_window.close()
             logger.debug("미니 창 종료")
+
+        if hasattr(self, "action_manager") and self.action_manager:
+            try:
+                self.action_manager.action_completed.disconnect(self.on_action_completed)
+            except Exception:
+                pass
+            self.action_manager.shutdown()
+            logger.debug("비동기 액션 정리 완료")
     except Exception as cleanup_exc:
         logger.warning(f"Cleanup warning: {cleanup_exc}")
 

@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMessageBox, QWidget
+from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMessageBox, QPushButton, QWidget
 
 from smartclipboard_app.ui.dialogs.clipboard_actions import ClipboardActionsDialog
 from smartclipboard_app.ui.dialogs.collections import CollectionManagerDialog
@@ -12,6 +12,8 @@ from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS, HotkeySetting
 from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
 from smartclipboard_app.ui.dialogs.snippets import SnippetDialog, SnippetManagerDialog, validate_snippet_shortcut
+from smartclipboard_app.ui.mainwindow_parts.table_ops import get_display_items_impl
+from smartclipboard_app.ui.mainwindow_parts.tray_hotkey_ops import paste_last_item_slot_impl
 from smartclipboard_app.ui.mainwindow_parts.tray_hotkey_ops import register_hotkeys_impl
 from smartclipboard_app.ui.mainwindow_parts.ui_dragdrop_ops import handle_drop_event_body
 from smartclipboard_app.ui.widgets.floating_mini_window import FloatingMiniWindow
@@ -175,6 +177,121 @@ class _FakeHotkeyWindow:
         self.paste_last_signal = _FakeSignal()
         self._registered_hotkeys = ["old-main", "old-mini", "old-paste"]
         self._last_hotkey_error = ""
+
+
+class _FakeClipboardWriter:
+    def __init__(self):
+        self.text_value = None
+        self.pixmap_value = None
+
+    def setText(self, text):
+        self.text_value = text
+
+    def setPixmap(self, pixmap):
+        self.pixmap_value = pixmap
+
+
+class _ImmediateTimer:
+    calls = []
+
+    @classmethod
+    def reset(cls):
+        cls.calls = []
+
+    @classmethod
+    def singleShot(cls, delay, callback):
+        cls.calls.append(delay)
+        callback()
+
+
+class _FakePasteKeyboard:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, keys):
+        self.sent.append(keys)
+
+
+class _FakePasteLastDB:
+    def __init__(self):
+        self.incremented = []
+        self.contents = {
+            10: ("pinned-old", None, "TEXT"),
+            11: ("latest-normal", None, "TEXT"),
+        }
+
+    def get_items(self, _query, _filter_type):
+        return [
+            (10, "pinned-old", "TEXT", "2026-04-01 09:00:00", 1, 0, 0),
+            (11, "latest-normal", "TEXT", "2026-04-01 10:00:00", 0, 0, 0),
+        ]
+
+    def get_content(self, pid):
+        return self.contents.get(pid)
+
+    def increment_use_count(self, pid):
+        self.incremented.append(pid)
+
+
+class _StaticTextControl:
+    def __init__(self, value):
+        self.value = value
+
+    def text(self):
+        return self.value
+
+    def currentText(self):
+        return self.value
+
+
+class _FakeSortedSearchDB:
+    def search_items(self, *_args, **_kwargs):
+        return [
+            (1, "alpha", "TEXT", "2026-04-01 09:00:00", 1, 0, 0),
+            (2, "bravo", "TEXT", "2026-04-01 09:01:00", 1, 0, 1),
+            (3, "omega", "TEXT", "2026-04-01 09:02:00", 0, 0, 0),
+        ]
+
+
+class _FakeTableWindow:
+    def __init__(self):
+        self.db = _FakeSortedSearchDB()
+        self.search_input = _StaticTextControl("")
+        self.filter_combo = _StaticTextControl("전체")
+        self.current_tag_filter = None
+        self.current_collection_filter = "__all__"
+        self.sort_column = 2
+        self.sort_order = Qt.SortOrder.DescendingOrder
+
+
+class _PasswordRotatingVaultDB:
+    def __init__(self):
+        self.rows = [(1, b"enc-old", "secret", "2026-04-01 10:00:00")]
+
+    def get_vault_items(self):
+        return list(self.rows)
+
+
+class _PasswordRotatingVaultManager:
+    is_unlocked = True
+
+    def __init__(self, db):
+        self.db = db
+
+    def decrypt(self, encrypted_data):
+        return "vault-secret" if encrypted_data == self.db.rows[0][1] else None
+
+    def has_master_password(self):
+        return True
+
+    def lock(self):
+        return None
+
+    def change_master_password(self, current_password, new_password):
+        if current_password != "old-pass" or new_password != "new-pass!1":
+            return False
+        self.db.rows[0] = (1, b"enc-new", "secret", "2026-04-01 10:00:00")
+        return True
 
 
 class _FailingKeyboard:
@@ -365,11 +482,60 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_paste_last_hotkey_uses_most_recent_item_not_pinned_sort_order(self):
+        window = _FakeMiniParent()
+        window.db = _FakePasteLastDB()
+        window.clipboard = _FakeClipboardWriter()
+        keyboard = _FakePasteKeyboard()
+        _ImmediateTimer.reset()
+
+        paste_last_item_slot_impl(window, mock.Mock(), mock.Mock(), _ImmediateTimer, keyboard)
+
+        self.assertEqual(window.clipboard.text_value, "latest-normal")
+        self.assertEqual(window.db.incremented, [11])
+        self.assertTrue(window.is_internal_copy)
+        self.assertEqual(_ImmediateTimer.calls, [100])
+        self.assertEqual(keyboard.sent, ["ctrl+v"])
+
+    def test_display_sort_keeps_pinned_rows_above_unpinned_in_descending_order(self):
+        window = _FakeTableWindow()
+
+        items = get_display_items_impl(window)
+
+        self.assertEqual([row[0] for row in items], [2, 1, 3])
+
     def test_secure_vault_copy_marks_internal_copy_flag(self):
         parent = _FakeMiniParent()
         dialog = SecureVaultDialog(parent, _FakeVaultDB(), _FakeVaultManager())
         try:
             dialog.copy_item(1, b"encrypted")
+            self.assertTrue(parent.is_internal_copy)
+        finally:
+            dialog.close()
+            parent.close()
+
+    def test_secure_vault_copy_button_uses_latest_encrypted_payload_after_password_change(self):
+        parent = _FakeMiniParent()
+        db = _PasswordRotatingVaultDB()
+        manager = _PasswordRotatingVaultManager(db)
+        dialog = SecureVaultDialog(parent, db, manager)
+        clipboard = QApplication.clipboard()
+        try:
+            clipboard.setText("")
+            button_widget = dialog.table.cellWidget(0, 2)
+            copy_buttons = [btn for btn in button_widget.findChildren(QPushButton) if btn.toolTip() == "복호화하여 복사"]
+            old_copy_button = copy_buttons[0]
+
+            with mock.patch(
+                "PyQt6.QtWidgets.QInputDialog.getText",
+                side_effect=[("old-pass", True), ("new-pass!1", True), ("new-pass!1", True)],
+            ), mock.patch("PyQt6.QtWidgets.QMessageBox.information"), mock.patch(
+                "smartclipboard_app.ui.dialogs.secure_vault.QTimer.singleShot"
+            ):
+                dialog.change_master_password()
+                old_copy_button.click()
+
+            self.assertEqual(clipboard.text(), "vault-secret")
             self.assertTrue(parent.is_internal_copy)
         finally:
             dialog.close()

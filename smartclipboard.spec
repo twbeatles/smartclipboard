@@ -16,9 +16,9 @@ Notes:
       targeted pyright is supplemental to preflight.
     - Runtime behavior is restored via legacy marshal payload.
     - If legacy source changes, rebuild payload first and keep tests green
-      (`test_payload_sync`, `test_migration_collections`,
-       `test_legacy_ui_contracts`, `test_signal_snapshot`,
-       `test_public_surfaces`).
+      (`test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`,
+       `test_migration_collections`, `test_legacy_ui_contracts`,
+       `test_signal_snapshot`, `test_public_surfaces`).
 """
 
 from pathlib import Path
