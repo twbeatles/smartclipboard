@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from smartclipboard_core.file_paths import describe_file_paths, file_paths_from_content
+
 FALLBACK_THEMES = {
     "dark": {
         "background": "#0f0f14",
@@ -152,15 +154,20 @@ class TrashDialog(QDialog):
     def load_items(self):
         items = self.db.get_deleted_items()
         self.table.setRowCount(len(items))
-        type_icons = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨"}
+        type_icons = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨", "FILE": "📎"}
 
         for row, (did, content, dtype, deleted_at, expires_at) in enumerate(items):
-            display = (content or "[이미지]")[:50].replace("\n", " ")
-            if len(content or "") > 50:
+            if dtype == "FILE":
+                display = describe_file_paths(file_paths_from_content(content))
+                tooltip = "\n".join(file_paths_from_content(content)[:20]) if content else "[파일 항목]"
+            else:
+                display = (content or "[이미지]")[:50].replace("\n", " ")
+                tooltip = content[:200] if content else "이미지 항목"
+            if len(display) > 50:
                 display += "..."
             content_item = QTableWidgetItem(display)
             content_item.setData(Qt.ItemDataRole.UserRole, did)
-            content_item.setToolTip(content[:200] if content else "이미지 항목")
+            content_item.setToolTip(tooltip)
             self.table.setItem(row, 0, content_item)
 
             type_item = QTableWidgetItem(type_icons.get(dtype, "📝"))

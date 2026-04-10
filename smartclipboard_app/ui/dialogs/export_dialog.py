@@ -51,7 +51,7 @@ class ExportDialog(QDialog):
         filter_group = QGroupBox("🔍 필터")
         filter_layout = QFormLayout(filter_group)
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["전체", "텍스트만", "링크만", "이미지만", "코드만", "색상만"])
+        self.type_combo.addItems(["전체", "텍스트만", "링크만", "이미지만", "코드만", "색상만", "파일만"])
         filter_layout.addRow("유형:", self.type_combo)
         self.date_filter_enabled = QCheckBox("시작일 이후 항목만 내보내기")
         self.date_from_input = QDateEdit()
@@ -81,6 +81,7 @@ class ExportDialog(QDialog):
             "이미지만": "IMAGE",
             "코드만": "CODE",
             "색상만": "COLOR",
+            "파일만": "FILE",
         }
         filter_type = type_map.get(self.type_combo.currentText(), "all")
         date_from = self.date_from_input.date().toPyDate() if self.date_filter_enabled.isChecked() else None

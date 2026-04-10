@@ -95,7 +95,8 @@ from smartclipboard_core import (
 from smartclipboard_core.actions import extract_first_url as core_extract_first_url
 from smartclipboard_app.managers.export_import import ExportImportManager as AppExportImportManager
 from smartclipboard_app.managers.secure_vault import SecureVaultManager as AppSecureVaultManager
-from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy, restore_file_clipboard
+from smartclipboard_core.file_paths import describe_file_paths, file_paths_from_content
 from smartclipboard_app.ui.dialogs.collections import (
     CollectionEditDialog as AppCollectionEditDialog,
     CollectionManagerDialog as AppCollectionManagerDialog,
@@ -199,7 +200,8 @@ FILTER_TAG_MAP = {
     "🖼️ 이미지": "IMAGE",
     "🔗 링크": "LINK",
     "💻 코드": "CODE",
-    "🎨 색상": "COLOR"
+    "🎨 색상": "COLOR",
+    "📎 파일": "FILE",
 }
 
 # v10.0: cleanup 호출 간격 (매번 아닌 N회마다)
@@ -215,15 +217,16 @@ RE_HSL_COLOR = re.compile(r'^hsl\s*\(\s*\d+\s*,\s*\d+%?\s*,\s*\d+%?\s*\)$', re.I
 CODE_INDICATORS = frozenset(["def ", "class ", "function ", "const ", "let ", "var ", "{", "}", "=>", "import ", "from ", "#include", "public ", "private "])
 
 # v10.1: 타입 아이콘 상수 (UI 렌더링 최적화)
-TYPE_ICONS = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨"}
+TYPE_ICONS = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨", "FILE": "📎"}
 
 # v10.1: UI 텍스트 상수 (유지보수성 및 향후 다국어 지원 대비)
 UI_TEXTS = {
-    "empty_history": "📋 클립보드 히스토리가 비어있습니다\n\n텍스트나 이미지를 복사하면 자동으로 저장됩니다\n⌨️ Ctrl+Shift+V로 언제든 호출 가능",
+    "empty_history": "📋 클립보드 히스토리가 비어있습니다\n\n텍스트, 이미지, 파일을 복사하면 자동으로 저장됩니다\n⌨️ Ctrl+Shift+V로 언제든 호출 가능",
     "search_no_results": "🔍 '{query}'에 대한 검색 결과가 없습니다",
     "tag_no_results": "🏷️ '{tag}' 태그를 가진 항목이 없습니다",
     "image_item": "[이미지 캡처됨]",
     "image_tooltip": "🖼️ 이미지 항목 - 더블클릭으로 미리보기",
+    "file_item": "[파일 항목]",
 }
 
 # --- 테마 정의 ---
@@ -1602,36 +1605,52 @@ class MainWindow(QMainWindow):
 
     def copy_item(self):
         pid = self.get_selected_id()
-        if not pid: return
+        if not pid:
+            return False
         data = self.db.get_content(pid)
-        if data:
-            content, blob, ptype = data
+        if not data:
+            return False
+
+        content, blob, ptype = data
+        if ptype == "IMAGE" and blob:
             mark_internal_copy(self)
-            if ptype == "IMAGE" and blob:
-                pixmap = QPixmap()
-                pixmap.loadFromData(blob)
-                self.clipboard.setPixmap(pixmap)
-            else:
-                self.clipboard.setText(content)
-            self.db.increment_use_count(pid)
-            
-            # 복사 시각 피드백
-            rows = self.table.selectionModel().selectedRows()
-            if rows:
-                row = rows[0].row()
-                theme = THEMES.get(self.current_theme, THEMES["dark"])
-                for col in range(self.table.columnCount()):
-                    item = self.table.item(row, col)
-                    if item:
-                        original_bg = item.background()
-                        item.setBackground(QColor(theme["success"]))
-                        QTimer.singleShot(300, lambda i=item, bg=original_bg: i.setBackground(bg))
-            
-            self.statusBar().showMessage("✅ 복사됨", 2000)
+            pixmap = QPixmap()
+            pixmap.loadFromData(blob)
+            self.clipboard.setPixmap(pixmap)
+        elif ptype == "FILE":
+            restore_result = restore_file_clipboard(self, self.clipboard, file_paths_from_content(content))
+            if not restore_result["applied"]:
+                self.statusBar().showMessage("⚠️ 복원 가능한 파일이 없어 클립보드를 변경하지 않았습니다.", 2500)
+                return False
+            if restore_result["missing_paths"]:
+                self.statusBar().showMessage(
+                    f"⚠️ 일부 파일이 없어 {len(restore_result['available_paths'])}개만 복원했습니다.",
+                    2500,
+                )
+        else:
+            mark_internal_copy(self)
+            self.clipboard.setText(content)
+        self.db.increment_use_count(pid)
+        
+        # 복사 시각 피드백
+        rows = self.table.selectionModel().selectedRows()
+        if rows:
+            row = rows[0].row()
+            theme = THEMES.get(self.current_theme, THEMES["dark"])
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item:
+                    original_bg = item.background()
+                    item.setBackground(QColor(theme["success"]))
+                    QTimer.singleShot(300, lambda i=item, bg=original_bg: i.setBackground(bg))
+        
+        self.statusBar().showMessage("✅ 복사됨", 2000)
+        return True
 
     def paste_selected(self):
         """Enter키로 붙여넣기"""
-        self.copy_item()
+        if not self.copy_item():
+            return
         self.hide()
         QTimer.singleShot(200, lambda: keyboard.send('ctrl+v'))
     

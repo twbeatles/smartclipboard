@@ -3,6 +3,12 @@ import datetime
 import os
 import sqlite3
 
+from smartclipboard_core.file_paths import (
+    file_content_from_paths,
+    file_duplicate_signature,
+    file_paths_from_content,
+)
+
 from .shared import CLEANUP_INTERVAL, DEFAULT_MAX_HISTORY, FILTER_TAG_MAP, history_order_by, logger
 
 class HistoryOpsMixin:
@@ -13,10 +19,46 @@ class HistoryOpsMixin:
                 cursor = self.conn.cursor()
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 updated_existing = False
+                file_path = ""
 
-                if type_tag != "IMAGE":
+                if type_tag == "FILE":
+                    normalized_paths = file_paths_from_content(content)
+                    normalized_content = file_content_from_paths(normalized_paths)
+                    if not normalized_content:
+                        return False
+
+                    file_path = normalized_paths[0]
+                    target_signature = file_duplicate_signature(normalized_paths)
+                    existing = None
                     cursor.execute(
-                        "SELECT id FROM history WHERE content = ? AND type != 'IMAGE' "
+                        "SELECT id, content FROM history WHERE type = 'FILE' "
+                        "ORDER BY timestamp DESC, id DESC"
+                    )
+                    for existing_id, existing_content in cursor.fetchall():
+                        if file_duplicate_signature(file_paths_from_content(existing_content)) == target_signature:
+                            existing = (existing_id,)
+                            break
+
+                    if existing:
+                        item_id = int(existing[0])
+                        cursor.execute(
+                            "UPDATE history SET content = ?, image_data = NULL, type = ?, timestamp = ?, file_path = ? "
+                            "WHERE id = ?",
+                            (normalized_content, type_tag, timestamp, file_path, item_id),
+                        )
+                        updated_existing = True
+                    else:
+                        cursor.execute(
+                            "INSERT INTO history (content, image_data, type, timestamp, file_path) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (normalized_content, None, type_tag, timestamp, file_path),
+                        )
+                        item_id = cursor.lastrowid
+                        if item_id is None:
+                            raise sqlite3.Error("Inserted history row has no id")
+                elif type_tag != "IMAGE":
+                    cursor.execute(
+                        "SELECT id FROM history WHERE content = ? AND type NOT IN ('IMAGE', 'FILE') "
                         "ORDER BY timestamp DESC, id DESC LIMIT 1",
                         (content,),
                     )
@@ -24,13 +66,14 @@ class HistoryOpsMixin:
                     if existing:
                         item_id = int(existing[0])
                         cursor.execute(
-                            "UPDATE history SET content = ?, image_data = NULL, type = ?, timestamp = ? WHERE id = ?",
+                            "UPDATE history SET content = ?, image_data = NULL, type = ?, timestamp = ?, file_path = '' "
+                            "WHERE id = ?",
                             (content, type_tag, timestamp, item_id),
                         )
                         updated_existing = True
                     else:
                         cursor.execute(
-                            "INSERT INTO history (content, image_data, type, timestamp) VALUES (?, ?, ?, ?)",
+                            "INSERT INTO history (content, image_data, type, timestamp, file_path) VALUES (?, ?, ?, ?, '')",
                             (content, image_data, type_tag, timestamp),
                         )
                         item_id = cursor.lastrowid
@@ -38,7 +81,7 @@ class HistoryOpsMixin:
                             raise sqlite3.Error("Inserted history row has no id")
                 else:
                     cursor.execute(
-                        "INSERT INTO history (content, image_data, type, timestamp) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO history (content, image_data, type, timestamp, file_path) VALUES (?, ?, ?, ?, '')",
                         (content, image_data, type_tag, timestamp),
                     )
                     item_id = cursor.lastrowid
@@ -82,7 +125,7 @@ class HistoryOpsMixin:
                     params.append(FILTER_TAG_MAP[type_filter])
                 elif type_filter != "전체":
                     # 레거시 필터 호환성
-                    legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
+                    legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR", "파일": "FILE"}
                     if type_filter in legacy_map:
                         sql += " AND type = ?"
                         params.append(legacy_map[type_filter])
@@ -267,7 +310,7 @@ class HistoryOpsMixin:
             try:
                 cursor = self.conn.cursor()
                 cursor.execute(
-                    "SELECT content, timestamp FROM history WHERE type != 'IMAGE' "
+                    "SELECT content, timestamp FROM history WHERE type NOT IN ('IMAGE', 'FILE') "
                     "ORDER BY timestamp DESC, id DESC"
                 )
                 return cursor.fetchall()

@@ -2,6 +2,8 @@ from __future__ import annotations
 import datetime
 import sqlite3
 
+from smartclipboard_core.file_paths import file_paths_from_content
+
 from .shared import logger
 
 class VaultTrashMixin:
@@ -94,15 +96,20 @@ class VaultTrashMixin:
                 if item:
                     timestamp = item[3] or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     collection_id = item[7]
+                    file_path = ""
                     if collection_id is not None and hasattr(self, "_collection_exists"):
                         try:
                             if not self._collection_exists(cursor, int(collection_id)):
                                 collection_id = None
                         except (TypeError, ValueError):
                             collection_id = None
+                    if item[2] == "FILE":
+                        restored_paths = file_paths_from_content(item[0])
+                        if restored_paths:
+                            file_path = restored_paths[0]
                     cursor.execute(
-                        "INSERT INTO history (content, image_data, type, timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO history (content, image_data, type, timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count, file_path) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             item[0],
                             item[1],
@@ -115,6 +122,7 @@ class VaultTrashMixin:
                             item[8] or 0,
                             item[9] or 0,
                             item[10] or 0,
+                            file_path,
                         ),
                     )
                     cursor.execute("DELETE FROM deleted_history WHERE id = ?", (deleted_id,))

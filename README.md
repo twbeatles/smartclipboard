@@ -12,13 +12,14 @@
 ## ✨ 주요 기능
 
 ### 📋 클립보드 히스토리
-- 텍스트, 이미지, 링크, 코드, 색상 자동 분류 및 저장
+- 텍스트, 이미지, 링크, 코드, 색상, 파일/폴더 자동 분류 및 저장
 - 최대 500개 항목 저장 (설정 가능)
 - 📌 중요 항목 고정 및 드래그 정렬 기능
 - 🏷️ 태그 시스템으로 항목 정리
 - ⭐ 북마크 기능으로 즐겨찾기 관리
 - 📁 컬렉션 기능으로 항목 그룹화
 - 📝 항목별 메모 첨부 기능
+- 파일 복사는 다중 선택을 하나의 `FILE` 항목으로 저장하고, paste-last/미니 창/선택 붙여넣기에서 로컬 file URL 클립보드를 복원
 
 ### 🔒 보안 보관함
 - PBKDF2-HMAC-SHA256 + Fernet 기반 암호화로 민감한 데이터 안전 보관
@@ -55,7 +56,10 @@
 - JSON, CSV, Markdown 내보내기 / JSON, CSV 가져오기 지원
 - 날짜 및 타입 필터링
 - JSON은 `IMAGE` 항목을 `image_data_b64`로 보존하며, CSV/Markdown은 이미지 플레이스홀더만 기록
+- `FILE` 항목은 바이너리 대신 경로 목록만 내보내며, JSON은 `file_paths`/`file_path`, CSV/Markdown은 newline 경로 목록을 사용
 - JSON 마이그레이션 모드 (태그/메모/북마크 + 컬렉션 정의/ID 매핑 정보 포함)
+- JSON import는 ISO-8601/tz timestamp를 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체
+- CSV import는 이미지 플레이스홀더 row를 복원하지 않으며, JSON import는 remap 실패/누락된 `collection_id`를 `NULL`로 정리
 - 백업 및 마이그레이션 용이
 
 ### 🎨 UI/UX
@@ -264,6 +268,15 @@ pyright
 - 보안 보관함은 마스터 비밀번호 변경 직후 열린 다이얼로그에서도 최신 암호문을 다시 조회해 복사 버튼이 계속 동작하도록 수정
 - 종료/복원 시 비동기 URL 제목 worker 결과가 닫힌 DB로 들어오지 않도록 `ClipboardActionManager.shutdown()` 경로를 추가
 
+### 🛠️ 2026-04-10 안정화 + 파일 Clipboard 지원
+- `FILE` 타입을 추가해 로컬 파일/폴더 복사를 다중 경로 하나의 히스토리 항목으로 저장
+- `history.file_path`를 FILE 첫 경로 저장용으로 활성화하고, 동일 path 집합 재복사 시 기존 metadata를 유지한 채 row를 갱신
+- paste-last/미니 창/선택 붙여넣기/더블클릭 복원 경로가 `QMimeData + file URL` 클립보드를 다시 구성하도록 보강
+- 일부 파일만 남아 있으면 남은 경로만 복원하고, 모두 사라졌으면 경고만 표시하고 clipboard/paste는 건드리지 않음
+- JSON export/import는 `FILE`의 `file_paths`/`file_path`/newline content를 모두 지원하고, CSV/Markdown은 경로 목록만 기록
+- CSV import는 `IMAGE` 플레이스홀더 row를 건너뛰고, JSON import는 ISO timestamp를 로컬 표준 시각으로 정규화하며 고아 `collection_id`를 `NULL`로 정리
+- 보안 보관함 `unlock()` 실패 시 `fernet/is_unlocked` 상태를 원자적으로 초기화해 잘못된 재시도 후 반쯤 열린 상태가 남지 않도록 수정
+
 ---
 
 ## 📝 v10.3 변경사항
@@ -398,6 +411,8 @@ smartclipboard/
 - Pylance/pyright는 루트 `pyrightconfig.json`을 기준으로 현행 유지보수 코드만 검사합니다.
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 먼저 거쳐 자기 재수집 루프를 피합니다.
 - JSON export/import는 `IMAGE` 항목용 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 의도적으로 제외합니다.
+- `FILE` 항목은 경로 목록 중심으로 동작하며, JSON은 `file_paths`/`file_path`, CSV/Markdown은 newline path content를 사용합니다.
+- import 무결성 정책상 CSV 이미지 플레이스홀더는 복원하지 않고, JSON에서 매핑 불가 `collection_id`는 `NULL`, 비표준 timestamp는 정규화 또는 import 시각으로 대체합니다.
 - 기존 모듈러 레이아웃 README는 `legacy/README (modular).md`에 보관되어 있습니다.
 
 ---

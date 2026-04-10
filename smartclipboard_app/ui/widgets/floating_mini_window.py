@@ -19,7 +19,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy, restore_file_clipboard
+from smartclipboard_core.file_paths import describe_file_paths, file_paths_from_content
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ FALLBACK_THEMES = {
     }
 }
 FALLBACK_GLASS_STYLES = {"dark": {"glass_bg": "rgba(22, 33, 62, 0.85)"}}
-FALLBACK_TYPE_ICONS = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨"}
+FALLBACK_TYPE_ICONS = {"TEXT": "📝", "LINK": "🔗", "IMAGE": "🖼️", "CODE": "💻", "COLOR": "🎨", "FILE": "📎"}
 
 
 class _MiniParent(Protocol):
@@ -194,10 +195,17 @@ class FloatingMiniWindow(QWidget):
         for pid, content, ptype, _timestamp, pinned, _use_count, _pin_order in items:
             icon = self.type_icons.get(ptype, "📝")
             pin_mark = "📌 " if pinned else ""
-            display = content.replace("\n", " ")[:35] + ("..." if len(content) > 35 else "")
+            if ptype == "FILE":
+                display = describe_file_paths(file_paths_from_content(content))
+            else:
+                display = content.replace("\n", " ")[:35] + ("..." if len(content) > 35 else "")
             item = QListWidgetItem(f"{pin_mark}{icon} {display}")
             item.setData(Qt.ItemDataRole.UserRole, pid)
-            item.setToolTip(content[:200])
+            if ptype == "FILE":
+                file_paths = file_paths_from_content(content)
+                item.setToolTip("\n".join(file_paths[:20]) if file_paths else (content or "[파일 항목]"))
+            else:
+                item.setToolTip(content[:200])
             self.list_widget.addItem(item)
 
     def on_item_double_clicked(self, item):
@@ -208,15 +216,29 @@ class FloatingMiniWindow(QWidget):
             data = self.db.get_content(pid)
             if data:
                 content, blob, ptype = data
-                mark_internal_copy(self.parent_window)
                 clipboard = QApplication.clipboard()
                 if clipboard is None:
                     return
                 if ptype == "IMAGE" and blob:
+                    mark_internal_copy(self.parent_window)
                     pixmap = QPixmap()
                     pixmap.loadFromData(blob)
                     clipboard.setPixmap(pixmap)
+                elif ptype == "FILE":
+                    restore_result = restore_file_clipboard(self.parent_window, clipboard, file_paths_from_content(content))
+                    if not restore_result["applied"]:
+                        return
+                    if restore_result["missing_paths"]:
+                        parent = _mini_parent(self.parent_window)
+                        if parent is not None and hasattr(parent, "statusBar"):
+                            status_bar = parent.statusBar()
+                            if status_bar is not None:
+                                status_bar.showMessage(
+                                    f"⚠️ 일부 파일이 없어 {len(restore_result['available_paths'])}개만 복원했습니다.",
+                                    2500,
+                                )
                 else:
+                    mark_internal_copy(self.parent_window)
                     clipboard.setText(content)
                 self.db.increment_use_count(pid)
                 self.hide()

@@ -329,7 +329,7 @@ class SchemaSearchMixin:
                         sql += " AND h.type = ?"
                         params.append(FILTER_TAG_MAP[type_filter])
                     elif type_filter != "전체":
-                        legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
+                        legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR", "파일": "FILE"}
                         if type_filter in legacy_map:
                             sql += " AND h.type = ?"
                             params.append(legacy_map[type_filter])
@@ -385,7 +385,7 @@ class SchemaSearchMixin:
                 sql += " AND type = ?"
                 params2.append(FILTER_TAG_MAP[type_filter])
             elif type_filter != "전체":
-                legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR"}
+                legacy_map = {"텍스트": "TEXT", "이미지": "IMAGE", "링크": "LINK", "코드": "CODE", "색상": "COLOR", "파일": "FILE"}
                 if type_filter in legacy_map:
                     sql += " AND type = ?"
                     params2.append(legacy_map[type_filter])

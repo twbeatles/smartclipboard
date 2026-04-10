@@ -78,7 +78,7 @@ def build_main_ui(self, HAS_QRCODE):
     
     self.filter_combo = QComboBox()
     self.filter_combo.setObjectName("FilterCombo")  # v10.6: 스타일 연결용
-    self.filter_combo.addItems(["전체", "📌 고정", "⭐ 북마크", "📝 텍스트", "🖼️ 이미지", "🔗 링크", "💻 코드", "🎨 색상"])
+    self.filter_combo.addItems(["전체", "📌 고정", "⭐ 북마크", "📝 텍스트", "🖼️ 이미지", "🔗 링크", "💻 코드", "🎨 색상", "📎 파일"])
     self.filter_combo.setFixedWidth(150)
     self.filter_combo.setToolTip("유형별 필터")
     self.filter_combo.currentTextChanged.connect(self.load_data)

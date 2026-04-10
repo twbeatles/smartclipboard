@@ -30,7 +30,7 @@
 ## 1. 프로젝트 개요
 
 SmartClipboard Pro는 **PyQt6** 기반 Windows 전용 클립보드 관리 데스크톱 앱이다.
-텍스트·이미지·링크·코드·색상 코드를 자동 분류하여 SQLite DB에 영구 저장하고,
+텍스트·이미지·링크·코드·색상·파일/폴더를 자동 분류하여 SQLite DB에 영구 저장하고,
 태그·컬렉션·북마크·암호화 보관함·자동화 액션 등 고급 기능을 제공한다.
 
 | 항목 | 값 |
@@ -107,6 +107,7 @@ smartclipboard/
 ├── smartclipboard_core/
 │   ├── database.py                ← ClipboardDB 컴포지터 (mixin 조합)
 │   ├── actions.py                 ← ClipboardActionManager
+│   ├── file_paths.py              ← FILE 경로 정규화/설명/중복 시그니처 헬퍼
 │   ├── worker.py                  ← 비동기 Worker + WorkerSignals
 │   │
 │   └── db_parts/                 ← DB mixin 모듈 (6개)
@@ -241,6 +242,7 @@ class ClipboardDB(
 
 **중복 방지 정책 (`add_item`):**
 - 동일 비이미지 텍스트 재복사 시: 기존 row의 tags/note/bookmark/collection/pin/use_count **유지**, timestamp/content/type만 갱신.
+- 동일 `FILE` path 집합 재복사 시: 기존 row의 metadata를 유지하고 `content/file_path/timestamp`만 갱신.
 
 #### `smartclipboard_core/actions.py` — `ClipboardActionManager`
 
@@ -343,7 +345,7 @@ class Worker(QRunnable):
 
 - **`floating_mini_window.py`** — 컴팩트 플로팅 클립보드 뷰어 (Alt+V)
 - **`toast.py`** — 슬라이드 애니메이션 임시 알림
-- **`clipboard_guard.py`** — `mark_internal_copy()` 내부 복사 플래그 (자기 재수집 루프 방지)
+- **`clipboard_guard.py`** — `mark_internal_copy()` 및 file URL clipboard 복원 헬퍼 (`restore_file_clipboard`)
 
 ---
 
@@ -354,11 +356,12 @@ class Worker(QRunnable):
 | 형식 | 기능 |
 |------|------|
 | JSON (내보내기) | 메타데이터 포함 (`include_metadata=True`): tags/note/bookmark/collections/use_count |
-| JSON (가져오기) | 컬렉션 ID remap, IMAGE는 `image_data_b64` round-trip |
-| CSV | 날짜·타입 필터 공통 적용, IMAGE는 플레이스홀더 행으로 기록 |
-| Markdown | 날짜·타입 필터 공통 적용, IMAGE는 설명용 플레이스홀더만 기록 |
+| JSON (가져오기) | 컬렉션 ID remap, IMAGE는 `image_data_b64` round-trip, FILE은 `file_paths/file_path/content`를 모두 수용 |
+| CSV | 날짜·타입 필터 공통 적용, IMAGE는 플레이스홀더 행으로 기록하고 import 시 skip, FILE은 newline path 목록 |
+| Markdown | 날짜·타입 필터 공통 적용, IMAGE는 설명용 플레이스홀더만 기록, FILE은 fenced text 경로 목록 |
 
 **JSON 마이그레이션 포맷** — `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color) 포함.
+**무결성 정책** — ISO-8601/tz timestamp는 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체한다. remap 실패 또는 누락된 `collection_id`는 `NULL`로 정리한다.
 
 #### `smartclipboard_app/managers/secure_vault.py` — `SecureVaultManager`
 
@@ -541,6 +544,17 @@ clipboard.setText(text)
 - `SecureVaultDialog.copy_item()`은 버튼 생성 시점의 암호문을 신뢰하지 않고 최신 보관 row를 다시 읽는다.
 - `ClipboardActionManager.shutdown()`은 종료 시 threadpool 완료를 기다리고, late result는 닫힌 DB에 반영하지 않는다.
 - Windows 테스트는 시스템 temp ACL 이슈를 피하려고 repo-local `.tmp-unittest/` 경로를 사용한다.
+
+## 8.3 2026-04-10 FILE Clipboard + import 정합성 메모
+
+- `FILE` 타입이 추가되어 로컬 파일/폴더 복사를 다중 경로 하나의 history row로 저장한다.
+- `smartclipboard_core.file_paths`는 local path 정규화, duplicate signature, preview label 생성의 단일 기준점이다.
+- `clipboard_runtime_ops.process_clipboard_impl()`는 `image -> local file urls -> text` 순서로 수집하며, Windows 파일 복사 시 `hasUrls()`를 `hasText()`보다 우선한다.
+- `history.file_path`는 FILE 첫 경로를 저장하고, `content`는 newline-joined absolute paths를 유지한다.
+- paste-last, 선택 붙여넣기, 미니 창 더블클릭은 `restore_file_clipboard()`를 통해 `QMimeData + file URL` 클립보드를 재구성한다.
+- 일부 파일만 남아 있으면 남은 경로만 복원하고, 모두 사라졌으면 경고만 표시하고 clipboard/paste는 변경하지 않는다.
+- CSV import는 IMAGE 플레이스홀더 row를 건너뛰고, JSON import는 remap 불가 `collection_id`를 `NULL`로 정리하며, 비표준 timestamp는 정규화 또는 import 시각으로 대체한다.
+- `SecureVaultManager.unlock()` 실패 시 `fernet/is_unlocked` 상태를 함께 초기화해 잘못된 재시도 후 반쯤 열린 상태가 남지 않도록 한다.
 
 ---
 

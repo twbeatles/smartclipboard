@@ -134,6 +134,8 @@ class SecureVaultManager:
             salt = base64.b64decode(salt_b64)
             key = self.derive_key(password, salt)
             if key is None:
+                self.fernet = None
+                self.is_unlocked = False
                 return False
             fernet = Fernet(key)
             if fernet.decrypt(verification.encode()) == b"VAULT_VERIFIED":
@@ -145,7 +147,8 @@ class SecureVaultManager:
             self.logger.debug("Vault unlock decode error: %s", exc)
         except Exception as exc:
             self.logger.debug("Vault unlock crypto error: %s", exc)
-            self.fernet = None
+        self.fernet = None
+        self.is_unlocked = False
         return False
 
     def lock(self):

@@ -1,11 +1,15 @@
 import json
+import os
 import re
+import tempfile
 import unittest
+from contextlib import contextmanager
 from unittest import mock
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMessageBox, QPushButton, QWidget
 
+from smartclipboard_core.file_paths import file_content_from_paths
 from smartclipboard_app.ui.dialogs.clipboard_actions import ClipboardActionsDialog
 from smartclipboard_app.ui.dialogs.collections import CollectionManagerDialog
 from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS, HotkeySettingsDialog
@@ -183,12 +187,30 @@ class _FakeClipboardWriter:
     def __init__(self):
         self.text_value = None
         self.pixmap_value = None
+        self.mime_data = None
 
     def setText(self, text):
         self.text_value = text
 
     def setPixmap(self, pixmap):
         self.pixmap_value = pixmap
+
+    def setMimeData(self, mime_data):
+        self.mime_data = mime_data
+
+    def text(self):
+        return self.text_value or ""
+
+    def mimeData(self):
+        return self.mime_data
+
+
+@contextmanager
+def _workspace_tempdir():
+    root = os.path.join(os.getcwd(), ".tmp-unittest")
+    os.makedirs(root, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=root) as tmpdir:
+        yield tmpdir
 
 
 class _ImmediateTimer:
@@ -224,6 +246,25 @@ class _FakePasteLastDB:
         return [
             (10, "pinned-old", "TEXT", "2026-04-01 09:00:00", 1, 0, 0),
             (11, "latest-normal", "TEXT", "2026-04-01 10:00:00", 0, 0, 0),
+        ]
+
+    def get_content(self, pid):
+        return self.contents.get(pid)
+
+    def increment_use_count(self, pid):
+        self.incremented.append(pid)
+
+
+class _FakeFilePasteLastDB:
+    def __init__(self, content):
+        self.incremented = []
+        self.contents = {
+            20: (content, None, "FILE"),
+        }
+
+    def get_items(self, _query, _filter_type):
+        return [
+            (20, "files", "FILE", "2026-04-01 10:00:00", 0, 0, 0),
         ]
 
     def get_content(self, pid):
@@ -482,6 +523,31 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_floating_mini_window_restores_file_clipboard(self):
+        with _workspace_tempdir() as tmpdir:
+            file_a = os.path.join(tmpdir, "note.txt")
+            with open(file_a, "w", encoding="utf-8") as fh:
+                fh.write("note")
+
+            class _FakeMiniFileDB(_FakeMiniDB):
+                def get_content(self, _pid):
+                    return (file_content_from_paths([file_a]), None, "FILE")
+
+            parent = _FakeMiniParent()
+            window = FloatingMiniWindow(_FakeMiniFileDB(), parent=parent)
+            clipboard = _FakeClipboardWriter()
+            try:
+                with mock.patch("smartclipboard_app.ui.widgets.floating_mini_window.QApplication.clipboard", return_value=clipboard):
+                    item = QListWidgetItem("row")
+                    item.setData(Qt.ItemDataRole.UserRole, 7)
+                    window.on_item_double_clicked(item)
+                restored_paths = [os.path.normcase(os.path.normpath(url.toLocalFile())) for url in clipboard.mimeData().urls()]
+                self.assertEqual(restored_paths, [os.path.normcase(os.path.normpath(file_a))])
+                self.assertTrue(parent.is_internal_copy)
+            finally:
+                window.close()
+                parent.close()
+
     def test_paste_last_hotkey_uses_most_recent_item_not_pinned_sort_order(self):
         window = _FakeMiniParent()
         window.db = _FakePasteLastDB()
@@ -496,6 +562,68 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertTrue(window.is_internal_copy)
         self.assertEqual(_ImmediateTimer.calls, [100])
         self.assertEqual(keyboard.sent, ["ctrl+v"])
+
+    def test_paste_last_hotkey_restores_file_clipboard_urls(self):
+        with _workspace_tempdir() as tmpdir:
+            file_a = os.path.join(tmpdir, "alpha.txt")
+            file_b = os.path.join(tmpdir, "beta.txt")
+            with open(file_a, "w", encoding="utf-8") as fh:
+                fh.write("alpha")
+            with open(file_b, "w", encoding="utf-8") as fh:
+                fh.write("beta")
+
+            window = _FakeMiniParent()
+            window.db = _FakeFilePasteLastDB(file_content_from_paths([file_a, file_b]))
+            window.clipboard = _FakeClipboardWriter()
+            keyboard = _FakePasteKeyboard()
+            _ImmediateTimer.reset()
+
+            paste_last_item_slot_impl(window, mock.Mock(), mock.Mock(), _ImmediateTimer, keyboard)
+
+            self.assertIsNotNone(window.clipboard.mime_data)
+            restored_paths = [os.path.normcase(os.path.normpath(url.toLocalFile())) for url in window.clipboard.mime_data.urls()]
+            self.assertEqual(
+                restored_paths,
+                [os.path.normcase(os.path.normpath(file_a)), os.path.normcase(os.path.normpath(file_b))],
+            )
+            self.assertEqual(window.db.incremented, [20])
+            self.assertTrue(window.is_internal_copy)
+            self.assertEqual(keyboard.sent, ["ctrl+v"])
+
+    def test_paste_last_hotkey_skips_missing_file_clipboard(self):
+        missing_path = os.path.join(os.getcwd(), ".tmp-unittest", "does-not-exist.txt")
+        window = _FakeMiniParent()
+        window.db = _FakeFilePasteLastDB(file_content_from_paths([missing_path]))
+        window.clipboard = _FakeClipboardWriter()
+        keyboard = _FakePasteKeyboard()
+        _ImmediateTimer.reset()
+
+        paste_last_item_slot_impl(window, mock.Mock(), mock.Mock(), _ImmediateTimer, keyboard)
+
+        self.assertIsNone(window.clipboard.mime_data)
+        self.assertEqual(window.db.incremented, [])
+        self.assertEqual(keyboard.sent, [])
+
+    def test_paste_last_hotkey_restores_available_file_paths_when_some_missing(self):
+        with _workspace_tempdir() as tmpdir:
+            file_a = os.path.join(tmpdir, "alpha.txt")
+            missing_path = os.path.join(tmpdir, "missing.txt")
+            with open(file_a, "w", encoding="utf-8") as fh:
+                fh.write("alpha")
+
+            window = _FakeMiniParent()
+            window.db = _FakeFilePasteLastDB(file_content_from_paths([file_a, missing_path]))
+            window.clipboard = _FakeClipboardWriter()
+            keyboard = _FakePasteKeyboard()
+            _ImmediateTimer.reset()
+
+            paste_last_item_slot_impl(window, mock.Mock(), mock.Mock(), _ImmediateTimer, keyboard)
+
+            self.assertIsNotNone(window.clipboard.mime_data)
+            restored_paths = [os.path.normcase(os.path.normpath(url.toLocalFile())) for url in window.clipboard.mime_data.urls()]
+            self.assertEqual(restored_paths, [os.path.normcase(os.path.normpath(file_a))])
+            self.assertEqual(window.db.incremented, [20])
+            self.assertEqual(keyboard.sent, ["ctrl+v"])
 
     def test_display_sort_keeps_pinned_rows_above_unpinned_in_descending_order(self):
         window = _FakeTableWindow()
@@ -519,21 +647,22 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         db = _PasswordRotatingVaultDB()
         manager = _PasswordRotatingVaultManager(db)
         dialog = SecureVaultDialog(parent, db, manager)
-        clipboard = QApplication.clipboard()
+        clipboard = _FakeClipboardWriter()
         try:
             clipboard.setText("")
-            button_widget = dialog.table.cellWidget(0, 2)
-            copy_buttons = [btn for btn in button_widget.findChildren(QPushButton) if btn.toolTip() == "복호화하여 복사"]
-            old_copy_button = copy_buttons[0]
+            with mock.patch("smartclipboard_app.ui.dialogs.secure_vault.QApplication.clipboard", return_value=clipboard):
+                button_widget = dialog.table.cellWidget(0, 2)
+                copy_buttons = [btn for btn in button_widget.findChildren(QPushButton) if btn.toolTip() == "복호화하여 복사"]
+                old_copy_button = copy_buttons[0]
 
-            with mock.patch(
-                "PyQt6.QtWidgets.QInputDialog.getText",
-                side_effect=[("old-pass", True), ("new-pass!1", True), ("new-pass!1", True)],
-            ), mock.patch("PyQt6.QtWidgets.QMessageBox.information"), mock.patch(
-                "smartclipboard_app.ui.dialogs.secure_vault.QTimer.singleShot"
-            ):
-                dialog.change_master_password()
-                old_copy_button.click()
+                with mock.patch(
+                    "PyQt6.QtWidgets.QInputDialog.getText",
+                    side_effect=[("old-pass", True), ("new-pass!1", True), ("new-pass!1", True)],
+                ), mock.patch("PyQt6.QtWidgets.QMessageBox.information"), mock.patch(
+                    "smartclipboard_app.ui.dialogs.secure_vault.QTimer.singleShot"
+                ):
+                    dialog.change_master_password()
+                    old_copy_button.click()
 
             self.assertEqual(clipboard.text(), "vault-secret")
             self.assertTrue(parent.is_internal_copy)
@@ -624,20 +753,21 @@ class UiDialogsWidgetsTests(unittest.TestCase):
     def test_secure_vault_clipboard_clear_is_delayed_and_conditional(self):
         parent = _FakeMiniParent()
         dialog = SecureVaultDialog(parent, _FakeVaultDB(), _FakeVaultManager())
-        clipboard = QApplication.clipboard()
+        clipboard = _FakeClipboardWriter()
         try:
-            with mock.patch("smartclipboard_app.ui.dialogs.secure_vault.QTimer.singleShot") as single_shot:
-                dialog.copy_item(1, b"encrypted")
-            single_shot.assert_called_once()
-            self.assertEqual(single_shot.call_args[0][0], 30000)
+            with mock.patch("smartclipboard_app.ui.dialogs.secure_vault.QApplication.clipboard", return_value=clipboard):
+                with mock.patch("smartclipboard_app.ui.dialogs.secure_vault.QTimer.singleShot") as single_shot:
+                    dialog.copy_item(1, b"encrypted")
+                single_shot.assert_called_once()
+                self.assertEqual(single_shot.call_args[0][0], 30000)
 
-            clipboard.setText("different-text")
-            dialog._clear_clipboard_if_unchanged("vault-secret")
-            self.assertEqual(clipboard.text(), "different-text")
+                clipboard.setText("different-text")
+                dialog._clear_clipboard_if_unchanged("vault-secret")
+                self.assertEqual(clipboard.text(), "different-text")
 
-            clipboard.setText("vault-secret")
-            dialog._clear_clipboard_if_unchanged("vault-secret")
-            self.assertEqual(clipboard.text(), "")
+                clipboard.setText("vault-secret")
+                dialog._clear_clipboard_if_unchanged("vault-secret")
+                self.assertEqual(clipboard.text(), "")
         finally:
             dialog.close()
             parent.close()

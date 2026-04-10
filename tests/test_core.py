@@ -10,6 +10,7 @@ from smartclipboard_app.managers.export_import import ExportImportManager
 from smartclipboard_app.managers.secure_vault import HAS_CRYPTO, SecureVaultManager
 from smartclipboard_core.actions import ClipboardActionManager, extract_first_url
 from smartclipboard_core.database import ClipboardDB
+from smartclipboard_core.file_paths import file_content_from_paths
 
 
 TEST_TMP_ROOT = os.path.join(os.getcwd(), ".tmp-unittest")
@@ -347,6 +348,39 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertEqual(items[0][0], item_id)
         self.assertEqual(items[1][0], other_id)
 
+    def test_duplicate_file_updates_existing_row_and_preserves_metadata(self):
+        file_a = os.path.join(self.tmpdir.name, "alpha.txt")
+        file_b = os.path.join(self.tmpdir.name, "beta.txt")
+        with open(file_a, "w", encoding="utf-8") as fh:
+            fh.write("alpha")
+        with open(file_b, "w", encoding="utf-8") as fh:
+            fh.write("beta")
+
+        first_id = self.db.add_item(file_content_from_paths([file_a, file_b]), None, "FILE")
+        self.assertTrue(first_id)
+        self.db.set_item_tags(first_id, "files")
+        self.db.set_note(first_id, "keep file metadata")
+        self.db.toggle_bookmark(first_id)
+        self.db.increment_use_count(first_id)
+
+        updated_id = self.db.add_item(file_content_from_paths([file_b, file_a]), None, "FILE")
+
+        self.assertEqual(updated_id, first_id)
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT content, tags, note, bookmark, use_count, file_path FROM history WHERE id = ?",
+                (first_id,),
+            )
+            row = cursor.fetchone()
+
+        self.assertEqual(row[0], file_content_from_paths([file_b, file_a]))
+        self.assertEqual(row[1], "files")
+        self.assertEqual(row[2], "keep file metadata")
+        self.assertEqual(row[3], 1)
+        self.assertEqual(row[4], 1)
+        self.assertEqual(row[5], os.path.abspath(file_b))
+
     def test_export_import_json_round_trip_preserves_image_item(self):
         image_bytes = b"fake-image-payload"
         item_id = self.db.add_item("[이미지 캡처]", image_bytes, "IMAGE")
@@ -384,6 +418,56 @@ class CoreDatabaseTests(unittest.TestCase):
         finally:
             if dst_db is not None:
                 dst_db.close()
+            dst_tmp.cleanup()
+
+    def test_export_import_file_round_trip_preserves_paths_in_json_and_csv(self):
+        file_a = os.path.join(self.tmpdir.name, "file-a.txt")
+        folder_b = os.path.join(self.tmpdir.name, "folder-b")
+        with open(file_a, "w", encoding="utf-8") as fh:
+            fh.write("file-a")
+        os.makedirs(folder_b, exist_ok=True)
+
+        content = file_content_from_paths([file_a, folder_b])
+        item_id = self.db.add_item(content, None, "FILE")
+        self.assertTrue(item_id)
+
+        manager = ExportImportManager(self.db)
+        json_path = os.path.join(self.tmpdir.name, "files.json")
+        csv_path = os.path.join(self.tmpdir.name, "files.csv")
+        self.assertEqual(manager.export_json(json_path), 1)
+        self.assertEqual(manager.export_csv(csv_path), 1)
+
+        with open(json_path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        self.assertEqual(payload["items"][0]["type"], "FILE")
+        self.assertEqual(payload["items"][0]["file_paths"], [os.path.abspath(file_a), os.path.abspath(folder_b)])
+
+        dst_tmp = _workspace_tempdir()
+        dst_db = None
+        csv_db = None
+        try:
+            dst_db = ClipboardDB(
+                db_file=os.path.join(dst_tmp.name, "clipboard_history_v6.db"),
+                app_dir=dst_tmp.name,
+            )
+            imported_json = ExportImportManager(dst_db).import_json(json_path)
+            self.assertEqual(imported_json, 1)
+            restored_json = dst_db.get_content(dst_db.get_items("", "전체")[0][0])
+            self.assertEqual(restored_json, (content, None, "FILE"))
+
+            csv_db = ClipboardDB(
+                db_file=os.path.join(dst_tmp.name, "clipboard_history_csv.db"),
+                app_dir=dst_tmp.name,
+            )
+            imported_csv = ExportImportManager(csv_db).import_csv(csv_path)
+            self.assertEqual(imported_csv, 1)
+            restored_csv = csv_db.get_content(csv_db.get_items("", "전체")[0][0])
+            self.assertEqual(restored_csv, (content, None, "FILE"))
+        finally:
+            if dst_db is not None:
+                dst_db.close()
+            if csv_db is not None:
+                csv_db.close()
             dst_tmp.cleanup()
 
     def test_cleanup_uses_timestamp_order_for_refreshed_duplicates(self):
@@ -507,6 +591,68 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertNotIn("visible-text", csv_text)
         self.assertNotIn("visible-text", md_text)
 
+    def test_import_csv_skips_image_placeholder_rows(self):
+        csv_path = os.path.join(self.tmpdir.name, "image-placeholder.csv")
+        with open(csv_path, "w", encoding="utf-8-sig", newline="") as fh:
+            fh.write("내용,유형,시간,고정,사용횟수\n")
+            fh.write('"[이미지 항목 - 바이너리 제외]",IMAGE,2026-04-01 10:00:00,아니오,0\n')
+
+        imported = ExportImportManager(self.db).import_csv(csv_path)
+
+        self.assertEqual(imported, 0)
+        self.assertEqual(self.db.get_items("", "전체"), [])
+
+    def test_import_json_normalizes_iso_timestamp_and_filters_correctly(self):
+        json_path = os.path.join(self.tmpdir.name, "iso.json")
+        payload = {
+            "items": [
+                {
+                    "content": "iso-item",
+                    "type": "TEXT",
+                    "timestamp": "2026-04-10T10:00:00+09:00",
+                }
+            ]
+        }
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+
+        imported = ExportImportManager(self.db).import_json(json_path)
+        self.assertEqual(imported, 1)
+
+        items = self.db.get_items("", "전체")
+        self.assertEqual(items[0][3], "2026-04-10 10:00:00")
+
+        filtered_path = os.path.join(self.tmpdir.name, "filtered.json")
+        exported = ExportImportManager(self.db).export_json(
+            filtered_path,
+            date_from=datetime.date(2026, 4, 11),
+        )
+        self.assertEqual(exported, 0)
+
+    def test_import_json_invalid_timestamp_falls_back_to_current_time(self):
+        json_path = os.path.join(self.tmpdir.name, "invalid-timestamp.json")
+        payload = {
+            "items": [
+                {
+                    "content": "bad-time-item",
+                    "type": "TEXT",
+                    "timestamp": "not-a-real-date",
+                }
+            ]
+        }
+        before = datetime.datetime.now()
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+
+        imported = ExportImportManager(self.db).import_json(json_path)
+        after = datetime.datetime.now()
+
+        self.assertEqual(imported, 1)
+        item = self.db.get_items("", "전체")[0]
+        stored = datetime.datetime.strptime(item[3], "%Y-%m-%d %H:%M:%S")
+        self.assertGreaterEqual(stored, before.replace(microsecond=0) - datetime.timedelta(seconds=1))
+        self.assertLessEqual(stored, after.replace(microsecond=0) + datetime.timedelta(seconds=1))
+
     def test_rule_and_action_updates_respect_priority_order(self):
         self.assertTrue(self.db.add_copy_rule("trim", r"\s+", "trim"))
         self.assertTrue(self.db.add_copy_rule("replace", r"foo", "custom_replace", "bar"))
@@ -558,6 +704,16 @@ class CoreDatabaseTests(unittest.TestCase):
         vault_items = self.db.get_vault_items()
         self.assertEqual(len(vault_items), 1)
         self.assertEqual(manager.decrypt(vault_items[0][1]), "vault-secret")
+
+    @unittest.skipUnless(HAS_CRYPTO, "cryptography not installed")
+    def test_unlock_failure_resets_vault_state(self):
+        manager = SecureVaultManager(self.db)
+        self.assertTrue(manager.set_master_password("OldPass!1"))
+
+        self.assertFalse(manager.unlock("WrongPass!9"))
+        self.assertFalse(manager.is_unlocked)
+        self.assertIsNone(manager.fernet)
+        self.assertIsNone(manager.encrypt("should-not-encrypt"))
 
 
 class CoreDatabaseSearchTests(unittest.TestCase):

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from smartclipboard_app.ui.clipboard_guard import extract_local_file_paths
+from smartclipboard_core.file_paths import describe_file_paths, file_content_from_paths
+
 
 def on_clipboard_change_impl(self, qtimer_cls):
     if self.is_privacy_mode or self.is_internal_copy:
@@ -26,6 +29,8 @@ def process_clipboard_impl(self, logger):
         mime_data = self.clipboard.mimeData()
         if mime_data.hasImage():
             self._process_image_clipboard(mime_data)
+            return
+        if mime_data.hasUrls() and process_file_clipboard_impl(self, mime_data, logger):
             return
         if mime_data.hasText():
             self._process_text_clipboard(mime_data)
@@ -89,6 +94,32 @@ def process_text_clipboard_impl(self, mime_data, logger):
                 self.is_data_dirty = True
     except Exception:
         logger.exception("Text processing error")
+
+
+def process_file_clipboard_impl(self, mime_data, logger):
+    try:
+        file_paths = extract_local_file_paths(mime_data)
+        if not file_paths:
+            return False
+
+        content = file_content_from_paths(file_paths)
+        if not content:
+            return False
+
+        item_id = self.db.add_item(content, None, "FILE")
+        if not item_id:
+            return False
+
+        logger.debug("File clipboard captured: %s", describe_file_paths(file_paths))
+        if self.isVisible():
+            self.load_data()
+            self.update_status_bar()
+        else:
+            self.is_data_dirty = True
+        return True
+    except Exception:
+        logger.exception("File clipboard processing error")
+        return False
 
 
 def process_actions_impl(self, text, item_id, logger, toast_cls):

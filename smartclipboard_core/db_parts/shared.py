@@ -18,11 +18,12 @@ APP_DIR = get_app_directory()
 DEFAULT_MAX_HISTORY = 100
 CLEANUP_INTERVAL = 10
 FILTER_TAG_MAP = {
-    "?? ???": "TEXT",
-    "??? ???": "IMAGE",
-    "?? ??": "LINK",
-    "?? ??": "CODE",
-    "?? ??": "COLOR",
+    "📝 텍스트": "TEXT",
+    "🖼️ 이미지": "IMAGE",
+    "🔗 링크": "LINK",
+    "💻 코드": "CODE",
+    "🎨 색상": "COLOR",
+    "📎 파일": "FILE",
 }
 
 logger = logging.getLogger(__name__)

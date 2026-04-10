@@ -15,6 +15,8 @@ Notes:
     - Repo-wide pyright still has db_parts mixin attribute-typing noise, so
       targeted pyright is supplemental to preflight.
     - Runtime behavior is restored via legacy marshal payload.
+    - FILE clipboard/history support depends on smartclipboard_core.file_paths
+      and repo-local temp usage during Windows test runs.
     - If legacy source changes, rebuild payload first and keep tests green
       (`test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`,
        `test_migration_collections`, `test_legacy_ui_contracts`,
@@ -99,6 +101,7 @@ HIDDEN_IMPORTS = [
     "smartclipboard_app.ui.controllers.lifecycle_controller",
     "smartclipboard_app.managers.secure_vault",
     "smartclipboard_app.managers.export_import",
+    "smartclipboard_core.file_paths",
 ]
 
 OPTIONAL_HIDDEN_IMPORTS = [

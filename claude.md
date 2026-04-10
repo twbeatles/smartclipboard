@@ -25,12 +25,16 @@
 - UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`을 재생성한 뒤 빌드해야 합니다.
 - `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
 - 동일 비이미지 재복사는 기존 history row를 갱신하는 정책이며, 메타데이터(tags/note/bookmark/collection/pin/use_count)를 유지해야 합니다.
+- 동일 `FILE` path 집합 재복사도 기존 history row를 갱신하는 정책이며, `content`는 newline-joined absolute paths, `file_path`는 첫 경로로 유지합니다.
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅합니다.
+- 파일 clipboard 복원 경로는 `smartclipboard_app.ui.clipboard_guard.restore_file_clipboard()`를 사용하고, 일부 파일만 남아 있으면 부분 복원, 모두 없으면 clipboard를 건드리지 않습니다.
 - JSON 마이그레이션 포맷(`include_metadata=True`)은 `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color)를 포함하며, import 시 컬렉션 ID remap을 수행합니다.
 - JSON export/import는 `IMAGE` 항목의 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB 대신 플레이스홀더만 기록합니다.
+- JSON export/import는 `FILE` 항목의 `file_paths`/`file_path`/newline content round-trip을 지원하고, CSV import는 `IMAGE` 플레이스홀더 row를 복원하지 않습니다.
+- import는 호환성보다 정합성을 우선하며, JSON import에서 remap 불가 `collection_id`는 `NULL`, 비표준 timestamp는 앱 표준 시각으로 정규화하거나 import 시각으로 대체합니다.
 - 스니펫 `shortcut`은 app-local 단축키이며 기본 앱 단축키·글로벌 핫키·다른 스니펫과 충돌하면 저장되지 않아야 합니다.
 - 전체 기록 삭제는 영구 삭제가 아니라 고정 제외 후 휴지통 이동 정책을 유지합니다.
-- 보안 보관함은 마스터 비밀번호 변경과 복호화 클립보드 30초 자동 삭제 흐름을 포함합니다.
+- 보안 보관함은 마스터 비밀번호 변경과 복호화 클립보드 30초 자동 삭제 흐름을 포함하며, `unlock()` 실패 시 `fernet/is_unlocked` 상태가 반드시 함께 초기화되어야 합니다.
 - `Ctrl+Shift+Z` paste-last는 pinned 정렬과 무관하게 가장 최근 복사된 항목(`timestamp DESC`, tie-break `id DESC`)을 사용해야 합니다.
 - UI 사용자 정렬은 오름/내림차순과 무관하게 pinned-first 정책을 유지해야 합니다.
 - 컬렉션 삭제는 `history`뿐 아니라 `deleted_history`의 `collection_id`도 정리해야 하고, 복원 시 존재하지 않는 컬렉션 참조는 `NULL`로 떨어져야 합니다.

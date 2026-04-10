@@ -96,7 +96,7 @@ class MigrationCollectionsTests(unittest.TestCase):
             orphan_count = cursor.fetchone()[0]
         self.assertEqual(orphan_count, 0)
 
-    def test_import_json_without_collections_payload_keeps_backward_compatibility(self):
+    def test_import_json_without_collections_payload_clears_orphan_collection_reference(self):
         old_payload = {
             "app": "SmartClipboard Pro",
             "version": "10.6",
@@ -121,7 +121,9 @@ class MigrationCollectionsTests(unittest.TestCase):
             cursor.execute("SELECT collection_id FROM history WHERE content = ?", ("legacy-item",))
             row = cursor.fetchone()
         self.assertIsNotNone(row)
-        self.assertEqual(row[0], 999)
+        self.assertIsNone(row[0])
+        uncategorized = {item[1] for item in self.dst_db.get_items_uncategorized()}
+        self.assertIn("legacy-item", uncategorized)
 
 
 if __name__ == "__main__":

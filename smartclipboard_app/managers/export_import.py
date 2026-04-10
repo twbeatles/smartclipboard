@@ -8,6 +8,14 @@ import csv
 import datetime
 import json
 import logging
+import os
+
+from smartclipboard_core.file_paths import (
+    describe_file_paths,
+    file_content_from_paths,
+    file_paths_from_content,
+    normalize_local_file_paths,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +25,7 @@ DEFAULT_TYPE_ICONS = {
     "IMAGE": "[I]",
     "CODE": "[C]",
     "COLOR": "[K]",
+    "FILE": "[F]",
 }
 
 
@@ -30,14 +39,61 @@ class ExportImportManager:
         self.logger = logger_ or logger
 
     @staticmethod
-    def _matches_date_filter(timestamp, date_from) -> bool:
-        if not date_from or not timestamp:
+    def _parse_timestamp(timestamp):
+        if not timestamp:
+            return None
+
+        if isinstance(timestamp, datetime.datetime):
+            parsed = timestamp
+        else:
+            raw_value = str(timestamp).strip()
+            if not raw_value:
+                return None
+
+            try:
+                parsed = datetime.datetime.strptime(raw_value, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                iso_value = raw_value[:-1] + "+00:00" if raw_value.endswith("Z") else raw_value
+                try:
+                    parsed = datetime.datetime.fromisoformat(iso_value)
+                except ValueError:
+                    try:
+                        parsed = datetime.datetime.combine(
+                            datetime.date.fromisoformat(raw_value),
+                            datetime.time(),
+                        )
+                    except ValueError:
+                        return None
+
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone().replace(tzinfo=None)
+        return parsed
+
+    @classmethod
+    def _normalize_timestamp(cls, timestamp, fallback: str | None = None) -> str:
+        parsed = cls._parse_timestamp(timestamp)
+        if parsed is None:
+            return fallback or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+    @classmethod
+    def _matches_date_filter(cls, timestamp, date_from) -> bool:
+        if not date_from:
             return True
-        try:
-            item_date = datetime.datetime.strptime(timestamp.split()[0], "%Y-%m-%d").date()
-        except (ValueError, IndexError, AttributeError):
-            return True
-        return item_date >= date_from
+        parsed = cls._parse_timestamp(timestamp)
+        return parsed.date() >= date_from if parsed is not None else False
+
+    @staticmethod
+    def _resolve_file_paths(payload: dict) -> list[str]:
+        raw_paths = payload.get("file_paths")
+        if isinstance(raw_paths, list):
+            return normalize_local_file_paths(raw_paths)
+
+        single_path = payload.get("file_path")
+        if single_path:
+            return normalize_local_file_paths([single_path])
+
+        return file_paths_from_content(payload.get("content", ""))
 
     def _get_filtered_items(self, filter_type="all", date_from=None):
         items = self.db.get_items("", "전체")
@@ -101,6 +157,11 @@ class ExportImportManager:
                     except Exception as exc:
                         self.logger.debug("Image export skipped for id=%s: %s", pid, exc)
                         continue
+                elif ptype == "FILE":
+                    file_paths = file_paths_from_content(content)
+                    if file_paths:
+                        payload["file_paths"] = file_paths
+                        payload["file_path"] = file_paths[0]
                 if include_metadata:
                     try:
                         with self.db.lock:
@@ -144,9 +205,13 @@ class ExportImportManager:
                 count = 0
                 for item in items:
                     _, content, ptype, timestamp, pinned, use_count, _pin_order = item
-                    export_content = content or ("[이미지 항목 - 바이너리 제외]" if ptype == "IMAGE" else "")
-                    if ptype == "IMAGE" and not export_content:
-                        export_content = "[이미지 항목 - 바이너리 제외]"
+                    if ptype == "IMAGE":
+                        export_content = content or "[이미지 항목 - 바이너리 제외]"
+                    elif ptype == "FILE":
+                        file_paths = file_paths_from_content(content)
+                        export_content = "\n".join(file_paths) if file_paths else (content or "[파일 항목]")
+                    else:
+                        export_content = content or ""
                     if not export_content:
                         continue
                     writer.writerow([export_content, ptype, timestamp, "예" if pinned else "아니오", use_count])
@@ -175,6 +240,12 @@ class ExportImportManager:
                         placeholder = content or "[이미지 항목]"
                         fh.write(f"{placeholder}\n\n")
                         fh.write("> 이미지 바이너리 데이터는 Markdown 내보내기에서 제외됩니다.\n\n")
+                    elif ptype == "FILE":
+                        file_paths = file_paths_from_content(content)
+                        lines = file_paths or [content or "[파일 항목]"]
+                        fh.write("```text\n")
+                        fh.write("\n".join(lines))
+                        fh.write("\n```\n\n")
                     elif ptype == "CODE":
                         fh.write(f"```\n{content}\n```\n\n")
                     elif ptype == "LINK":
@@ -189,7 +260,7 @@ class ExportImportManager:
             return -1
 
     def import_json(self, path):
-        valid_types = {"TEXT", "LINK", "IMAGE", "CODE", "COLOR"}
+        valid_types = {"TEXT", "LINK", "IMAGE", "CODE", "COLOR", "FILE"}
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -234,6 +305,12 @@ class ExportImportManager:
                         self.logger.debug("Image import skipped for content=%r: %s", content, exc)
                         continue
                     content = content or "[이미지 캡처]"
+                elif ptype == "FILE":
+                    file_paths = self._resolve_file_paths(item)
+                    if not file_paths:
+                        self.logger.debug("File import skipped for payload without valid local paths")
+                        continue
+                    content = file_content_from_paths(file_paths)
                 elif not content:
                     continue
                 item_id = self.db.add_item(content, image_data, ptype)
@@ -245,18 +322,19 @@ class ExportImportManager:
                 for key in ("tags", "note", "bookmark", "collection_id", "pinned", "pin_order", "use_count", "timestamp"):
                     if key in item:
                         metadata[key] = item.get(key)
-                if collections_payload and "collection_id" in metadata:
-                    legacy_collection_id = metadata.get("collection_id")
+                if "collection_id" in metadata:
+                    metadata["collection_id"] = None
+                    legacy_collection_id = item.get("collection_id")
                     lookup_key = legacy_collection_id
                     if legacy_collection_id is not None and not isinstance(legacy_collection_id, bool):
                         try:
                             lookup_key = int(str(legacy_collection_id))
                         except (TypeError, ValueError):
-                            pass
-                    if lookup_key in collection_id_map:
+                            lookup_key = None
+                    if collections_payload and lookup_key in collection_id_map:
                         metadata["collection_id"] = collection_id_map[lookup_key]
-                    else:
-                        metadata["collection_id"] = None
+                if "timestamp" in metadata:
+                    metadata["timestamp"] = self._normalize_timestamp(metadata.get("timestamp"))
                 if metadata and hasattr(self.db, "set_item_metadata"):
                     self.db.set_item_metadata(item_id, **metadata)
             return imported
@@ -265,7 +343,7 @@ class ExportImportManager:
             return -1
 
     def import_csv(self, path):
-        valid_types = {"TEXT", "LINK", "IMAGE", "CODE", "COLOR"}
+        valid_types = {"TEXT", "LINK", "IMAGE", "CODE", "COLOR", "FILE"}
         try:
             imported = 0
             with open(path, "r", encoding="utf-8-sig") as fh:
@@ -277,6 +355,13 @@ class ExportImportManager:
                     content, ptype = row[0], row[1]
                     if ptype not in valid_types:
                         ptype = "TEXT"
+                    if ptype == "IMAGE":
+                        continue
+                    if ptype == "FILE":
+                        file_paths = file_paths_from_content(content)
+                        if not file_paths:
+                            continue
+                        content = file_content_from_paths(file_paths)
                     if content:
                         self.db.add_item(content, None, ptype)
                         imported += 1

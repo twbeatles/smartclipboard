@@ -8,6 +8,8 @@ from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QTableWidgetItem
 
+from smartclipboard_core.file_paths import describe_file_paths, file_paths_from_content
+
 
 def load_data_impl(self, THEMES, logger):
     """데이터 로드 및 테이블 갱신 - 리팩토링된 버전"""
@@ -125,7 +127,7 @@ def show_empty_state_impl(self, theme):
     else:
         empty_msg = "📋 클립보드 히스토리가 비어있습니다\n\n"
         empty_msg += "💡 시작 방법:\n"
-        empty_msg += "• 텍스트나 이미지를 복사하면 자동 저장\n"
+        empty_msg += "• 텍스트, 이미지, 파일을 복사하면 자동 저장\n"
         empty_msg += "• Ctrl+Shift+V: 클립보드 창 열기\n"
         empty_msg += "• Alt+V: 미니 창 열기\n"
         empty_msg += "• 더블클릭으로 항목 붙여넣기"
@@ -163,18 +165,27 @@ def populate_table_impl(self, items, theme, TYPE_ICONS):
         self.table.setItem(row_idx, 1, type_item)
         
         # 3. 내용
-        display = content.replace('\n', ' ').strip()
-        if len(display) > 45: display = display[:45] + "..."
+        if ptype == "FILE":
+            file_paths = file_paths_from_content(content)
+            display = describe_file_paths(file_paths)
+        else:
+            display = content.replace('\n', ' ').strip()
+            if len(display) > 45:
+                display = display[:45] + "..."
         content_item = QTableWidgetItem(display)
         
         if ptype == "IMAGE":
             content_item.setToolTip("🖼️ 이미지 항목 - 더블클릭으로 미리보기")
+        elif ptype == "FILE":
+            file_paths = file_paths_from_content(content)
+            content_item.setToolTip("\n".join(file_paths[:20]) if file_paths else (content or "[파일 항목]"))
         else:
             content_item.setToolTip(content[:500] if len(content) > 500 else content)
             
         if ptype == "LINK": content_item.setForeground(QColor(theme["secondary"]))
         elif ptype == "CODE": content_item.setForeground(QColor(theme["success"]))
         elif ptype == "COLOR": content_item.setForeground(QColor(content) if content.startswith("#") else QColor(theme["warning"]))
+        elif ptype == "FILE": content_item.setForeground(QColor(theme["primary"]))
         
         content_item.setData(Qt.ItemDataRole.UserRole + 1, content)
         self.table.setItem(row_idx, 2, content_item)
@@ -237,6 +248,16 @@ def on_selection_changed_impl(self, HAS_QRCODE, THEMES):
             self.btn_link.setEnabled(False)
             self.btn_google.setEnabled(False)
             if HAS_QRCODE: self.btn_qr.setEnabled(False)
+        elif ptype == "FILE":
+            self.detail_stack.setCurrentIndex(0)
+            self.detail_text.setPlainText(content)
+            self.tools_layout_visible(False)
+            self.btn_save_img.setVisible(False)
+            self.btn_link.setEnabled(False)
+            self.btn_google.setEnabled(False)
+            if HAS_QRCODE:
+                self.btn_qr.setEnabled(False)
+            self.detail_text.setStyleSheet(f"background-color: {theme['surface_variant']}; color: {theme['text']}; border: 2px solid {theme['border']};")
         else:
             self.detail_stack.setCurrentIndex(0)
             self.detail_text.setPlainText(content)

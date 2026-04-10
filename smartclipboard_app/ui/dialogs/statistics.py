@@ -40,7 +40,7 @@ class StatisticsDialog(QDialog):
 
         type_group = QGroupBox("📊 유형별 분포")
         type_layout = QVBoxLayout(type_group)
-        type_icons = {"TEXT": "📝 텍스트", "LINK": "🔗 링크", "IMAGE": "🖼️ 이미지", "CODE": "💻 코드", "COLOR": "🎨 색상"}
+        type_icons = {"TEXT": "📝 텍스트", "LINK": "🔗 링크", "IMAGE": "🖼️ 이미지", "CODE": "💻 코드", "COLOR": "🎨 색상", "FILE": "📎 파일"}
         for type_key, count in stats.get("by_type", {}).items():
             label = QLabel(f"{type_icons.get(type_key, type_key)}: {count}개")
             type_layout.addWidget(label)

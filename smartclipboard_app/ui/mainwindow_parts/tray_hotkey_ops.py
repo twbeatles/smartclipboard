@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy, restore_file_clipboard
+from smartclipboard_core.file_paths import file_paths_from_content
 
 
 def _normalized_hotkey_value(value, fallback: str) -> str:
@@ -150,12 +151,29 @@ def paste_last_item_slot_impl(self, logger, qpixmap_cls, qtimer_cls, keyboard):
             return
 
         content, blob, ptype = data
-        mark_internal_copy(self)
         if ptype == "IMAGE" and blob:
+            mark_internal_copy(self)
             pixmap = qpixmap_cls()
             pixmap.loadFromData(blob)
             self.clipboard.setPixmap(pixmap)
+        elif ptype == "FILE":
+            restore_result = restore_file_clipboard(self, self.clipboard, file_paths_from_content(content))
+            if not restore_result["applied"]:
+                status_bar_getter = getattr(self, "statusBar", None)
+                status_bar = status_bar_getter() if callable(status_bar_getter) else None
+                if status_bar is not None:
+                    status_bar.showMessage("⚠️ 복원 가능한 파일이 없어 붙여넣기를 건너뛰었습니다.", 2500)
+                return
+            if restore_result["missing_paths"]:
+                status_bar_getter = getattr(self, "statusBar", None)
+                status_bar = status_bar_getter() if callable(status_bar_getter) else None
+                if status_bar is not None:
+                    status_bar.showMessage(
+                        f"⚠️ 일부 파일이 없어 {len(restore_result['available_paths'])}개만 복원했습니다.",
+                        2500,
+                    )
         else:
+            mark_internal_copy(self)
             self.clipboard.setText(content)
         self.db.increment_use_count(pid)
         qtimer_cls.singleShot(100, lambda: keyboard.send("ctrl+v"))
