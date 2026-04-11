@@ -68,7 +68,7 @@ class CopyRuleEditDialog(QDialog):
         for key, label in self.ACTIONS.items():
             self.action_combo.addItem(label, key)
         self.replacement_input = QLineEdit()
-        self.replacement_input.setPlaceholderText("치환 문자열")
+        self.replacement_input.setPlaceholderText("치환 문자열 (비우면 삭제)")
 
         form.addRow("이름:", self.name_input)
         form.addRow("패턴:", self.pattern_input)
@@ -118,10 +118,6 @@ class CopyRuleEditDialog(QDialog):
             re.compile(pattern)
         except re.error as exc:
             QMessageBox.warning(self, "패턴 오류", f"잘못된 정규식 패턴입니다.\n{exc}")
-            return
-
-        if action == "custom_replace" and replacement == "":
-            QMessageBox.warning(self, "경고", "정규식 치환에는 치환값이 필요합니다.")
             return
 
         exclude_id = self.rule[0] if self.rule is not None else None

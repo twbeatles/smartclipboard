@@ -28,11 +28,13 @@
 - 5분 자동 잠금 타이머
 - 마스터 비밀번호 변경 시 기존 보관 항목 전체 재암호화
 - 복호화 후 클립보드로 복사한 텍스트는 30초 뒤 자동 삭제
+- 설정 손상 시 잠금 화면에서 `Reset 보관함`으로 복구 가능
 
 ### ⚡ 클립보드 액션 자동화
 - 패턴 매칭 기반 자동 처리
 - **v10.2**: URL 제목 가져오기 개선 (타임아웃/에러 처리 강화)
-- 전화번호 자동 포맷팅
+- `fetch_title`은 첫 URL만 추출하며 로컬/사설/메타데이터 주소는 보안상 차단
+- 전화번호 자동 포맷팅 (`02`, 일반 지역번호, `0505`, `1588/1661/1800`류 대표번호 포함)
 - 이메일 정규화
 - 텍스트 변환 (대소문자, 트림 등)
 - **v10.2**: 정규식 패턴 유효성 검증
@@ -57,9 +59,10 @@
 - 날짜 및 타입 필터링
 - JSON은 `IMAGE` 항목을 `image_data_b64`로 보존하며, CSV/Markdown은 이미지 플레이스홀더만 기록
 - `FILE` 항목은 바이너리 대신 경로 목록만 내보내며, JSON은 `file_paths`/`file_path`, CSV/Markdown은 newline 경로 목록을 사용
-- JSON 마이그레이션 모드 (태그/메모/북마크 + 컬렉션 정의/ID 매핑 정보 포함)
-- JSON import는 ISO-8601/tz timestamp를 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체
+- JSON 마이그레이션 모드 (히스토리 항목의 태그/메모/북마크 + 컬렉션 정의/ID 매핑 정보 포함, 스니펫/규칙/핫키/보안 보관함 제외)
+- JSON import는 ISO-8601/tz timestamp를 원본 시각 기준 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체
 - CSV import는 이미지 플레이스홀더 row를 복원하지 않으며, JSON import는 remap 실패/누락된 `collection_id`를 `NULL`로 정리
+- `FILE` 항목은 복원 전에 목록/상세/미니 창에서 누락 경로(stale) 여부를 미리 표시
 - 백업 및 마이그레이션 용이
 
 ### 🎨 UI/UX
@@ -274,8 +277,16 @@ pyright
 - paste-last/미니 창/선택 붙여넣기/더블클릭 복원 경로가 `QMimeData + file URL` 클립보드를 다시 구성하도록 보강
 - 일부 파일만 남아 있으면 남은 경로만 복원하고, 모두 사라졌으면 경고만 표시하고 clipboard/paste는 건드리지 않음
 - JSON export/import는 `FILE`의 `file_paths`/`file_path`/newline content를 모두 지원하고, CSV/Markdown은 경로 목록만 기록
-- CSV import는 `IMAGE` 플레이스홀더 row를 건너뛰고, JSON import는 ISO timestamp를 로컬 표준 시각으로 정규화하며 고아 `collection_id`를 `NULL`로 정리
+- CSV import는 `IMAGE` 플레이스홀더 row를 건너뛰고, JSON import는 ISO timestamp를 원본 시각 기준 앱 표준 시각으로 정규화하며 고아 `collection_id`를 `NULL`로 정리
 - 보안 보관함 `unlock()` 실패 시 `fernet/is_unlocked` 상태를 원자적으로 초기화해 잘못된 재시도 후 반쯤 열린 상태가 남지 않도록 수정
+
+### 🛠️ 2026-04-11 기능 리뷰 후속 반영
+- `fetch_title`은 URL 후행 문장부호를 제거하고, 로컬/사설/메타데이터 주소와 비 HTML 응답을 제목 조회 대상에서 제외
+- 전화번호 자동 포맷 범위를 `02`, 일반 지역번호, `0505`, `15xx/16xx/18xx` 대표번호까지 확장
+- 보안 보관함은 salt/verification 설정을 함께 저장하고, 손상 상태에서는 잠금 화면 `Reset 보관함`으로 설정값과 저장 항목을 초기화 복구
+- 복사 규칙의 `custom_replace`는 빈 문자열 치환을 허용해 “삭제 치환”에 사용할 수 있도록 완화
+- `FILE` 항목은 목록/상세/미니 창에서 누락 파일 수를 미리 보여 주어 붙여넣기 전에 stale 상태를 확인 가능
+- JSON 마이그레이션 문구를 실제 범위(히스토리 메타데이터 + 컬렉션) 기준으로 정리하고, 관련 회귀 테스트를 추가
 
 ---
 
@@ -412,7 +423,10 @@ smartclipboard/
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 먼저 거쳐 자기 재수집 루프를 피합니다.
 - JSON export/import는 `IMAGE` 항목용 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 의도적으로 제외합니다.
 - `FILE` 항목은 경로 목록 중심으로 동작하며, JSON은 `file_paths`/`file_path`, CSV/Markdown은 newline path content를 사용합니다.
+- `FILE` 항목은 복원 시점뿐 아니라 목록/상세/미니 창에서 누락 경로 수를 먼저 보여주며, 일부만 남아 있으면 부분 복원 정책을 유지합니다.
 - import 무결성 정책상 CSV 이미지 플레이스홀더는 복원하지 않고, JSON에서 매핑 불가 `collection_id`는 `NULL`, 비표준 timestamp는 정규화 또는 import 시각으로 대체합니다.
+- `fetch_title`은 첫 URL만 대상으로 하며, 로컬/사설/메타데이터 주소 차단과 HTML 응답 제한을 기본 정책으로 유지합니다.
+- 보안 보관함은 `vault_salt`와 `vault_verification`이 함께 있어야 정상 구성으로 간주하며, 손상 상태는 Reset 복구 흐름을 통해 정리합니다.
 - 기존 모듈러 레이아웃 README는 `legacy/README (modular).md`에 보관되어 있습니다.
 
 ---
@@ -461,6 +475,7 @@ MIT License
 - 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `legacy/README (modular).md`는 동일 기준을 따릅니다.
 - 권장 회귀 테스트 기준은 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`입니다.
 - PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`) 포함과 함께 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하고, payload에서 직접 참조하는 대화상자 모듈(`smartclipboard_app.ui.dialogs.collections` 포함)을 명시적으로 유지합니다.
+- 2026-04-11 후속 수정은 기존 패키징 범위 안에서 처리되므로 추가 hidden import/datas 변경 없이 현재 spec을 유지합니다.
 
 ## Refactor Layout (2026-03-12)
 

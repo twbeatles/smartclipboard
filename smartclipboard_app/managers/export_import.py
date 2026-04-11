@@ -66,7 +66,9 @@ class ExportImportManager:
                         return None
 
         if parsed.tzinfo is not None:
-            parsed = parsed.astimezone().replace(tzinfo=None)
+            # Preserve the source wall-clock time so imports stay deterministic
+            # regardless of the machine timezone running the import.
+            parsed = parsed.replace(tzinfo=None)
         return parsed
 
     @classmethod

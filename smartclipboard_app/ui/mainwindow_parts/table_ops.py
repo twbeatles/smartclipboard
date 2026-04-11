@@ -8,7 +8,12 @@ from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QTableWidgetItem
 
-from smartclipboard_core.file_paths import describe_file_paths, file_paths_from_content
+from smartclipboard_core.file_paths import (
+    build_file_paths_detail_text,
+    build_file_paths_tooltip,
+    describe_file_paths_with_status,
+    file_paths_from_content,
+)
 
 
 def load_data_impl(self, THEMES, logger):
@@ -167,7 +172,7 @@ def populate_table_impl(self, items, theme, TYPE_ICONS):
         # 3. 내용
         if ptype == "FILE":
             file_paths = file_paths_from_content(content)
-            display = describe_file_paths(file_paths)
+            display = describe_file_paths_with_status(file_paths)
         else:
             display = content.replace('\n', ' ').strip()
             if len(display) > 45:
@@ -178,7 +183,7 @@ def populate_table_impl(self, items, theme, TYPE_ICONS):
             content_item.setToolTip("🖼️ 이미지 항목 - 더블클릭으로 미리보기")
         elif ptype == "FILE":
             file_paths = file_paths_from_content(content)
-            content_item.setToolTip("\n".join(file_paths[:20]) if file_paths else (content or "[파일 항목]"))
+            content_item.setToolTip(build_file_paths_tooltip(file_paths))
         else:
             content_item.setToolTip(content[:500] if len(content) > 500 else content)
             
@@ -250,7 +255,7 @@ def on_selection_changed_impl(self, HAS_QRCODE, THEMES):
             if HAS_QRCODE: self.btn_qr.setEnabled(False)
         elif ptype == "FILE":
             self.detail_stack.setCurrentIndex(0)
-            self.detail_text.setPlainText(content)
+            self.detail_text.setPlainText(build_file_paths_detail_text(file_paths_from_content(content)))
             self.tools_layout_visible(False)
             self.btn_save_img.setVisible(False)
             self.btn_link.setEnabled(False)

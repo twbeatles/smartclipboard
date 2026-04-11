@@ -24,6 +24,7 @@ Windows용 PyQt6 기반 클립보드 매니저입니다.
 - 스니펫/휴지통/미니 윈도우
 - JSON/CSV/Markdown 내보내기
 - JSON 마이그레이션 모드(메타데이터 + 컬렉션 정의/ID 매핑 정보 포함) 내보내기/가져오기
+- FILE 누락 경로(stale) 사전 표시, 보안 보관함 Reset 복구, 확장된 전화번호 포맷은 루트 `README.md` 기준으로 유지
 
 ## 프로젝트 구조
 
@@ -101,6 +102,7 @@ pyinstaller --clean smartclipboard.spec
 - 2026-03 정합성 패치로 fetch_title 액션의 첫 URL 추출 경로, 복합 필터 검색 경로, 휴지통 다중선택, minimized 시작 안정성, JSON 컬렉션 remap이 보강되었습니다.
 - 2026-03-19 안정화 패치로 비이미지 중복 캡처 시 메타데이터 보존, JSON `IMAGE` round-trip(`image_data_b64`), 보안 보관함/스니펫/URL 복사의 internal copy guard, `add_snippet()` 런타임 오류 수정이 반영되었습니다.
 - 2026-04-08 리스크 보강으로 paste-last semantics, pinned-first 내림차순 정렬, 컬렉션 삭제/복원 무결성, 보안 보관함 비밀번호 변경 직후 복사, 종료 중 비동기 worker 정리가 보강되었습니다.
+- 2026-04-11 후속 반영으로 fetch_title 로컬/사설 URL 차단, `02`/`0505`/대표번호 전화 포맷 확장, FILE stale preview, 보안 보관함 Reset 복구, JSON 마이그레이션 문구 정리가 추가되었습니다.
 - 스니펫 `shortcut` 컬럼은 유지되지만 사용자 할당 UI/실행 경로는 아직 노출되지 않습니다.
 
 ## 문서 정합성 기준 (2026-03-07)
@@ -115,3 +117,4 @@ pyinstaller --clean smartclipboard.spec
 - Local guard now compiles both helper folders via `scripts/preflight_local.py`.
 - Added API surface tests: `tests/test_public_surfaces.py` and `tests/baseline/clipboarddb_public_methods.txt`.
 - Packaging guard: `smartclipboard.spec` now explicitly includes `smartclipboard_core.db_parts` collection.
+- 2026-04-11 기준 추가 hidden import/datas 증설은 필요하지 않으며, 현재 spec 범위로 패키징이 유지됩니다.

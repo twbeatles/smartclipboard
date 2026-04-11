@@ -6,7 +6,11 @@ import os
 
 from PyQt6.QtCore import QMimeData, QUrl
 
-from smartclipboard_core.file_paths import file_paths_from_content, normalize_local_file_paths
+from smartclipboard_core.file_paths import (
+    file_paths_from_content,
+    normalize_local_file_paths,
+    partition_existing_file_paths,
+)
 
 
 def mark_internal_copy(parent: object | None) -> None:
@@ -43,8 +47,7 @@ def restore_file_clipboard(
     os_module=os,
 ) -> dict[str, object]:
     normalized_paths = normalize_local_file_paths(file_paths)
-    available_paths = [path for path in normalized_paths if os_module.path.exists(path)]
-    missing_paths = [path for path in normalized_paths if not os_module.path.exists(path)]
+    available_paths, missing_paths = partition_existing_file_paths(normalized_paths, os_module=os_module)
 
     if clipboard is None or not hasattr(clipboard, "setMimeData") or not available_paths:
         return {

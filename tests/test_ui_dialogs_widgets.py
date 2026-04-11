@@ -7,16 +7,17 @@ from contextlib import contextmanager
 from unittest import mock
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMessageBox, QPushButton, QWidget
+from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMessageBox, QPushButton, QTableWidget, QWidget
 
 from smartclipboard_core.file_paths import file_content_from_paths
 from smartclipboard_app.ui.dialogs.clipboard_actions import ClipboardActionsDialog
 from smartclipboard_app.ui.dialogs.collections import CollectionManagerDialog
+from smartclipboard_app.ui.dialogs.copy_rules import CopyRuleEditDialog
 from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS, HotkeySettingsDialog
 from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
 from smartclipboard_app.ui.dialogs.snippets import SnippetDialog, SnippetManagerDialog, validate_snippet_shortcut
-from smartclipboard_app.ui.mainwindow_parts.table_ops import get_display_items_impl
+from smartclipboard_app.ui.mainwindow_parts.table_ops import get_display_items_impl, populate_table_impl
 from smartclipboard_app.ui.mainwindow_parts.tray_hotkey_ops import paste_last_item_slot_impl
 from smartclipboard_app.ui.mainwindow_parts.tray_hotkey_ops import register_hotkeys_impl
 from smartclipboard_app.ui.mainwindow_parts.ui_dragdrop_ops import handle_drop_event_body
@@ -61,6 +62,21 @@ class _FakeActionDB:
 class _FakeActionManager:
     def reload_actions(self):
         return None
+
+
+class _FakeCopyRuleDB:
+    def __init__(self):
+        self.added = []
+
+    def is_duplicate_copy_rule(self, pattern, action, replacement="", exclude_id=None):
+        return False
+
+    def add_copy_rule(self, name, pattern, action, replacement=""):
+        self.added.append((name, pattern, action, replacement))
+        return True
+
+    def update_copy_rule(self, *_args, **_kwargs):
+        return True
 
 
 class _FakeMiniDB:
@@ -108,8 +124,43 @@ class _FakeVaultManager:
     def has_master_password(self):
         return True
 
+    def is_configuration_corrupted(self):
+        return False
+
     def lock(self):
         return None
+
+    def reset_vault(self):
+        return True
+
+
+class _CorruptedVaultManager:
+    def __init__(self):
+        self.is_unlocked = False
+        self.reset_calls = 0
+        self._corrupted = True
+
+    def has_master_password(self):
+        return False
+
+    def is_configuration_corrupted(self):
+        return self._corrupted
+
+    def reset_vault(self):
+        self.reset_calls += 1
+        self._corrupted = False
+        return True
+
+    def lock(self):
+        return None
+
+
+class _FakeMiniListDB:
+    def __init__(self, items):
+        self._items = items
+
+    def get_items(self, _q, _filter):
+        return list(self._items)
 
 
 class _FakeSnippetDB:
@@ -492,8 +543,25 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             phone_action = [entry for entry in db.added if entry[2] == "format_phone"]
             self.assertEqual(len(phone_action), 1)
             pattern = phone_action[0][1]
-            self.assertEqual(pattern, r"^0\d{9,10}$")
+            self.assertEqual(pattern, r"^(?:02\d{7,8}|0\d{9,10}|1[568]\d{6})$")
             self.assertTrue(re.search(pattern, "01012345678"))
+            self.assertTrue(re.search(pattern, "021234567"))
+            self.assertTrue(re.search(pattern, "15881234"))
+        finally:
+            dialog.close()
+
+    def test_copy_rule_dialog_allows_empty_custom_replace(self):
+        db = _FakeCopyRuleDB()
+        dialog = CopyRuleEditDialog(None, db)
+        try:
+            dialog.name_input.setText("remove-foo")
+            dialog.pattern_input.setText("foo")
+            dialog.action_combo.setCurrentIndex(dialog.action_combo.findData("custom_replace"))
+            dialog.replacement_input.setText("")
+            with mock.patch.object(dialog, "accept") as accept_mock:
+                dialog.save_rule()
+            self.assertEqual(db.added, [("remove-foo", "foo", "custom_replace", "")])
+            accept_mock.assert_called_once()
         finally:
             dialog.close()
 
@@ -632,6 +700,58 @@ class UiDialogsWidgetsTests(unittest.TestCase):
 
         self.assertEqual([row[0] for row in items], [2, 1, 3])
 
+    def test_table_ops_file_rows_show_missing_status_before_restore(self):
+        with _workspace_tempdir() as tmpdir:
+            file_a = os.path.join(tmpdir, "alpha.txt")
+            missing_path = os.path.join(tmpdir, "missing.txt")
+            with open(file_a, "w", encoding="utf-8") as fh:
+                fh.write("alpha")
+
+            class _FakePopulateWindow:
+                def __init__(self):
+                    self.table = QTableWidget()
+                    self.table.setColumnCount(5)
+
+            window = _FakePopulateWindow()
+            populate_table_impl(
+                window,
+                [(1, file_content_from_paths([file_a, missing_path]), "FILE", "2026-04-01 10:00:00", 0, 0, 0)],
+                {
+                    "primary": "#3366ff",
+                    "text_secondary": "#888888",
+                    "secondary": "#22aa99",
+                    "success": "#22aa55",
+                    "warning": "#ffaa33",
+                },
+                {"FILE": "📎"},
+            )
+
+            content_item = window.table.item(0, 2)
+            self.assertIsNotNone(content_item)
+            self.assertTrue(content_item.text().startswith("[누락 1]"))
+            self.assertIn("사용 가능 1개, 누락 1개", content_item.toolTip())
+
+    def test_floating_mini_window_marks_stale_file_items_in_tooltip(self):
+        with _workspace_tempdir() as tmpdir:
+            file_a = os.path.join(tmpdir, "note.txt")
+            missing_path = os.path.join(tmpdir, "missing.txt")
+            with open(file_a, "w", encoding="utf-8") as fh:
+                fh.write("note")
+
+            db = _FakeMiniListDB(
+                [(1, file_content_from_paths([file_a, missing_path]), "FILE", "2026-04-01 10:00:00", 0, 0, 0)]
+            )
+            parent = _FakeMiniParent()
+            window = FloatingMiniWindow(db, parent=parent)
+            try:
+                window.load_items()
+                item = window.list_widget.item(0)
+                self.assertIn("[누락 1]", item.text())
+                self.assertIn("사용 가능 1개, 누락 1개", item.toolTip())
+            finally:
+                window.close()
+                parent.close()
+
     def test_secure_vault_copy_marks_internal_copy_flag(self):
         parent = _FakeMiniParent()
         dialog = SecureVaultDialog(parent, _FakeVaultDB(), _FakeVaultManager())
@@ -666,6 +786,24 @@ class UiDialogsWidgetsTests(unittest.TestCase):
 
             self.assertEqual(clipboard.text(), "vault-secret")
             self.assertTrue(parent.is_internal_copy)
+        finally:
+            dialog.close()
+            parent.close()
+
+    def test_secure_vault_corruption_reset_returns_to_first_time_setup(self):
+        parent = _FakeMiniParent()
+        manager = _CorruptedVaultManager()
+        dialog = SecureVaultDialog(parent, _FakeVaultDB(), manager)
+        try:
+            self.assertFalse(dialog.btn_reset.isHidden())
+            self.assertIn("손상", dialog.status_label.text())
+            with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes), mock.patch.object(
+                QMessageBox, "information"
+            ):
+                dialog.reset_vault()
+            self.assertEqual(manager.reset_calls, 1)
+            self.assertTrue(dialog.btn_reset.isHidden())
+            self.assertIn("최초 설정", dialog.status_label.text())
         finally:
             dialog.close()
             parent.close()

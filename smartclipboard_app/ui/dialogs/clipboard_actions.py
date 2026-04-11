@@ -336,7 +336,7 @@ class ClipboardActionsDialog(QDialog):
     def add_default_actions(self):
         defaults = [
             ("URL 제목 가져오기", r"https?://", "fetch_title", "{}"),
-            ("전화번호 자동 포맷", r"^0\d{9,10}$", "format_phone", "{}"),
+            ("전화번호 자동 포맷", r"^(?:02\d{7,8}|0\d{9,10}|1[568]\d{6})$", "format_phone", "{}"),
         ]
         added = 0
         skipped = 0

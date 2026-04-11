@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import re
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from PyQt6.QtCore import QObject, QThreadPool, pyqtSignal
 
@@ -27,6 +29,39 @@ else:
 from .worker import Worker
 
 logger = logging.getLogger(__name__)
+TITLE_FETCH_MAX_BYTES = 1024 * 1024
+URL_TRAILING_PUNCTUATION = ".,!?:;"
+BLOCKED_TITLE_HOSTS = {
+    "localhost",
+    "metadata.google.internal",
+    "metadata.google.internal.",
+}
+
+
+def _normalize_extracted_url(url: str) -> str:
+    return url.rstrip(URL_TRAILING_PUNCTUATION)
+
+
+def _is_safe_title_fetch_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+
+    if parsed.scheme not in {"http", "https"}:
+        return False
+
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        return False
+    if hostname in BLOCKED_TITLE_HOSTS:
+        return False
+
+    try:
+        host_ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return True
+    return host_ip.is_global
 
 
 def extract_first_url(text: str) -> Optional[str]:
@@ -34,7 +69,7 @@ def extract_first_url(text: str) -> Optional[str]:
     if not text:
         return None
     match = re.search(r"https?://[^\s<>'\"\]\)]+", text)
-    return match.group(0) if match else None
+    return _normalize_extracted_url(match.group(0)) if match else None
 
 
 class ClipboardActionManager(QObject):
@@ -135,6 +170,12 @@ class ClipboardActionManager(QObject):
         if not HAS_WEB:
             self.action_completed.emit(action_name, {"type": "notify", "message": "웹 요청 라이브러리가 없어 URL 제목을 가져올 수 없습니다."})
             return
+        if not _is_safe_title_fetch_url(url):
+            self.action_completed.emit(
+                action_name,
+                {"type": "notify", "message": "보안상 로컬/사설 주소의 제목 가져오기는 건너뜁니다."},
+            )
+            return
 
         worker = Worker(self._fetch_title_logic, url, item_id)
         worker.signals.result.connect(lambda res: self._handle_title_result(res, action_name))
@@ -143,18 +184,46 @@ class ClipboardActionManager(QObject):
     @staticmethod
     def _fetch_title_logic(url, item_id):
         """작업 스레드에서 실행될 로직."""
+        response = None
         try:
             if requests is None or BeautifulSoup is None:
                 return {"title": None, "item_id": item_id, "url": url, "error": "web libraries unavailable"}
+            if not _is_safe_title_fetch_url(url):
+                return {"title": None, "item_id": item_id, "url": url, "error": "blocked local/private url"}
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            response = requests.get(url, headers=headers, timeout=(3, 5), verify=True)
+            response = requests.get(url, headers=headers, timeout=(3, 5), verify=True, stream=True)
             response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
+            content_type = str(response.headers.get("Content-Type", "") or "").lower()
+            if content_type and "html" not in content_type:
+                return {"title": None, "item_id": item_id, "url": url, "error": f"unsupported content type: {content_type}"}
+
+            html_chunks: list[bytes] = []
+            bytes_read = 0
+            for chunk in response.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                remaining = TITLE_FETCH_MAX_BYTES - bytes_read
+                if remaining <= 0:
+                    break
+                limited_chunk = chunk[:remaining]
+                html_chunks.append(limited_chunk)
+                bytes_read += len(limited_chunk)
+                if bytes_read >= TITLE_FETCH_MAX_BYTES:
+                    break
+
+            html_text = b"".join(html_chunks).decode(response.encoding or "utf-8", errors="replace")
+            soup = BeautifulSoup(html_text, "html.parser")
             title = soup.title.string if soup.title else None
             return {"title": title.strip() if title else None, "item_id": item_id, "url": url}
         except Exception as exc:
             logger.debug("Fetch title error: %s", exc)
             return {"title": None, "item_id": item_id, "url": url, "error": str(exc)}
+        finally:
+            if response is not None and hasattr(response, "close"):
+                try:
+                    response.close()
+                except Exception:
+                    pass
 
     def _handle_title_result(self, result, action_name):
         """비동기 결과 처리 (메인 스레드)."""
@@ -190,10 +259,22 @@ class ClipboardActionManager(QObject):
     def format_phone(self, text):
         """전화번호 포맷팅."""
         digits = re.sub(r"\D", "", text)
-        if len(digits) == 11 and digits.startswith("010"):
+        if digits.startswith("02") and len(digits) == 9:
+            formatted = f"{digits[:2]}-{digits[2:5]}-{digits[5:]}"
+            return {"type": "format", "original": text, "formatted": formatted}
+        if digits.startswith("02") and len(digits) == 10:
+            formatted = f"{digits[:2]}-{digits[2:6]}-{digits[6:]}"
+            return {"type": "format", "original": text, "formatted": formatted}
+        if len(digits) == 8 and digits.startswith(("15", "16", "18")):
+            formatted = f"{digits[:4]}-{digits[4:]}"
+            return {"type": "format", "original": text, "formatted": formatted}
+        if digits.startswith("0505") and len(digits) == 11:
+            formatted = f"{digits[:4]}-{digits[4:7]}-{digits[7:]}"
+            return {"type": "format", "original": text, "formatted": formatted}
+        if len(digits) == 11 and digits.startswith("0"):
             formatted = f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
             return {"type": "format", "original": text, "formatted": formatted}
-        if len(digits) == 10:
+        if len(digits) == 10 and digits.startswith("0"):
             formatted = f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
             return {"type": "format", "original": text, "formatted": formatted}
         return None

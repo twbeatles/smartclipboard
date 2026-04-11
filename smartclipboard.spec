@@ -17,9 +17,12 @@ Notes:
     - Runtime behavior is restored via legacy marshal payload.
     - FILE clipboard/history support depends on smartclipboard_core.file_paths
       and repo-local temp usage during Windows test runs.
+    - 2026-04-11 stabilization stays inside already-packaged modules, so no
+      extra datas/hiddenimports are required for fetch_title hardening, vault
+      reset recovery, or stale FILE preview indicators.
     - If legacy source changes, rebuild payload first and keep tests green
       (`test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`,
-       `test_migration_collections`, `test_legacy_ui_contracts`,
+       `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`,
        `test_signal_snapshot`, `test_public_surfaces`).
 """
 

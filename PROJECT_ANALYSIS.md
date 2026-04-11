@@ -251,7 +251,7 @@ class ClipboardDB(
 | 액션 | 설명 |
 |------|------|
 | `fetch_title` | 첫 번째 URL 추출 → 비동기 웹 페이지 제목 가져오기 |
-| `format_phone` | 전화번호 자동 포맷팅 (010-xxxx-xxxx, 02-xxx-xxxx) |
+| `format_phone` | 전화번호 자동 포맷팅 (`02`, 일반 지역번호, `0505`, `15xx/16xx/18xx`) |
 | `format_email` | 이메일 정규화 (소문자, 공백 제거) |
 | `notify` | 토스트 알림 표시 |
 | `transform` | 텍스트 변환 (trim/upper/lower) |
@@ -361,7 +361,7 @@ class Worker(QRunnable):
 | Markdown | 날짜·타입 필터 공통 적용, IMAGE는 설명용 플레이스홀더만 기록, FILE은 fenced text 경로 목록 |
 
 **JSON 마이그레이션 포맷** — `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color) 포함.
-**무결성 정책** — ISO-8601/tz timestamp는 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체한다. remap 실패 또는 누락된 `collection_id`는 `NULL`로 정리한다.
+**무결성 정책** — ISO-8601/tz timestamp는 **원본 wall-clock 기준** 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체한다. remap 실패 또는 누락된 `collection_id`는 `NULL`로 정리한다.
 
 #### `smartclipboard_app/managers/secure_vault.py` — `SecureVaultManager`
 
@@ -488,14 +488,17 @@ clipboard.setText(text)
 - [x] 5분 자동 잠금
 - [x] 마스터 비밀번호 변경 + 전체 보관 항목 재암호화
 - [x] 복호화 클립보드 30초 자동 삭제
+- [x] 손상된 보관함 설정 Reset 복구
 
 ### 자동화
 - [x] URL 제목 자동 가져오기 (비동기)
-- [x] 전화번호 자동 포맷팅
+- [x] 로컬/사설 URL 차단 기반 제목 가져오기 하드닝
+- [x] 전화번호 자동 포맷팅 (`02`/일반 지역번호/`0505`/대표번호)
 - [x] 이메일 정규화
 - [x] 텍스트 변환 (대소문자/트림)
 - [x] 패턴 기반 토스트 알림
 - [x] 액션/규칙 생성·수정·삭제·우선순위 이동 UI
+- [x] 빈 문자열 허용 `custom_replace` 삭제 치환
 
 ### UI/UX
 - [x] 5가지 테마 (다크/라이트/오션/퍼플/미드나잇)
@@ -508,6 +511,7 @@ clipboard.setText(text)
 - [x] 앱 내부 스니펫 단축키
 - [x] 토스트 알림 (슬라이드 애니메이션)
 - [x] 드래그앤드롭 파일 지원
+- [x] FILE 누락 경로 사전 표시(stale preview)
 
 ### 데이터 관리
 - [x] JSON/CSV/Markdown 내보내기
@@ -555,6 +559,17 @@ clipboard.setText(text)
 - 일부 파일만 남아 있으면 남은 경로만 복원하고, 모두 사라졌으면 경고만 표시하고 clipboard/paste는 변경하지 않는다.
 - CSV import는 IMAGE 플레이스홀더 row를 건너뛰고, JSON import는 remap 불가 `collection_id`를 `NULL`로 정리하며, 비표준 timestamp는 정규화 또는 import 시각으로 대체한다.
 - `SecureVaultManager.unlock()` 실패 시 `fernet/is_unlocked` 상태를 함께 초기화해 잘못된 재시도 후 반쯤 열린 상태가 남지 않도록 한다.
+
+## 8.4 2026-04-11 기능 리뷰 후속 반영 메모
+
+- `fetch_title`은 URL 추출 후 후행 문장부호를 제거하고, 로컬/사설/메타데이터 주소는 요청 전 차단한다.
+- 제목 가져오기는 HTML 응답만 제한 크기로 읽으며, 비 HTML 응답은 title fetch 대상으로 취급하지 않는다.
+- `format_phone()`은 `02`, 일반 지역번호, `0505`, `15xx/16xx/18xx` 대표번호까지 지원 범위를 확장했다.
+- `copy_rules`의 `custom_replace`는 빈 replacement를 허용하여 삭제 치환에 사용할 수 있다.
+- `SecureVaultManager`는 `vault_salt`와 `vault_verification`을 함께 저장/검증하고, 손상 상태는 잠금 화면 Reset 경로로 복구한다.
+- `FILE` 항목은 복원 시점 경고만이 아니라 목록/상세/미니 창에서 stale/missing 경로 수를 먼저 보여준다.
+- JSON 마이그레이션 문구는 히스토리 메타데이터 + 컬렉션 범위만 의미하도록 정리되었고, 스키마 자체는 확장하지 않았다.
+- `smartclipboard.spec`는 이번 변경에서 추가 hidden import 없이 현행 상태를 유지해도 충분하다.
 
 ---
 

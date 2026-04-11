@@ -41,6 +41,26 @@ class SecureVaultManager:
         self.lock_timeout = 300
         self.logger = logger_ or logger
 
+    def _store_vault_bootstrap(self, salt_b64: str, verification: str) -> bool:
+        with self.db.lock:
+            try:
+                cursor = self.db.conn.cursor()
+                cursor.execute("BEGIN")
+                cursor.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                    ("vault_salt", salt_b64),
+                )
+                cursor.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                    ("vault_verification", verification),
+                )
+                self.db.conn.commit()
+                return True
+            except Exception as exc:
+                self.db.conn.rollback()
+                self.logger.debug("Vault bootstrap save failed: %s", exc)
+                return False
+
     def derive_key(self, password, salt):
         if not HAS_CRYPTO or PBKDF2HMAC is None or hashes is None:
             return None
@@ -61,9 +81,11 @@ class SecureVaultManager:
             return False
         fernet = Fernet(key)
         verification = fernet.encrypt(b"VAULT_VERIFIED")
+        if not self._store_vault_bootstrap(base64.b64encode(salt).decode(), verification.decode()):
+            self.fernet = None
+            self.is_unlocked = False
+            return False
         self.fernet = fernet
-        self.db.set_setting("vault_salt", base64.b64encode(salt).decode())
-        self.db.set_setting("vault_verification", verification.decode())
         self.is_unlocked = True
         self.last_activity = time.time()
         return True
@@ -178,7 +200,31 @@ class SecureVaultManager:
             return None
 
     def has_master_password(self):
-        return self.db.get_setting("vault_salt") is not None
+        salt_b64 = str(self.db.get_setting("vault_salt") or "").strip()
+        verification = str(self.db.get_setting("vault_verification") or "").strip()
+        return bool(salt_b64 and verification)
+
+    def is_configuration_corrupted(self):
+        salt_b64 = str(self.db.get_setting("vault_salt") or "").strip()
+        verification = str(self.db.get_setting("vault_verification") or "").strip()
+        return bool(salt_b64) != bool(verification)
+
+    def reset_vault(self):
+        with self.db.lock:
+            try:
+                cursor = self.db.conn.cursor()
+                cursor.execute("BEGIN")
+                cursor.execute("DELETE FROM secure_vault")
+                cursor.execute("DELETE FROM settings WHERE key IN (?, ?)", ("vault_salt", "vault_verification"))
+                self.db.conn.commit()
+            except Exception as exc:
+                self.db.conn.rollback()
+                self.logger.debug("Vault reset failed: %s", exc)
+                return False
+
+        self.fernet = None
+        self.is_unlocked = False
+        return True
 
 
 __all__ = ["SecureVaultManager", "HAS_CRYPTO"]

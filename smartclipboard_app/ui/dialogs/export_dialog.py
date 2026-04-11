@@ -43,8 +43,10 @@ class ExportDialog(QDialog):
         format_layout.addWidget(self.format_json)
         format_layout.addWidget(self.format_csv)
         format_layout.addWidget(self.format_md)
-        self.json_migration_mode = QCheckBox("JSON 마이그레이션 모드 (태그/메모/북마크/컬렉션 포함)")
-        self.json_migration_mode.setToolTip("JSON 내보내기에 메타데이터를 포함합니다.")
+        self.json_migration_mode = QCheckBox("JSON 마이그레이션 모드 (히스토리 메타데이터/컬렉션 포함)")
+        self.json_migration_mode.setToolTip(
+            "히스토리 항목의 태그/메모/북마크/컬렉션 정보만 포함합니다. 스니펫/규칙/핫키/보안 보관함은 제외됩니다."
+        )
         format_layout.addWidget(self.json_migration_mode)
         layout.addWidget(format_group)
 

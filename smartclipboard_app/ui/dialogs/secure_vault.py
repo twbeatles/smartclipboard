@@ -80,6 +80,12 @@ class SecureVaultDialog(QDialog):
         btn_unlock.clicked.connect(self.unlock_vault)
         pw_layout.addWidget(btn_unlock)
 
+        self.btn_reset = QPushButton("Reset 보관함")
+        self.btn_reset.setToolTip("손상되었거나 더 이상 접근할 수 없는 보안 보관함을 초기화합니다.")
+        self.btn_reset.clicked.connect(self.reset_vault)
+        self.btn_reset.setVisible(False)
+        pw_layout.addWidget(self.btn_reset)
+
         self.main_layout.addWidget(self.password_widget)
 
         self.items_widget = QWidget()
@@ -124,13 +130,22 @@ class SecureVaultDialog(QDialog):
         self.status_label.setText("🔒 보관함이 잠겨 있습니다")
         self.password_widget.setVisible(True)
         self.items_widget.setVisible(False)
-        if not self.vault.has_master_password():
+        has_password = self.vault.has_master_password()
+        is_corrupted = hasattr(self.vault, "is_configuration_corrupted") and self.vault.is_configuration_corrupted()
+        self.btn_reset.setVisible(has_password or is_corrupted)
+        if is_corrupted:
+            self.status_label.setText("⚠️ 보안 보관함 설정이 손상되었습니다. Reset 후 다시 설정해주세요.")
+        elif not has_password:
             self.status_label.setText("🔐 마스터 비밀번호를 설정해주세요 (최초 설정)")
 
     def unlock_vault(self):
         password = self.password_input.text()
         if not password:
             QMessageBox.warning(self, "경고", "비밀번호를 입력하세요.")
+            return
+
+        if hasattr(self.vault, "is_configuration_corrupted") and self.vault.is_configuration_corrupted():
+            QMessageBox.warning(self, "복구 필요", "보안 보관함 설정이 손상되었습니다. Reset 후 다시 설정해주세요.")
             return
 
         if not self.vault.has_master_password():
@@ -150,6 +165,25 @@ class SecureVaultDialog(QDialog):
                 QMessageBox.warning(self, "실패", "비밀번호가 일치하지 않습니다.")
 
         self.password_input.clear()
+
+    def reset_vault(self):
+        reply = QMessageBox.question(
+            self,
+            "Reset 보관함",
+            "보안 보관함의 설정과 저장된 항목을 모두 삭제합니다. 계속하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if not hasattr(self.vault, "reset_vault") or not self.vault.reset_vault():
+            QMessageBox.critical(self, "오류", "보안 보관함 초기화에 실패했습니다.")
+            return
+
+        self.password_input.clear()
+        self.table.setRowCount(0)
+        self.show_lock_ui()
+        QMessageBox.information(self, "초기화 완료", "보안 보관함이 초기화되었습니다. 새 마스터 비밀번호를 설정해주세요.")
 
     def lock_vault(self):
         self.vault.lock()

@@ -3,14 +3,20 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from PyQt6.QtWidgets import QApplication
 
 from smartclipboard_app.managers.export_import import ExportImportManager
 from smartclipboard_app.managers.secure_vault import HAS_CRYPTO, SecureVaultManager
-from smartclipboard_core.actions import ClipboardActionManager, extract_first_url
+from smartclipboard_core.actions import HAS_WEB, ClipboardActionManager, extract_first_url
 from smartclipboard_core.database import ClipboardDB
-from smartclipboard_core.file_paths import file_content_from_paths
+from smartclipboard_core.file_paths import (
+    build_file_paths_detail_text,
+    build_file_paths_tooltip,
+    describe_file_paths_with_status,
+    file_content_from_paths,
+)
 
 
 TEST_TMP_ROOT = os.path.join(os.getcwd(), ".tmp-unittest")
@@ -34,6 +40,26 @@ class FakeActionDB:
         return True
 
 
+class _FakeHTMLResponse:
+    def __init__(self, body, content_type="text/html; charset=utf-8", status_code=200):
+        self._body = body.encode("utf-8") if isinstance(body, str) else body
+        self.headers = {"Content-Type": content_type}
+        self.status_code = status_code
+        self.encoding = "utf-8"
+        self.closed = False
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def iter_content(self, chunk_size=65536):
+        for start in range(0, len(self._body), chunk_size):
+            yield self._body[start : start + chunk_size]
+
+    def close(self):
+        self.closed = True
+
+
 class CoreActionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -41,6 +67,10 @@ class CoreActionTests(unittest.TestCase):
 
     def test_extract_first_url(self):
         text = "prefix https://example.com/path?q=1 suffix"
+        self.assertEqual(extract_first_url(text), "https://example.com/path?q=1")
+
+    def test_extract_first_url_trims_trailing_punctuation(self):
+        text = "참고 링크: https://example.com/path?q=1, 다음 문장."
         self.assertEqual(extract_first_url(text), "https://example.com/path?q=1")
 
     def test_fetch_title_uses_extracted_url(self):
@@ -80,6 +110,42 @@ class CoreActionTests(unittest.TestCase):
 
         self.assertEqual(db.updated_titles, [])
         self.assertEqual(emitted, [])
+
+    @unittest.skipUnless(HAS_WEB, "web libraries not installed")
+    def test_fetch_title_logic_blocks_private_urls_before_request(self):
+        with mock.patch("smartclipboard_core.actions.requests.get") as get_mock:
+            result = ClipboardActionManager._fetch_title_logic("http://127.0.0.1/admin", 5)
+
+        get_mock.assert_not_called()
+        self.assertEqual(result["title"], None)
+        self.assertIn("blocked", result.get("error", ""))
+
+    @unittest.skipUnless(HAS_WEB, "web libraries not installed")
+    def test_fetch_title_logic_returns_html_title_for_safe_url(self):
+        response = _FakeHTMLResponse("<html><head><title>Example Title</title></head><body></body></html>")
+        with mock.patch("smartclipboard_core.actions.requests.get", return_value=response):
+            result = ClipboardActionManager._fetch_title_logic("https://example.com/path", 8)
+
+        self.assertEqual(result["title"], "Example Title")
+        self.assertEqual(result["item_id"], 8)
+        self.assertTrue(response.closed)
+
+    def test_format_phone_supports_expanded_korean_patterns(self):
+        manager = ClipboardActionManager(FakeActionDB([]))
+        cases = {
+            "021234567": "02-123-4567",
+            "0212345678": "02-1234-5678",
+            "0312345678": "031-234-5678",
+            "01012345678": "010-1234-5678",
+            "05051234567": "0505-123-4567",
+            "15881234": "1588-1234",
+        }
+
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                result = manager.format_phone(raw)
+                self.assertIsNotNone(result)
+                self.assertEqual(result["formatted"], expected)
 
 
 class CoreDatabaseTests(unittest.TestCase):
@@ -629,6 +695,16 @@ class CoreDatabaseTests(unittest.TestCase):
         )
         self.assertEqual(exported, 0)
 
+    def test_normalize_timestamp_preserves_wall_time_for_timezone_aware_input(self):
+        self.assertEqual(
+            ExportImportManager._normalize_timestamp("2026-04-10T10:00:00+09:00"),
+            "2026-04-10 10:00:00",
+        )
+        self.assertEqual(
+            ExportImportManager._normalize_timestamp("2026-04-10T01:00:00Z"),
+            "2026-04-10 01:00:00",
+        )
+
     def test_import_json_invalid_timestamp_falls_back_to_current_time(self):
         json_path = os.path.join(self.tmpdir.name, "invalid-timestamp.json")
         payload = {
@@ -652,6 +728,17 @@ class CoreDatabaseTests(unittest.TestCase):
         stored = datetime.datetime.strptime(item[3], "%Y-%m-%d %H:%M:%S")
         self.assertGreaterEqual(stored, before.replace(microsecond=0) - datetime.timedelta(seconds=1))
         self.assertLessEqual(stored, after.replace(microsecond=0) + datetime.timedelta(seconds=1))
+
+    def test_file_path_status_helpers_report_missing_paths(self):
+        existing_path = os.path.join(self.tmpdir.name, "exists.txt")
+        missing_path = os.path.join(self.tmpdir.name, "missing.txt")
+        with open(existing_path, "w", encoding="utf-8") as fh:
+            fh.write("hello")
+
+        paths = [existing_path, missing_path]
+        self.assertTrue(describe_file_paths_with_status(paths).startswith("[누락 1]"))
+        self.assertIn("사용 가능 1개, 누락 1개", build_file_paths_tooltip(paths))
+        self.assertIn("사용 가능 1개, 누락 1개", build_file_paths_detail_text(paths))
 
     def test_rule_and_action_updates_respect_priority_order(self):
         self.assertTrue(self.db.add_copy_rule("trim", r"\s+", "trim"))
@@ -714,6 +801,26 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertFalse(manager.is_unlocked)
         self.assertIsNone(manager.fernet)
         self.assertIsNone(manager.encrypt("should-not-encrypt"))
+
+    def test_has_master_password_requires_complete_bootstrap_settings(self):
+        manager = SecureVaultManager(self.db)
+        self.db.set_setting("vault_salt", "partial-only")
+
+        self.assertFalse(manager.has_master_password())
+        self.assertTrue(manager.is_configuration_corrupted())
+
+    def test_reset_vault_clears_settings_and_items(self):
+        manager = SecureVaultManager(self.db)
+        self.db.set_setting("vault_salt", "salt-value")
+        self.db.set_setting("vault_verification", "verification-value")
+        self.assertTrue(self.db.add_vault_item(b"encrypted", "secret"))
+
+        self.assertTrue(manager.reset_vault())
+        self.assertFalse(manager.has_master_password())
+        self.assertFalse(manager.is_configuration_corrupted())
+        self.assertEqual(self.db.get_vault_items(), [])
+        self.assertIsNone(self.db.get_setting("vault_salt"))
+        self.assertIsNone(self.db.get_setting("vault_verification"))
 
 
 class CoreDatabaseSearchTests(unittest.TestCase):

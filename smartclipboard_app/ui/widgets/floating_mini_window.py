@@ -20,7 +20,11 @@ from PyQt6.QtWidgets import (
 )
 
 from smartclipboard_app.ui.clipboard_guard import mark_internal_copy, restore_file_clipboard
-from smartclipboard_core.file_paths import describe_file_paths, file_paths_from_content
+from smartclipboard_core.file_paths import (
+    build_file_paths_tooltip,
+    describe_file_paths_with_status,
+    file_paths_from_content,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -196,14 +200,14 @@ class FloatingMiniWindow(QWidget):
             icon = self.type_icons.get(ptype, "📝")
             pin_mark = "📌 " if pinned else ""
             if ptype == "FILE":
-                display = describe_file_paths(file_paths_from_content(content))
+                display = describe_file_paths_with_status(file_paths_from_content(content))
             else:
                 display = content.replace("\n", " ")[:35] + ("..." if len(content) > 35 else "")
             item = QListWidgetItem(f"{pin_mark}{icon} {display}")
             item.setData(Qt.ItemDataRole.UserRole, pid)
             if ptype == "FILE":
                 file_paths = file_paths_from_content(content)
-                item.setToolTip("\n".join(file_paths[:20]) if file_paths else (content or "[파일 항목]"))
+                item.setToolTip(build_file_paths_tooltip(file_paths))
             else:
                 item.setToolTip(content[:200])
             self.list_widget.addItem(item)

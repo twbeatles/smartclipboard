@@ -24,17 +24,24 @@
 - `pyright`/Pylance 진단은 기본적으로 `legacy/클립모드 매니저 (legacy).py`와 `smartclipboard_app/legacy_main_src.py`를 제외한 현행 코드 기준으로 맞춥니다.
 - UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`을 재생성한 뒤 빌드해야 합니다.
 - `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
+- `fetch_title`은 로컬/사설/메타데이터 주소를 기본 차단하고, HTML 응답만 제한 크기로 읽는 정책을 유지합니다.
 - 동일 비이미지 재복사는 기존 history row를 갱신하는 정책이며, 메타데이터(tags/note/bookmark/collection/pin/use_count)를 유지해야 합니다.
 - 동일 `FILE` path 집합 재복사도 기존 history row를 갱신하는 정책이며, `content`는 newline-joined absolute paths, `file_path`는 첫 경로로 유지합니다.
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅합니다.
 - 파일 clipboard 복원 경로는 `smartclipboard_app.ui.clipboard_guard.restore_file_clipboard()`를 사용하고, 일부 파일만 남아 있으면 부분 복원, 모두 없으면 clipboard를 건드리지 않습니다.
+- `FILE` 항목은 복원 직전뿐 아니라 목록/상세/미니 창에서도 stale/missing 경로 수를 먼저 보여주는 UX를 유지합니다.
 - JSON 마이그레이션 포맷(`include_metadata=True`)은 `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color)를 포함하며, import 시 컬렉션 ID remap을 수행합니다.
+- JSON 마이그레이션 문구는 히스토리 메타데이터 + 컬렉션 범위만 의미하며, 스니펫/규칙/핫키/보안 보관함 상태까지 포함하는 것으로 확장하지 않습니다.
 - JSON export/import는 `IMAGE` 항목의 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB 대신 플레이스홀더만 기록합니다.
 - JSON export/import는 `FILE` 항목의 `file_paths`/`file_path`/newline content round-trip을 지원하고, CSV import는 `IMAGE` 플레이스홀더 row를 복원하지 않습니다.
 - import는 호환성보다 정합성을 우선하며, JSON import에서 remap 불가 `collection_id`는 `NULL`, 비표준 timestamp는 앱 표준 시각으로 정규화하거나 import 시각으로 대체합니다.
+- 현재 timestamp 정규화는 timezone-aware ISO 입력의 원본 wall-clock을 보존하는 정책입니다.
+- `format_phone`은 `02`, 일반 지역번호, `0505`, `15xx/16xx/18xx` 대표번호까지 지원하는 쪽으로 유지합니다.
+- `copy_rules`의 `custom_replace`는 빈 replacement를 허용하며, 빈 문자열은 “삭제 치환”으로 해석합니다.
 - 스니펫 `shortcut`은 app-local 단축키이며 기본 앱 단축키·글로벌 핫키·다른 스니펫과 충돌하면 저장되지 않아야 합니다.
 - 전체 기록 삭제는 영구 삭제가 아니라 고정 제외 후 휴지통 이동 정책을 유지합니다.
 - 보안 보관함은 마스터 비밀번호 변경과 복호화 클립보드 30초 자동 삭제 흐름을 포함하며, `unlock()` 실패 시 `fernet/is_unlocked` 상태가 반드시 함께 초기화되어야 합니다.
+- 보안 보관함은 `vault_salt`와 `vault_verification`이 모두 있어야 정상 구성으로 간주하고, 손상 시 잠금 화면 Reset 복구 경로를 유지합니다.
 - `Ctrl+Shift+Z` paste-last는 pinned 정렬과 무관하게 가장 최근 복사된 항목(`timestamp DESC`, tie-break `id DESC`)을 사용해야 합니다.
 - UI 사용자 정렬은 오름/내림차순과 무관하게 pinned-first 정책을 유지해야 합니다.
 - 컬렉션 삭제는 `history`뿐 아니라 `deleted_history`의 `collection_id`도 정리해야 하고, 복원 시 존재하지 않는 컬렉션 참조는 `NULL`로 떨어져야 합니다.
@@ -42,6 +49,7 @@
 - Windows 테스트 임시 경로는 시스템 temp 대신 repo-local `.tmp-unittest/`를 사용합니다.
 - 핫키 저장 경로는 등록 실패 시 이전 글로벌 핫키 상태로 롤백되어야 합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지하고, payload에서 직접 참조하는 `smartclipboard_app.ui.dialogs.collections`도 명시적으로 포함합니다.
+- 2026-04-11 후속 수정은 기존 패키징 범위 안에서 처리되므로 `smartclipboard.spec`의 datas/hidden import 증설 없이 유지 가능합니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
   - `scripts/refactor_signal_snapshot.py`
