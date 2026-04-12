@@ -156,6 +156,12 @@ Windows 로컬 테스트는 시스템 temp 권한 이슈를 피하기 위해 rep
 python scripts/preflight_local.py --skip-payload-build
 ```
 
+optional dependency까지 CI와 같은 강도로 확인하려면 위 strict 커맨드를 사용합니다. 기본 `preflight_local.py`는 `cryptography`, `requests`, `bs4`, `qrcode`, `PIL` 누락을 경고만 출력하고 계속 진행하지만, strict 모드와 CI는 실패로 처리합니다.
+
+```powershell
+python scripts/preflight_local.py --skip-payload-build --strict-optional-deps
+```
+
 ## 🤖 CI (GitHub Actions)
 
 - 워크플로우 파일: `.github/workflows/ci.yml`
@@ -163,7 +169,7 @@ python scripts/preflight_local.py --skip-payload-build
 - Python 매트릭스: `3.10`, `3.11`, `3.12`, `3.13`
 - 각 매트릭스에서 다음을 수행합니다.
   - payload 빌드 + smoke import
-  - `python scripts/preflight_local.py --skip-payload-build`
+  - `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps`
 
 ## 🔎 정적 분석 (Pylance/Pyright)
 
@@ -458,6 +464,17 @@ MIT License
 </div>
 
 ---
+
+## 2026-04-12 Stabilization Notes
+
+- `ExportImportManager` 공개 메서드는 계속 `int`를 반환하고, 상세 결과는 `last_import_report` / `last_export_report`에 기록됩니다.
+- JSON/CSV import는 시작 전에 `backups/pre_import_YYYYMMDD_HHMMSS.db` 백업을 만들고 파일 단위 단일 트랜잭션으로 반영되어, 중간 실패 시 전체 rollback 됩니다.
+- `search_items()`는 FTS-first 정책을 유지하면서 FTS 0건일 때만 LIKE 보완 검색을 수행합니다. `_last_search_fallback`은 실제 FTS 오류일 때만 UI 경고용으로 켜집니다.
+- `ClipboardActionManager`는 전용 `QThreadPool(maxThreadCount=4)`과 URL 기준 in-flight dedupe/cache를 사용하고, 늦게 도착한 title 결과는 현재 row의 첫 URL이 여전히 같은 경우에만 저장합니다.
+- `history.file_signature` 컬럼과 인덱스를 사용해 `FILE` 중복 판별을 전체 row 순회 대신 canonicalized path signature lookup으로 처리합니다.
+- 보안 보관함 복호화 텍스트는 프로세스 내 armed clipboard state로 추적되며, 30초 조건부 clear와 앱 종료 시 즉시 clear를 모두 수행합니다.
+- 설정 저장 시 `mini_window_enabled` 변경으로 핫키 재등록이 실패하면 그 설정만 되돌리고 실제 `_last_hotkey_error`를 경고로 노출합니다.
+- `smartclipboard.spec`은 이번 안정화에서도 추가 hidden import/datas 변경 없이 충분합니다.
 
 ## MainWindow 분할 구조 (2026-03-07)
 

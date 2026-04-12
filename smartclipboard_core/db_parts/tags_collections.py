@@ -73,20 +73,9 @@ class TagsCollectionsMixin:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT id FROM collections WHERE name = ?", (normalized_name,))
-                existing = cursor.fetchone()
-                if existing:
-                    logger.warning("Collection Add Error: duplicate name '%s'", normalized_name)
-                    return False
-                created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cursor.execute(
-                    "INSERT INTO collections (name, icon, color, created_at) VALUES (?, ?, ?, ?)",
-                    (normalized_name, icon, color, created_at)
-                )
-                collection_row_id = cursor.lastrowid
-                if collection_row_id is None:
-                    raise sqlite3.Error("Inserted collection row has no id")
-                self.conn.commit()
+                collection_row_id = self._add_collection_locked(cursor, normalized_name, icon, color)
+                if collection_row_id:
+                    self.conn.commit()
                 return collection_row_id
             except sqlite3.Error as e:
                 logger.error(f"Collection Add Error: {e}")
@@ -111,14 +100,32 @@ class TagsCollectionsMixin:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute(
-                    "SELECT id, name, icon, color, created_at FROM collections WHERE name = ?",
-                    (normalized_name,),
-                )
-                return cursor.fetchone()
+                return self._get_collection_by_name_locked(cursor, normalized_name)
             except sqlite3.Error as e:
                 logger.error(f"Collection Lookup Error: {e}")
                 return None
+
+    def _get_collection_by_name_locked(self, cursor, normalized_name: str):
+        cursor.execute(
+            "SELECT id, name, icon, color, created_at FROM collections WHERE name = ?",
+            (normalized_name,),
+        )
+        return cursor.fetchone()
+
+    def _add_collection_locked(self, cursor, normalized_name: str, icon: str, color: str) -> int | bool:
+        existing = self._get_collection_by_name_locked(cursor, normalized_name)
+        if existing:
+            logger.warning("Collection Add Error: duplicate name '%s'", normalized_name)
+            return False
+        created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "INSERT INTO collections (name, icon, color, created_at) VALUES (?, ?, ?, ?)",
+            (normalized_name, icon, color, created_at),
+        )
+        collection_row_id = cursor.lastrowid
+        if collection_row_id is None:
+            raise sqlite3.Error("Inserted collection row has no id")
+        return collection_row_id
 
     def is_duplicate_collection_name(self, name: str, exclude_id: int | None = None) -> bool:
         normalized_name = self._normalize_collection_name(name)

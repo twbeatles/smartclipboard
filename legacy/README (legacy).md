@@ -367,3 +367,8 @@ MIT License
   <b>Made with ❤️ by MySmartTools</b><br>
   <sub>© 2025-2026</sub>
 </div>
+
+## 2026-04-12 Note
+
+- 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
+- import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.

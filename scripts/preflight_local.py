@@ -9,12 +9,20 @@ This script standardizes the minimum verification sequence before packaging:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+OPTIONAL_DEPENDENCIES = [
+    ("cryptography", "cryptography"),
+    ("requests", "requests"),
+    ("bs4", "beautifulsoup4"),
+    ("qrcode", "qrcode"),
+    ("PIL", "pillow"),
+]
 
 
 def run_step(cmd: list[str]) -> int:
@@ -60,6 +68,28 @@ def compile_targets() -> list[str]:
     return targets
 
 
+def check_optional_dependencies(strict: bool) -> int:
+    print(">>> optional dependency check")
+    missing: list[tuple[str, str]] = []
+    for module_name, package_name in OPTIONAL_DEPENDENCIES:
+        if importlib.util.find_spec(module_name) is None:
+            missing.append((module_name, package_name))
+
+    if not missing:
+        print("all optional dependencies available")
+        return 0
+
+    print("missing optional dependencies detected:")
+    for module_name, package_name in missing:
+        print(f" - module '{module_name}' (install via: pip install {package_name})")
+    print("note: local feature coverage or tests may be reduced when these are missing")
+    if strict:
+        print("strict optional dependency mode enabled; failing preflight")
+        return 1
+    print("continuing because strict optional dependency mode is off")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run SmartClipboard local preflight checks")
     parser.add_argument(
@@ -67,9 +97,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip rebuilding legacy payload before checks",
     )
+    parser.add_argument(
+        "--strict-optional-deps",
+        action="store_true",
+        help="Fail when optional runtime dependencies are missing",
+    )
     args = parser.parse_args(argv)
 
     python = sys.executable
+
+    optional_dep_code = check_optional_dependencies(strict=args.strict_optional_deps)
+    if optional_dep_code != 0:
+        return optional_dep_code
 
     steps: list[list[str]] = []
     if not args.skip_payload_build:

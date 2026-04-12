@@ -13,9 +13,12 @@ from smartclipboard_core.file_paths import file_content_from_paths
 from smartclipboard_app.ui.dialogs.clipboard_actions import ClipboardActionsDialog
 from smartclipboard_app.ui.dialogs.collections import CollectionManagerDialog
 from smartclipboard_app.ui.dialogs.copy_rules import CopyRuleEditDialog
+from smartclipboard_app.ui.dialogs.export_dialog import ExportDialog
 from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS, HotkeySettingsDialog
+from smartclipboard_app.ui.dialogs.import_dialog import ImportDialog
 from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
+from smartclipboard_app.ui.mainwindow_parts.status_lifecycle_ops import quit_app_impl
 from smartclipboard_app.ui.dialogs.snippets import SnippetDialog, SnippetManagerDialog, validate_snippet_shortcut
 from smartclipboard_app.ui.mainwindow_parts.table_ops import get_display_items_impl, populate_table_impl
 from smartclipboard_app.ui.mainwindow_parts.tray_hotkey_ops import paste_last_item_slot_impl
@@ -35,6 +38,71 @@ class _FakeSettingsDB:
     def set_setting(self, key, value):
         self.saved[key] = value
         self.values[key] = value
+
+
+class _FakeImportExportManager:
+    def __init__(self):
+        self.last_import_report = {}
+        self.last_export_report = {}
+
+    def import_json(self, path):
+        self.last_import_report = {
+            "success": True,
+            "format": "json",
+            "path": path,
+            "imported": 2,
+            "skipped": 0,
+            "warnings": [],
+            "backup_path": os.path.join(os.getcwd(), "backups", "pre_import_20260412_120000.db"),
+            "collection_summary": {"created": 0, "reused": 0, "remapped": 0, "cleared": 0},
+        }
+        return 2
+
+    def import_csv(self, path):
+        self.last_import_report = {
+            "success": True,
+            "format": "csv",
+            "path": path,
+            "imported": 1,
+            "skipped": 2,
+            "warnings": ["CSV import warning"],
+            "backup_path": os.path.join(os.getcwd(), "backups", "pre_import_20260412_120001.db"),
+            "collection_summary": {"created": 0, "reused": 0, "remapped": 0, "cleared": 1},
+        }
+        return 1
+
+    def export_json(self, path, *_args, **_kwargs):
+        self.last_export_report = {
+            "success": True,
+            "format": "json",
+            "path": path,
+            "exported": 3,
+            "skipped": 0,
+            "warnings": [],
+        }
+        return 3
+
+    def export_csv(self, path, *_args, **_kwargs):
+        self.last_export_report = {
+            "success": True,
+            "format": "csv",
+            "path": path,
+            "exported": 2,
+            "skipped": 1,
+            "warnings": ["CSV export warning"],
+        }
+        return 2
+
+    def export_markdown(self, path, *_args, **_kwargs):
+        self.last_export_report = {
+            "success": True,
+            "format": "markdown",
+            "path": path,
+            "exported": 2,
+            "skipped": 0,
+            "warnings": ["Markdown export warning"],
+        }
+        return 2
 
 
 class _FakeActionDB:
@@ -234,6 +302,21 @@ class _FakeHotkeyWindow:
         self._last_hotkey_error = ""
 
 
+class _FakeSettingsParent(QWidget):
+    def __init__(self):
+        super().__init__()
+        self._last_hotkey_error = "mini registration failed"
+        self.register_calls = 0
+        self.theme_changes = []
+
+    def register_hotkeys(self):
+        self.register_calls += 1
+        return False if self.register_calls == 1 else True
+
+    def change_theme(self, theme_name: str):
+        self.theme_changes.append(theme_name)
+
+
 class _FakeClipboardWriter:
     def __init__(self):
         self.text_value = None
@@ -254,6 +337,40 @@ class _FakeClipboardWriter:
 
     def mimeData(self):
         return self.mime_data
+
+
+class _FakeQuitDB:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeQuitApp:
+    clipboard_instance = None
+    quit_called = False
+
+    @classmethod
+    def clipboard(cls):
+        return cls.clipboard_instance
+
+    @classmethod
+    def quit(cls):
+        cls.quit_called = True
+
+
+class _FakeQuitWindow:
+    def __init__(self, clipboard_text):
+        self.db = _FakeQuitDB()
+        self._vault_clipboard_expected_text = clipboard_text
+        self._vault_clipboard_expires_at = 123.0
+        self.is_internal_copy = False
+
+
+class _FakeQuitKeyboard:
+    def remove_hotkey(self, _handle):
+        return None
 
 
 @contextmanager
@@ -519,6 +636,67 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             self.assertEqual(dialog.max_history_spin.value(), 123)
             self.assertTrue(dialog.mini_window_enabled.isChecked())
             self.assertEqual(dialog.log_level_combo.currentData(), "INFO")
+        finally:
+            dialog.close()
+
+    def test_settings_dialog_rolls_back_only_mini_window_on_hotkey_failure(self):
+        db = _FakeSettingsDB({"mini_window_enabled": "false", "log_level": "INFO"})
+        parent = _FakeSettingsParent()
+        dialog = SettingsDialog(parent, db, current_theme="dark", themes=FALLBACK_THEMES, max_history=100)
+        try:
+            dialog.mini_window_enabled.setChecked(True)
+            dialog.max_history_spin.setValue(222)
+            dialog.log_level_combo.setCurrentIndex(dialog.log_level_combo.findData("DEBUG"))
+            with mock.patch.object(QMessageBox, "warning") as warning_mock:
+                dialog.save_settings()
+            self.assertEqual(db.values["mini_window_enabled"], "false")
+            self.assertEqual(db.values["max_history"], 222)
+            self.assertEqual(db.values["log_level"], "DEBUG")
+            self.assertEqual(parent.register_calls, 2)
+            self.assertTrue(warning_mock.called)
+            self.assertIn("미니 창", warning_mock.call_args[0][2])
+            self.assertTrue(dialog.result())
+        finally:
+            dialog.close()
+            parent.close()
+
+    def test_import_dialog_csv_warns_and_shows_summary(self):
+        dialog = ImportDialog(None, _FakeImportExportManager())
+        try:
+            dialog.file_path.setText("sample.csv")
+            dialog._set_format_hint("sample.csv")
+            self.assertIn("CSV", dialog.format_hint.text())
+            with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes), mock.patch.object(
+                QMessageBox, "information"
+            ) as info_mock:
+                dialog.do_import()
+            self.assertTrue(info_mock.called)
+            summary = info_mock.call_args[0][2]
+            self.assertIn("가져온 항목", summary)
+            self.assertIn("사전 백업", summary)
+            self.assertIn("컬렉션 처리", summary)
+            self.assertTrue(dialog.result())
+        finally:
+            dialog.close()
+
+    def test_export_dialog_shows_report_summary_for_multiple_formats(self):
+        dialog = ExportDialog(None, _FakeImportExportManager())
+        try:
+            dialog.format_json.setChecked(True)
+            dialog.format_csv.setChecked(True)
+            dialog.format_md.setChecked(False)
+            with mock.patch(
+                "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+                side_effect=[("out.json", "JSON"), ("out.csv", "CSV")],
+            ), mock.patch.object(QMessageBox, "information") as info_mock:
+                dialog.do_export()
+            self.assertTrue(info_mock.called)
+            summary = info_mock.call_args[0][2]
+            self.assertIn("JSON", summary)
+            self.assertIn("CSV", summary)
+            self.assertIn("내보냄 3개", summary)
+            self.assertIn("CSV export warning", summary)
+            self.assertTrue(dialog.result())
         finally:
             dialog.close()
 
@@ -898,17 +1076,49 @@ class UiDialogsWidgetsTests(unittest.TestCase):
                     dialog.copy_item(1, b"encrypted")
                 single_shot.assert_called_once()
                 self.assertEqual(single_shot.call_args[0][0], 30000)
+                self.assertEqual(getattr(parent, "_vault_clipboard_expected_text", None), "vault-secret")
 
                 clipboard.setText("different-text")
                 dialog._clear_clipboard_if_unchanged("vault-secret")
                 self.assertEqual(clipboard.text(), "different-text")
+                self.assertIsNone(getattr(parent, "_vault_clipboard_expected_text", None))
 
                 clipboard.setText("vault-secret")
+                setattr(parent, "_vault_clipboard_expected_text", "vault-secret")
                 dialog._clear_clipboard_if_unchanged("vault-secret")
                 self.assertEqual(clipboard.text(), "")
+                self.assertIsNone(getattr(parent, "_vault_clipboard_expected_text", None))
         finally:
             dialog.close()
             parent.close()
+
+    def test_quit_app_impl_clears_armed_vault_clipboard(self):
+        clipboard = _FakeClipboardWriter()
+        clipboard.setText("vault-secret")
+        _FakeQuitApp.clipboard_instance = clipboard
+        _FakeQuitApp.quit_called = False
+        window = _FakeQuitWindow("vault-secret")
+
+        quit_app_impl(window, mock.Mock(), _FakeQuitKeyboard(), _FakeQuitApp)
+
+        self.assertEqual(clipboard.text(), "")
+        self.assertTrue(window.is_internal_copy)
+        self.assertTrue(window.db.closed)
+        self.assertIsNone(window._vault_clipboard_expected_text)
+        self.assertTrue(_FakeQuitApp.quit_called)
+
+    def test_quit_app_impl_leaves_non_matching_clipboard_text_untouched(self):
+        clipboard = _FakeClipboardWriter()
+        clipboard.setText("different-text")
+        _FakeQuitApp.clipboard_instance = clipboard
+        _FakeQuitApp.quit_called = False
+        window = _FakeQuitWindow("vault-secret")
+
+        quit_app_impl(window, mock.Mock(), _FakeQuitKeyboard(), _FakeQuitApp)
+
+        self.assertEqual(clipboard.text(), "different-text")
+        self.assertTrue(window.db.closed)
+        self.assertIsNone(window._vault_clipboard_expected_text)
 
 
 if __name__ == "__main__":

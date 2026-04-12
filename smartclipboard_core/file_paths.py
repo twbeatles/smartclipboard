@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Iterable
 from urllib.parse import unquote, urlparse
@@ -51,6 +52,18 @@ def file_paths_from_content(content: str | None) -> list[str]:
 
 def file_content_from_paths(paths: Iterable[str | None]) -> str:
     return "\n".join(normalize_local_file_paths(paths))
+
+
+def file_signature_from_paths(paths: Iterable[str | None]) -> str:
+    normalized_paths = normalize_local_file_paths(paths)
+    if not normalized_paths:
+        return ""
+    signature_source = "\n".join(sorted(os.path.normcase(path) for path in normalized_paths))
+    return hashlib.sha256(signature_source.encode("utf-8")).hexdigest()
+
+
+def file_signature_from_content(content: str | None) -> str:
+    return file_signature_from_paths(file_paths_from_content(content))
 
 
 def file_duplicate_signature(paths: Iterable[str | None]) -> tuple[str, ...]:
@@ -140,6 +153,8 @@ __all__ = [
     "file_content_from_paths",
     "file_duplicate_signature",
     "file_paths_from_content",
+    "file_signature_from_content",
+    "file_signature_from_paths",
     "normalize_local_file_path",
     "normalize_local_file_paths",
     "partition_existing_file_paths",

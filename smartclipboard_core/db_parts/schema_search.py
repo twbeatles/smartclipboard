@@ -1,6 +1,8 @@
 from __future__ import annotations
 import sqlite3
 
+from smartclipboard_core.file_paths import file_signature_from_content
+
 from .shared import FILTER_TAG_MAP, history_order_by, logger
 
 class SchemaSearchMixin:
@@ -89,6 +91,11 @@ class SchemaSearchMixin:
                 cursor.execute("ALTER TABLE history ADD COLUMN file_path TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+            # v10.7: file_signature 컬럼 추가 (FILE 중복 탐지 최적화)
+            try:
+                cursor.execute("ALTER TABLE history ADD COLUMN file_signature TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
             # v8.0: url_title 컬럼 추가 (링크 제목 캐시)
             try:
                 cursor.execute("ALTER TABLE history ADD COLUMN url_title TEXT DEFAULT ''")
@@ -169,9 +176,23 @@ class SchemaSearchMixin:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_type ON history(type)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_bookmark ON history(bookmark)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_file_signature ON history(file_signature)")
             except sqlite3.OperationalError as e:
                 logger.debug(f"Index creation skipped: {e}")
-            
+
+            try:
+                cursor.execute(
+                    "SELECT id, content FROM history WHERE type = 'FILE' AND COALESCE(file_signature, '') = ''"
+                )
+                stale_file_rows = cursor.fetchall()
+                for item_id, content in stale_file_rows:
+                    cursor.execute(
+                        "UPDATE history SET file_signature = ? WHERE id = ?",
+                        (file_signature_from_content(content), item_id),
+                    )
+            except sqlite3.OperationalError as e:
+                logger.debug(f"FILE signature backfill skipped: {e}")
+             
             self.conn.commit()
             logger.info("DB 테이블 초기화 완료 (v10.1)")
 
@@ -348,7 +369,8 @@ class SchemaSearchMixin:
                     cursor.execute(sql, params)
                     rows = cursor.fetchall()
                     self._last_search_used_fts = True
-                    return rows
+                    if rows:
+                        return rows
                 except sqlite3.Error as e:
                     self._last_search_fallback = True
                     self._last_search_error = str(e)

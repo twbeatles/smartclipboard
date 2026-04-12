@@ -56,12 +56,25 @@
   - payload 반영 동기화 검증: `tests/test_payload_sync.py`
   - 현재 로더 구조에서는 로더 기반 결과와 소스 본문 기준 결과가 다를 수 있으므로 `legacy_main_src.py` 기준으로 확인합니다.
 
+## 3.1 2026-04-12 Stable Contract
+
+- `ExportImportManager` public API는 계속 `int`를 반환하고, 세부 요약은 `last_import_report` / `last_export_report`에서 읽습니다.
+- JSON/CSV import는 항상 pre-import backup을 만든 뒤 파일 단위 단일 트랜잭션으로 반영하며, 실패 시 전체 rollback 됩니다.
+- `search_items()`는 FTS-first 정책을 유지하고 FTS 0건일 때만 LIKE 보완 검색을 수행합니다. `_last_search_fallback`은 실제 FTS 오류일 때만 UI 경고용으로 사용합니다.
+- `ClipboardActionManager.fetch_title`은 URL dedupe/cache와 전용 `QThreadPool(maxThreadCount=4)` 위에서 동작하며, stale URL 결과는 현재 row URL을 다시 확인한 뒤에만 저장합니다.
+- `FILE` duplicate detection은 `history.file_signature` lookup을 사용하므로 path canonicalization 규칙을 깨면 안 됩니다.
+- 보안 보관함 복호화 텍스트는 armed clipboard state로 추적되며 30초 조건부 clear와 종료 시 즉시 clear를 모두 유지합니다.
+- `mini_window_enabled` 변경 후 hotkey 재등록이 실패하면 그 설정만 rollback 하고 실제 `_last_hotkey_error`를 사용자 경고로 노출합니다.
+- `smartclipboard.spec`은 이번 안정화에서도 추가 hidden import/datas 증설 없이 유지 가능합니다.
+
 ## 4. 필수 검증
 
 ```powershell
 python scripts/preflight_local.py
 pyright <touched-files>
 ```
+
+optional runtime dependency까지 CI와 같은 강도로 확인하려면 `python scripts/preflight_local.py --strict-optional-deps`를 추가 실행합니다.
 
 - 현재 repo-wide `pyright`는 `smartclipboard_core/db_parts/*.py` mixin attribute-access 노이즈가 남아 있으므로, 최소 게이트는 `preflight_local.py`이고 `pyright`는 변경 파일 기준으로 병행합니다.
 
@@ -107,7 +120,7 @@ pyinstaller --clean smartclipboard.spec
 - Python 매트릭스: `3.10`, `3.11`, `3.12`, `3.13`
 - 단계:
   - `scripts/build_legacy_payload.py --smoke-import`
-  - `scripts/preflight_local.py --skip-payload-build`
+  - `scripts/preflight_local.py --skip-payload-build --strict-optional-deps`
 
 ## 8. MainWindow 분할 리팩토링 작업 규칙 (2026-03-07)
 

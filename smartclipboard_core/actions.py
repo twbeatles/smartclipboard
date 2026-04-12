@@ -30,6 +30,7 @@ from .worker import Worker
 
 logger = logging.getLogger(__name__)
 TITLE_FETCH_MAX_BYTES = 1024 * 1024
+TITLE_FETCH_MAX_THREADS = 4
 URL_TRAILING_PUNCTUATION = ".,!?:;"
 BLOCKED_TITLE_HOSTS = {
     "localhost",
@@ -82,11 +83,12 @@ class ClipboardActionManager(QObject):
         self.db = db
         self.actions_cache = []
         self._is_shutting_down = False
+        self._title_cache: dict[str, str] = {}
+        self._pending_by_url: dict[str, set[object]] = {}
+        self._pending_action_name_by_url: dict[str, str] = {}
         self.reload_actions()
-        threadpool = QThreadPool.globalInstance()
-        if threadpool is None:
-            threadpool = QThreadPool()
-        self.threadpool = threadpool
+        self.threadpool = QThreadPool()
+        self.threadpool.setMaxThreadCount(TITLE_FETCH_MAX_THREADS)
 
     def reload_actions(self):
         """액션 규칙 캐시 갱신 - 정규식 사전 컴파일 최적화."""
@@ -177,12 +179,30 @@ class ClipboardActionManager(QObject):
             )
             return
 
-        worker = Worker(self._fetch_title_logic, url, item_id)
-        worker.signals.result.connect(lambda res: self._handle_title_result(res, action_name))
+        cached_title = self._title_cache.get(url)
+        if cached_title:
+            if item_id:
+                if self._update_title_for_current_item(item_id, url, cached_title):
+                    self.action_completed.emit(action_name, {"type": "title", "title": cached_title})
+                else:
+                    self.action_completed.emit(action_name, {"type": "notify", "message": "URL 제목을 저장하지 못했습니다."})
+            else:
+                self.action_completed.emit(action_name, {"type": "title", "title": cached_title})
+            return
+
+        pending_item_ids = self._pending_by_url.setdefault(url, set())
+        if item_id is not None:
+            pending_item_ids.add(item_id)
+        if url in self._pending_action_name_by_url:
+            return
+
+        self._pending_action_name_by_url[url] = action_name
+        worker = Worker(self._fetch_title_logic, url)
+        worker.signals.result.connect(lambda res, request_url=url: self._handle_title_result(res, request_url))
         self.threadpool.start(worker)
 
     @staticmethod
-    def _fetch_title_logic(url, item_id):
+    def _fetch_title_logic(url, item_id=None):
         """작업 스레드에서 실행될 로직."""
         response = None
         try:
@@ -225,19 +245,42 @@ class ClipboardActionManager(QObject):
                 except Exception:
                     pass
 
-    def _handle_title_result(self, result, action_name):
+    def _update_title_for_current_item(self, item_id: int, request_url: str, title: str) -> bool:
+        if not item_id or not title:
+            return False
+        data = self.db.get_content(item_id)
+        if not data:
+            return False
+        current_content, _blob, _type = data
+        if extract_first_url(current_content or "") != request_url:
+            return False
+        return self.db.update_url_title(item_id, title)
+
+    def _handle_title_result(self, result, request_url):
         """비동기 결과 처리 (메인 스레드)."""
+        url = result.get("url") or request_url
+        action_name = self._pending_action_name_by_url.pop(url, "fetch_title")
+        pending_item_ids = self._pending_by_url.pop(url, set())
+
         if self._is_shutting_down or not self._db_is_available():
             logger.debug("Ignoring title result after shutdown or DB close")
             return
-        title = result.get("title")
-        item_id = result.get("item_id")
 
-        if title and item_id:
-            if self.db.update_url_title(item_id, title):
-                self.action_completed.emit(action_name, {"type": "title", "title": title})
+        title = result.get("title")
+
+        if title:
+            self._title_cache[url] = title
+            updated_any = False
+            if pending_item_ids:
+                for pending_item_id in pending_item_ids:
+                    if isinstance(pending_item_id, int) and self._update_title_for_current_item(pending_item_id, url, title):
+                        updated_any = True
+                if updated_any:
+                    self.action_completed.emit(action_name, {"type": "title", "title": title})
+                else:
+                    self.action_completed.emit(action_name, {"type": "notify", "message": "URL 제목을 저장하지 못했습니다."})
             else:
-                self.action_completed.emit(action_name, {"type": "notify", "message": "URL 제목을 저장하지 못했습니다."})
+                self.action_completed.emit(action_name, {"type": "title", "title": title})
             return
 
         self.action_completed.emit(action_name, {"type": "notify", "message": "URL 제목을 가져오지 못했습니다."})

@@ -117,4 +117,6 @@ pyinstaller --clean smartclipboard.spec
 - Local guard now compiles both helper folders via `scripts/preflight_local.py`.
 - Added API surface tests: `tests/test_public_surfaces.py` and `tests/baseline/clipboarddb_public_methods.txt`.
 - Packaging guard: `smartclipboard.spec` now explicitly includes `smartclipboard_core.db_parts` collection.
+- 2026-04-12 Note: 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
+- 2026-04-12 Note: import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
 - 2026-04-11 기준 추가 hidden import/datas 증설은 필요하지 않으며, 현재 spec 범위로 패키징이 유지됩니다.

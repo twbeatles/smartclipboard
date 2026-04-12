@@ -249,15 +249,10 @@ class SettingsDialog(QDialog):
     def save_settings(self):
         selected_theme = cast(str, self.theme_combo.currentData() or self.current_theme)
         current_theme = self.current_theme
+        previous_mini_enabled = str(self.db.get_setting("mini_window_enabled", "true") or "true")
 
         self.db.set_setting("theme", selected_theme)
         self.db.set_setting("max_history", self.max_history_spin.value())
-
-        mini_enabled = "true" if self.mini_window_enabled.isChecked() else "false"
-        self.db.set_setting("mini_window_enabled", mini_enabled)
-        hotkey_parent = _hotkey_parent(self.parent())
-        if hotkey_parent is not None:
-            hotkey_parent.register_hotkeys()
 
         selected_log_level = cast(str, self.log_level_combo.currentData() or "INFO")
         self.db.set_setting("log_level", selected_log_level)
@@ -277,11 +272,32 @@ class SettingsDialog(QDialog):
             for handler in self.logger.handlers:
                 handler.setLevel(level)
 
+        mini_enabled = "true" if self.mini_window_enabled.isChecked() else "false"
+        hotkey_parent = _hotkey_parent(self.parent())
+        hotkey_warning = ""
+        if mini_enabled != previous_mini_enabled:
+            self.db.set_setting("mini_window_enabled", mini_enabled)
+            if hotkey_parent is not None and hotkey_parent.register_hotkeys() is False:
+                self.db.set_setting("mini_window_enabled", previous_mini_enabled)
+                hotkey_parent.register_hotkeys()
+                self.mini_window_enabled.setChecked(_parse_bool_setting(previous_mini_enabled, default=True))
+                hotkey_error = getattr(hotkey_parent, "_last_hotkey_error", "") or "unknown hotkey registration error"
+                hotkey_warning = (
+                    "설정 저장은 완료됐지만 미니 창 핫키 재적용에 실패해 해당 설정만 되돌렸습니다.\n\n"
+                    f"오류: {hotkey_error}"
+                )
+        else:
+            self.db.set_setting("mini_window_enabled", mini_enabled)
+
         if selected_theme != current_theme:
-            QMessageBox.information(self, "테마 변경", "설정한 테마가 적용되었습니다.")
             theme_parent = _theme_parent(self.parent())
             if theme_parent is not None:
                 theme_parent.change_theme(selected_theme)
+            if not hotkey_warning:
+                QMessageBox.information(self, "테마 변경", "설정한 테마가 적용되었습니다.")
+
+        if hotkey_warning:
+            QMessageBox.warning(self, "일부 설정 되돌림", hotkey_warning)
 
         self.accept()
 

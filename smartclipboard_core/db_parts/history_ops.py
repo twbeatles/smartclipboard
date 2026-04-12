@@ -5,88 +5,102 @@ import sqlite3
 
 from smartclipboard_core.file_paths import (
     file_content_from_paths,
-    file_duplicate_signature,
     file_paths_from_content,
+    file_signature_from_paths,
 )
 
 from .shared import CLEANUP_INTERVAL, DEFAULT_MAX_HISTORY, FILTER_TAG_MAP, history_order_by, logger
 
 class HistoryOpsMixin:
+    def _add_item_locked(
+        self,
+        cursor,
+        content: str,
+        image_data: bytes | None,
+        type_tag: str,
+        timestamp: str | None = None,
+    ) -> tuple[int | bool, bool]:
+        """Insert/update a history item without committing the transaction."""
+        item_timestamp = timestamp or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        updated_existing = False
+
+        if type_tag == "FILE":
+            normalized_paths = file_paths_from_content(content)
+            normalized_content = file_content_from_paths(normalized_paths)
+            if not normalized_content:
+                return False, False
+
+            file_path = normalized_paths[0]
+            file_signature = file_signature_from_paths(normalized_paths)
+            cursor.execute(
+                "SELECT id FROM history WHERE type = 'FILE' AND file_signature = ? "
+                "ORDER BY timestamp DESC, id DESC LIMIT 1",
+                (file_signature,),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                item_id = int(existing[0])
+                cursor.execute(
+                    "UPDATE history SET content = ?, image_data = NULL, type = ?, timestamp = ?, "
+                    "file_path = ?, file_signature = ? WHERE id = ?",
+                    (normalized_content, type_tag, item_timestamp, file_path, file_signature, item_id),
+                )
+                updated_existing = True
+            else:
+                cursor.execute(
+                    "INSERT INTO history (content, image_data, type, timestamp, file_path, file_signature) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (normalized_content, None, type_tag, item_timestamp, file_path, file_signature),
+                )
+                item_id = cursor.lastrowid
+                if item_id is None:
+                    raise sqlite3.Error("Inserted history row has no id")
+            return item_id, updated_existing
+
+        if type_tag != "IMAGE":
+            cursor.execute(
+                "SELECT id FROM history WHERE content = ? AND type NOT IN ('IMAGE', 'FILE') "
+                "ORDER BY timestamp DESC, id DESC LIMIT 1",
+                (content,),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                item_id = int(existing[0])
+                cursor.execute(
+                    "UPDATE history SET content = ?, image_data = NULL, type = ?, timestamp = ?, "
+                    "file_path = '', file_signature = '' WHERE id = ?",
+                    (content, type_tag, item_timestamp, item_id),
+                )
+                updated_existing = True
+            else:
+                cursor.execute(
+                    "INSERT INTO history (content, image_data, type, timestamp, file_path, file_signature) "
+                    "VALUES (?, ?, ?, ?, '', '')",
+                    (content, image_data, type_tag, item_timestamp),
+                )
+                item_id = cursor.lastrowid
+                if item_id is None:
+                    raise sqlite3.Error("Inserted history row has no id")
+            return item_id, updated_existing
+
+        cursor.execute(
+            "INSERT INTO history (content, image_data, type, timestamp, file_path, file_signature) "
+            "VALUES (?, ?, ?, ?, '', '')",
+            (content, image_data, type_tag, item_timestamp),
+        )
+        item_id = cursor.lastrowid
+        if item_id is None:
+            raise sqlite3.Error("Inserted history row has no id")
+        return item_id, False
+
     def add_item(self, content: str, image_data: bytes | None, type_tag: str) -> int | bool:
         """항목 추가. 동일 텍스트는 기존 항목을 최신 상태로 갱신."""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                updated_existing = False
-                file_path = ""
-
-                if type_tag == "FILE":
-                    normalized_paths = file_paths_from_content(content)
-                    normalized_content = file_content_from_paths(normalized_paths)
-                    if not normalized_content:
-                        return False
-
-                    file_path = normalized_paths[0]
-                    target_signature = file_duplicate_signature(normalized_paths)
-                    existing = None
-                    cursor.execute(
-                        "SELECT id, content FROM history WHERE type = 'FILE' "
-                        "ORDER BY timestamp DESC, id DESC"
-                    )
-                    for existing_id, existing_content in cursor.fetchall():
-                        if file_duplicate_signature(file_paths_from_content(existing_content)) == target_signature:
-                            existing = (existing_id,)
-                            break
-
-                    if existing:
-                        item_id = int(existing[0])
-                        cursor.execute(
-                            "UPDATE history SET content = ?, image_data = NULL, type = ?, timestamp = ?, file_path = ? "
-                            "WHERE id = ?",
-                            (normalized_content, type_tag, timestamp, file_path, item_id),
-                        )
-                        updated_existing = True
-                    else:
-                        cursor.execute(
-                            "INSERT INTO history (content, image_data, type, timestamp, file_path) "
-                            "VALUES (?, ?, ?, ?, ?)",
-                            (normalized_content, None, type_tag, timestamp, file_path),
-                        )
-                        item_id = cursor.lastrowid
-                        if item_id is None:
-                            raise sqlite3.Error("Inserted history row has no id")
-                elif type_tag != "IMAGE":
-                    cursor.execute(
-                        "SELECT id FROM history WHERE content = ? AND type NOT IN ('IMAGE', 'FILE') "
-                        "ORDER BY timestamp DESC, id DESC LIMIT 1",
-                        (content,),
-                    )
-                    existing = cursor.fetchone()
-                    if existing:
-                        item_id = int(existing[0])
-                        cursor.execute(
-                            "UPDATE history SET content = ?, image_data = NULL, type = ?, timestamp = ?, file_path = '' "
-                            "WHERE id = ?",
-                            (content, type_tag, timestamp, item_id),
-                        )
-                        updated_existing = True
-                    else:
-                        cursor.execute(
-                            "INSERT INTO history (content, image_data, type, timestamp, file_path) VALUES (?, ?, ?, ?, '')",
-                            (content, image_data, type_tag, timestamp),
-                        )
-                        item_id = cursor.lastrowid
-                        if item_id is None:
-                            raise sqlite3.Error("Inserted history row has no id")
-                else:
-                    cursor.execute(
-                        "INSERT INTO history (content, image_data, type, timestamp, file_path) VALUES (?, ?, ?, ?, '')",
-                        (content, image_data, type_tag, timestamp),
-                    )
-                    item_id = cursor.lastrowid
-                    if item_id is None:
-                        raise sqlite3.Error("Inserted history row has no id")
+                item_id, updated_existing = self._add_item_locked(cursor, content, image_data, type_tag)
+                if not item_id:
+                    return False
 
                 self.conn.commit()
 
@@ -526,6 +540,20 @@ class HistoryOpsMixin:
 
     def set_item_metadata(self, item_id: int, **metadata) -> bool:
         """항목 메타데이터를 키-값 형태로 일괄 업데이트."""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                updated = self._set_item_metadata_locked(cursor, item_id, **metadata)
+                if updated:
+                    self.conn.commit()
+                return updated
+            except sqlite3.Error as e:
+                logger.error(f"Set Metadata Error: {e}")
+                self.conn.rollback()
+                return False
+
+    def _set_item_metadata_locked(self, cursor, item_id: int, **metadata) -> bool:
+        """Update metadata without committing the outer transaction."""
         allowed = {
             "tags",
             "note",
@@ -540,19 +568,11 @@ class HistoryOpsMixin:
         if not updates:
             return True
 
-        with self.lock:
-            try:
-                cursor = self.conn.cursor()
-                cols = ", ".join(f"{k} = ?" for k in updates.keys())
-                params = list(updates.values())
-                params.append(item_id)
-                cursor.execute(f"UPDATE history SET {cols} WHERE id = ?", params)
-                self.conn.commit()
-                return True
-            except sqlite3.Error as e:
-                logger.error(f"Set Metadata Error: {e}")
-                self.conn.rollback()
-                return False
+        cols = ", ".join(f"{k} = ?" for k in updates.keys())
+        params = list(updates.values())
+        params.append(item_id)
+        cursor.execute(f"UPDATE history SET {cols} WHERE id = ?", params)
+        return True
 
     def add_temp_item(self, content, image_data, type_tag, minutes=30):
         """임시 항목 추가 (N분 후 자동 만료)"""
@@ -561,8 +581,11 @@ class HistoryOpsMixin:
                 cursor = self.conn.cursor()
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 expires_at = (datetime.datetime.now() + datetime.timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
-                cursor.execute("INSERT INTO history (content, image_data, type, timestamp, expires_at) VALUES (?, ?, ?, ?, ?)",
-                               (content, image_data, type_tag, timestamp, expires_at))
+                cursor.execute(
+                    "INSERT INTO history (content, image_data, type, timestamp, expires_at, file_path, file_signature) "
+                    "VALUES (?, ?, ?, ?, ?, '', '')",
+                    (content, image_data, type_tag, timestamp, expires_at),
+                )
                 self.conn.commit()
                 return cursor.lastrowid
             except sqlite3.Error as e:

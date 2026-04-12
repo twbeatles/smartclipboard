@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+
 
 def update_tray_theme_impl(self, THEMES):
     theme = THEMES.get(self.current_theme, THEMES["dark"])
@@ -93,6 +95,20 @@ def run_periodic_cleanup_impl(self, logger):
 def quit_app_impl(self, logger, keyboard, qapplication_cls):
     logger.info("앱 종료 시작...")
     try:
+        armed_vault_text = getattr(self, "_vault_clipboard_expected_text", None)
+        if armed_vault_text:
+            clipboard = qapplication_cls.clipboard()
+            if clipboard is not None:
+                try:
+                    if clipboard.text() == armed_vault_text:
+                        mark_internal_copy(self)
+                        clipboard.setText("")
+                        logger.debug("Cleared armed vault clipboard during shutdown")
+                except Exception as clipboard_exc:
+                    logger.debug(f"Vault clipboard cleanup skipped during shutdown: {clipboard_exc}")
+            self._vault_clipboard_expected_text = None
+            self._vault_clipboard_expires_at = None
+
         if hasattr(self, "settings"):
             self.settings.setValue("geometry", self.saveGeometry())
 

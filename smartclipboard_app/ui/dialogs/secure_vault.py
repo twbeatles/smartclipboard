@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Protocol, TypeVar, cast
 
 from PyQt6.QtCore import Qt, QTimer
@@ -25,6 +26,7 @@ from PyQt6.QtWidgets import (
 from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
 
 T = TypeVar("T")
+VAULT_CLIPBOARD_CLEAR_MS = 30000
 
 
 class _VaultParent(Protocol):
@@ -40,6 +42,23 @@ def _vault_parent(value: object | None) -> _VaultParent | None:
     if value is not None and hasattr(value, "statusBar"):
         return cast(_VaultParent, value)
     return None
+
+
+def _arm_parent_vault_clipboard(parent_window: object | None, plaintext: str) -> None:
+    if parent_window is None:
+        return
+    setattr(parent_window, "_vault_clipboard_expected_text", plaintext)
+    setattr(parent_window, "_vault_clipboard_expires_at", time.monotonic() + (VAULT_CLIPBOARD_CLEAR_MS / 1000))
+
+
+def _disarm_parent_vault_clipboard(parent_window: object | None, expected_text: str | None = None) -> None:
+    if parent_window is None:
+        return
+    armed_text = getattr(parent_window, "_vault_clipboard_expected_text", None)
+    if expected_text is not None and armed_text != expected_text:
+        return
+    setattr(parent_window, "_vault_clipboard_expected_text", None)
+    setattr(parent_window, "_vault_clipboard_expires_at", None)
 
 
 class SecureVaultDialog(QDialog):
@@ -253,24 +272,29 @@ class SecureVaultDialog(QDialog):
                 status_bar = parent.statusBar()
                 if status_bar is not None:
                     status_bar.showMessage("✅ 복호화된 내용이 클립보드에 복사되었습니다.", 3000)
+            _arm_parent_vault_clipboard(self.parent_window, decrypted)
             self._schedule_clipboard_clear(decrypted)
         else:
             QMessageBox.warning(self, "오류", "복호화에 실패했습니다. 보관함을 다시 열어주세요.")
 
     def _schedule_clipboard_clear(self, text):
-        QTimer.singleShot(30000, lambda expected=text: self._clear_clipboard_if_unchanged(expected))
+        QTimer.singleShot(VAULT_CLIPBOARD_CLEAR_MS, lambda expected=text: self._clear_clipboard_if_unchanged(expected))
 
     def _clear_clipboard_if_unchanged(self, expected_text):
         clipboard = QApplication.clipboard()
         if clipboard is None:
+            _disarm_parent_vault_clipboard(self.parent_window, expected_text)
             return
         try:
             if clipboard.text() != expected_text:
+                _disarm_parent_vault_clipboard(self.parent_window, expected_text)
                 return
         except Exception:
+            _disarm_parent_vault_clipboard(self.parent_window, expected_text)
             return
         mark_internal_copy(self.parent_window)
         clipboard.setText("")
+        _disarm_parent_vault_clipboard(self.parent_window, expected_text)
 
     def change_master_password(self):
         if not self.vault.is_unlocked:

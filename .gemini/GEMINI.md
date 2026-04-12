@@ -97,3 +97,14 @@ pyinstaller --clean smartclipboard.spec
   - `tests/test_public_surfaces.py`
   - `tests/baseline/clipboarddb_public_methods.txt`
 - `smartclipboard.spec` explicitly collects `smartclipboard_core.db_parts` submodules.
+
+## 2026-04-12 Stabilization Notes
+
+- `ExportImportManager` public API still returns `int`, and detailed results live in `last_import_report` / `last_export_report`.
+- JSON/CSV import now always creates a pre-import backup and applies each file inside one DB transaction, so partial writes do not survive failures.
+- `search_items()` remains FTS-first and only uses LIKE as a zero-hit supplement or true FTS-error fallback. UI warning state should only represent real FTS errors.
+- `ClipboardActionManager.fetch_title` uses URL-level in-flight dedupe, an in-memory title cache, and a dedicated `QThreadPool(maxThreadCount=4)`. Late results must re-check the current row URL before saving.
+- `FILE` duplicate detection now depends on `history.file_signature`; keep path canonicalization rules aligned across insert/update/restore code paths.
+- Vault clipboard plaintext is tracked only in-process via an armed state and must be conditionally cleared after 30 seconds and again on shutdown if still present.
+- `mini_window_enabled` save failures should roll back only that setting and surface `_last_hotkey_error` to the user.
+- For CI-equivalent dependency verification, run `python scripts/preflight_local.py --strict-optional-deps`.

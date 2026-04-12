@@ -16,6 +16,7 @@ from smartclipboard_core.file_paths import (
     build_file_paths_tooltip,
     describe_file_paths_with_status,
     file_content_from_paths,
+    file_signature_from_paths,
 )
 
 
@@ -31,6 +32,7 @@ class FakeActionDB:
     def __init__(self, actions):
         self._actions = actions
         self.updated_titles = []
+        self.contents = {}
 
     def get_clipboard_actions(self):
         return self._actions
@@ -38,6 +40,9 @@ class FakeActionDB:
     def update_url_title(self, item_id, title):
         self.updated_titles.append((item_id, title))
         return True
+
+    def get_content(self, item_id):
+        return self.contents.get(item_id)
 
 
 class _FakeHTMLResponse:
@@ -146,6 +151,60 @@ class CoreActionTests(unittest.TestCase):
                 result = manager.format_phone(raw)
                 self.assertIsNotNone(result)
                 self.assertEqual(result["formatted"], expected)
+
+    def test_fetch_url_title_async_deduplicates_inflight_requests_by_url(self):
+        db = FakeActionDB([])
+        manager = ClipboardActionManager(db)
+        started_workers = []
+        manager.threadpool.start = lambda worker: started_workers.append(worker)
+
+        manager.fetch_url_title_async("https://example.com/post", 1, "fetch")
+        manager.fetch_url_title_async("https://example.com/post", 2, "fetch")
+
+        self.assertEqual(len(started_workers), 1)
+        self.assertEqual(manager._pending_by_url["https://example.com/post"], {1, 2})
+        self.assertEqual(manager.threadpool.maxThreadCount(), 4)
+
+    def test_fetch_url_title_async_uses_in_memory_cache(self):
+        db = FakeActionDB([])
+        db.contents[3] = ("Cached https://example.com/cache", None, "LINK")
+        manager = ClipboardActionManager(db)
+        manager._title_cache["https://example.com/cache"] = "Cached Title"
+
+        start_calls = []
+        manager.threadpool.start = lambda worker: start_calls.append(worker)
+        emitted = []
+        manager.action_completed.connect(lambda action_name, result: emitted.append((action_name, result)))
+
+        manager.fetch_url_title_async("https://example.com/cache", 3, "fetch")
+
+        self.assertEqual(start_calls, [])
+        self.assertEqual(db.updated_titles, [(3, "Cached Title")])
+        self.assertEqual(emitted[0][1]["title"], "Cached Title")
+
+    def test_handle_title_result_updates_all_subscribers_for_same_url(self):
+        db = FakeActionDB([])
+        db.contents[1] = ("first https://example.com/shared", None, "LINK")
+        db.contents[2] = ("second https://example.com/shared", None, "LINK")
+        manager = ClipboardActionManager(db)
+        manager._pending_by_url["https://example.com/shared"] = {1, 2}
+        manager._pending_action_name_by_url["https://example.com/shared"] = "fetch"
+
+        manager._handle_title_result({"url": "https://example.com/shared", "title": "Shared Title"}, "https://example.com/shared")
+
+        self.assertEqual(db.updated_titles, [(1, "Shared Title"), (2, "Shared Title")])
+        self.assertEqual(manager._title_cache["https://example.com/shared"], "Shared Title")
+
+    def test_handle_title_result_ignores_stale_item_url(self):
+        db = FakeActionDB([])
+        db.contents[5] = ("moved to https://example.com/other", None, "LINK")
+        manager = ClipboardActionManager(db)
+        manager._pending_by_url["https://example.com/original"] = {5}
+        manager._pending_action_name_by_url["https://example.com/original"] = "fetch"
+
+        manager._handle_title_result({"url": "https://example.com/original", "title": "Late Title"}, "https://example.com/original")
+
+        self.assertEqual(db.updated_titles, [])
 
 
 class CoreDatabaseTests(unittest.TestCase):
@@ -536,6 +595,89 @@ class CoreDatabaseTests(unittest.TestCase):
                 csv_db.close()
             dst_tmp.cleanup()
 
+    def test_export_and_import_reports_capture_summary_details(self):
+        item_id = self.db.add_item("report-item", None, "TEXT")
+        self.assertTrue(item_id)
+        manager = ExportImportManager(self.db)
+        export_path = os.path.join(self.tmpdir.name, "report.json")
+
+        exported = manager.export_json(export_path, include_metadata=True)
+        self.assertEqual(exported, 1)
+        self.assertTrue(manager.last_export_report["success"])
+        self.assertEqual(manager.last_export_report["format"], "json")
+        self.assertEqual(manager.last_export_report["exported"], 1)
+
+        dst_tmp = _workspace_tempdir()
+        dst_db = None
+        try:
+            dst_db = ClipboardDB(
+                db_file=os.path.join(dst_tmp.name, "clipboard_history_v6.db"),
+                app_dir=dst_tmp.name,
+            )
+            dst_manager = ExportImportManager(dst_db)
+            imported = dst_manager.import_json(export_path)
+            self.assertEqual(imported, 1)
+            self.assertTrue(dst_manager.last_import_report["success"])
+            self.assertEqual(dst_manager.last_import_report["format"], "json")
+            self.assertIsNotNone(dst_manager.last_import_report["backup_path"])
+            self.assertTrue(os.path.exists(dst_manager.last_import_report["backup_path"]))
+        finally:
+            if dst_db is not None:
+                dst_db.close()
+            dst_tmp.cleanup()
+
+    def test_import_json_rolls_back_all_rows_on_unexpected_failure(self):
+        payload = {
+            "items": [
+                {"content": "first-item", "type": "TEXT", "timestamp": "2026-04-10 10:00:00"},
+                {"content": "second-item", "type": "TEXT", "timestamp": "2026-04-10 10:01:00"},
+            ]
+        }
+        import_path = os.path.join(self.tmpdir.name, "rollback.json")
+        with open(import_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+
+        manager = ExportImportManager(self.db)
+        original_add_item_locked = self.db._add_item_locked
+        call_count = {"value": 0}
+
+        def failing_add_item_locked(cursor, content, image_data, type_tag, timestamp=None):
+            call_count["value"] += 1
+            if call_count["value"] == 2:
+                raise RuntimeError("simulated import failure")
+            return original_add_item_locked(cursor, content, image_data, type_tag, timestamp=timestamp)
+
+        with mock.patch.object(self.db, "_add_item_locked", side_effect=failing_add_item_locked):
+            imported = manager.import_json(import_path)
+
+        self.assertEqual(imported, -1)
+        self.assertEqual(self.db.get_items("", "?꾩껜"), [])
+        self.assertIsNotNone(manager.last_import_report["backup_path"])
+        self.assertTrue(os.path.exists(manager.last_import_report["backup_path"]))
+
+    def test_file_signature_backfill_restores_missing_values(self):
+        file_a = os.path.join(self.tmpdir.name, "sig-a.txt")
+        file_b = os.path.join(self.tmpdir.name, "sig-b.txt")
+        with open(file_a, "w", encoding="utf-8") as fh:
+            fh.write("alpha")
+        with open(file_b, "w", encoding="utf-8") as fh:
+            fh.write("beta")
+
+        item_id = self.db.add_item(file_content_from_paths([file_a, file_b]), None, "FILE")
+        expected_signature = file_signature_from_paths([file_a, file_b])
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("UPDATE history SET file_signature = '' WHERE id = ?", (item_id,))
+            self.db.conn.commit()
+
+        self.db.create_tables()
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT file_signature FROM history WHERE id = ?", (item_id,))
+            restored_signature = cursor.fetchone()[0]
+        self.assertEqual(restored_signature, expected_signature)
+
     def test_cleanup_uses_timestamp_order_for_refreshed_duplicates(self):
         first_id = self.db.add_item("duplicate-cleanup", None, "TEXT")
         second_id = self.db.add_item("keep-or-delete", None, "TEXT")
@@ -854,6 +996,28 @@ class CoreDatabaseSearchTests(unittest.TestCase):
         # Ensure punctuation-heavy queries do not crash (sanitized for FTS safety).
         weird = {row[0] for row in self.db.search_items('("alpha") -- !!')}
         self.assertIn(tags_only_id, weird)
+
+    def test_search_items_uses_like_fallback_when_fts_returns_zero_rows(self):
+        item_id = self.db.add_item("smartclipboard", None, "TEXT")
+
+        rows = self.db.search_items("clip")
+
+        self.assertEqual({row[0] for row in rows}, {item_id})
+        self.assertFalse(getattr(self.db, "_last_search_fallback", True))
+        self.assertTrue(getattr(self.db, "_last_search_used_fts", False))
+
+    def test_search_items_sets_fallback_flag_only_on_real_fts_error(self):
+        item_id = self.db.add_item("alpha-note", None, "TEXT")
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("DROP TABLE history_fts")
+            self.db.conn.commit()
+
+        rows = self.db.search_items("alpha")
+
+        self.assertEqual({row[0] for row in rows}, {item_id})
+        self.assertTrue(getattr(self.db, "_last_search_fallback", False))
+        self.assertIsNotNone(getattr(self.db, "_last_search_error", None))
 
     def test_search_items_keeps_pinned_first(self):
         pinned_a = self.db.add_item("pinned-a", None, "TEXT")

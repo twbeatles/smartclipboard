@@ -38,4 +38,4 @@ jobs:
 
       - name: Run preflight checks
         run: |
-          python scripts/preflight_local.py --skip-payload-build
+          python scripts/preflight_local.py --skip-payload-build --strict-optional-deps

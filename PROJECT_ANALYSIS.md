@@ -728,6 +728,18 @@ pyinstaller --clean smartclipboard.spec
 - 파일: `.github/workflows/ci.yml`
 - 환경: `windows-latest`
 - 매트릭스: Python 3.10 / 3.11 / 3.12 / 3.13
+- preflight 단계: `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps`
+
+## 12. 2026-04-12 Stabilization Delta
+
+- `ExportImportManager`는 public `int` return을 유지하면서 `last_import_report` / `last_export_report`에 결과 요약을 남긴다.
+- JSON/CSV import는 pre-import backup 생성 후 파일 단위 단일 트랜잭션으로 반영되어 중간 실패 시 전체 rollback 된다.
+- 검색은 FTS-first이며 FTS 0건 시 LIKE 보완 검색을 수행하고, `_last_search_fallback`은 실제 FTS 오류일 때만 UI 경고 상태를 나타낸다.
+- URL title fetch는 전용 `QThreadPool(maxThreadCount=4)`과 URL dedupe/cache를 사용하며 stale late result는 현재 row URL을 다시 확인한 뒤에만 저장한다.
+- `history` schema는 `file_path` 외에 `file_signature` 기반 FILE duplicate lookup을 사용한다.
+- Vault clipboard plaintext는 armed in-process state로 추적되어 30초 조건부 clear와 종료 시 즉시 clear를 모두 수행한다.
+- `mini_window_enabled` 저장 후 hotkey 재등록 실패 시 그 설정만 rollback 하고 실제 `_last_hotkey_error`를 사용자에게 노출한다.
+- `scripts/preflight_local.py`는 기본 로컬 모드에서 optional dependency 누락을 경고로 보여주고, `--strict-optional-deps` 및 CI에서는 실패로 처리한다.
 
 ---
 
