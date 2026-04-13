@@ -125,7 +125,7 @@ python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.
 pyinstaller --clean smartclipboard.spec
 ```
 
-결과물: `dist/SmartClipboard.exe` (~40MB, UPX 압축 적용 시)
+결과물: `dist/SmartClipboard.exe` (기본 spec 기준 UPX 비활성)
 
 ## ✅ 로컬 프리플라이트
 
@@ -372,3 +372,4 @@ MIT License
 
 - 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
 - import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
+- payload/spec 동기화 기준은 `legacy_main_payload.marshal` + `legacy_main_payload.manifest.json` 세트를 루트 `README.md` 기준으로 관리합니다.

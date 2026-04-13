@@ -38,9 +38,9 @@ SmartClipboard Pro는 **PyQt6** 기반 Windows 전용 클립보드 관리 데스
 | 진입점 | `클립모드 매니저.py` |
 | UI 프레임워크 | PyQt6 ≥ 6.4.0 |
 | 데이터 저장 | SQLite 3 (WAL 모드) |
-| 빌드 산출물 | `dist/SmartClipboard.exe` (~40MB) |
+| 빌드 산출물 | `dist/SmartClipboard.exe` (기본 spec 기준 UPX 비활성) |
 | 대상 OS | Windows 10/11 |
-| Python 지원 | 3.10 / 3.11 / 3.12 / 3.13 |
+| Python 지원 | 3.10 / 3.11 / 3.12 / 3.13 / 3.14 |
 
 ---
 
@@ -57,8 +57,10 @@ smartclipboard/
 ├── smartclipboard_app/
 │   ├── bootstrap.py               ← QApplication 초기화, 예외 훅
 │   ├── legacy_main.py             ← 하이브리드 payload 로더
+│   ├── legacy_payload.py          ← payload manifest/hash 유틸
 │   ├── legacy_main_src.py         ← 복원된 소스 스냅샷 (1,741줄)
 │   ├── legacy_main_payload.marshal ← 바이너리 런타임 payload
+│   ├── legacy_main_payload.manifest.json ← Python/source sync manifest
 │   │
 │   ├── managers/
 │   │   ├── export_import.py       ← JSON/CSV/MD 내보내기·가져오기
@@ -175,7 +177,7 @@ smartclipboard/
 |----|------|
 | 미설정 / `payload` | 바이너리 marshal 로드 (기본) |
 | `src` | `legacy_main_src.py` 직접 로드 |
-| 자동 폴백 | payload 파싱 실패 시 src로 전환 |
+| 자동 폴백 | payload 파싱 실패, manifest 불일치, 실행 실패 시 src로 전환 |
 
 상태 확인: `LEGACY_IMPL_ACTIVE`, `LEGACY_IMPL_FALLBACK_REASON` 상수.
 
@@ -537,7 +539,7 @@ clipboard.setText(text)
 - `copy_rules` / `clipboard_actions`는 `priority` 컬럼을 실제 UI 순서와 동기화한다.
 - `ExportImportManager`는 JSON/CSV/Markdown에 동일한 날짜·타입 필터를 적용하고, CSV/Markdown의 IMAGE는 플레이스홀더만 기록한다.
 - `SecureVaultManager`는 마스터 비밀번호 변경과 클립보드 30초 자동 정리 흐름을 지원한다.
-- `smartclipboard.spec`는 payload 경로에서 누락되지 않도록 `smartclipboard_app.ui.dialogs.collections`를 hidden import에 포함한다.
+- `smartclipboard.spec`는 payload 경로에서 누락되지 않도록 `smartclipboard_app.ui.dialogs.collections`를 hidden import에 포함하고, `legacy_main_payload.manifest.json`을 payload와 함께 데이터 자산으로 포함한다.
 
 ## 8.2 2026-04-08 구현 리스크 보강 메모
 
@@ -617,7 +619,7 @@ value = db.get_setting("my_feature_enabled", default="0")
 # 정적 분석 (변경 파일 기준)
 pyright smartclipboard_core/actions.py smartclipboard_app/ui/dialogs/new_dialog.py
 
-# payload 재빌드 (legacy_main_src.py 변경 시 반드시)
+# payload 재빌드 + manifest 갱신 (legacy_main_src.py 변경 시 반드시)
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 
 # 전체 사전검증
@@ -676,9 +678,10 @@ python scripts/preflight_local.py
 ```
 
 내부 동작:
-1. payload 재생성 + smoke import
-2. `py_compile` (전체 대상 모듈)
-3. `unittest discover`
+1. payload 재생성 + manifest 갱신
+2. payload smoke import 검증
+3. `py_compile` (전체 대상 모듈)
+4. `unittest discover`
 
 ### 단계별 실행
 

@@ -13,6 +13,7 @@ Windows용 PyQt6 기반 클립보드 매니저입니다.
 - 레거시 런타임: `smartclipboard_app/legacy_main.py`
   - 현재 `legacy_main.py`는 소스 본문이 아니라 `legacy_main_payload.marshal`을 로드/실행하는 호환 로더입니다.
   - payload 파일: `smartclipboard_app/legacy_main_payload.marshal`
+  - payload manifest: `smartclipboard_app/legacy_main_payload.manifest.json`
 
 ## 주요 기능
 
@@ -36,6 +37,7 @@ smartclipboard-main/
 │   ├── bootstrap.py
 │   ├── legacy_main.py                  # marshal loader
 │   ├── legacy_main_payload.marshal     # legacy runtime payload
+│   ├── legacy_main_payload.manifest.json # payload sync manifest
 │   ├── managers/
 │   └── ui/
 ├── smartclipboard_core/
@@ -92,7 +94,7 @@ pyinstaller --clean smartclipboard.spec
 
 - `dist/SmartClipboard.exe`
 
-`smartclipboard.spec`는 `smartclipboard_app/legacy_main_payload.marshal`을 `datas`로 포함하며, `smartclipboard_core`와 `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집합니다.
+`smartclipboard.spec`는 `smartclipboard_app/legacy_main_payload.marshal`과 `smartclipboard_app/legacy_main_payload.manifest.json`을 `datas`로 포함하며, `smartclipboard_core`와 `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집합니다.
 
 ## 중요 참고
 
@@ -105,7 +107,7 @@ pyinstaller --clean smartclipboard.spec
 - 2026-04-11 후속 반영으로 fetch_title 로컬/사설 URL 차단, `02`/`0505`/대표번호 전화 포맷 확장, FILE stale preview, 보안 보관함 Reset 복구, JSON 마이그레이션 문구 정리가 추가되었습니다.
 - 스니펫 `shortcut` 컬럼은 유지되지만 사용자 할당 UI/실행 경로는 아직 노출되지 않습니다.
 
-## 문서 정합성 기준 (2026-03-07)
+## 문서 정합성 기준 (2026-04-13)
 
 - 상세 변경 이력은 루트 `README.md`를 기준으로 관리합니다.
 - 개발 가이드는 `claude.md`, `.gemini/GEMINI.md`와 동일한 테스트/빌드 기준을 따릅니다.
@@ -119,4 +121,4 @@ pyinstaller --clean smartclipboard.spec
 - Packaging guard: `smartclipboard.spec` now explicitly includes `smartclipboard_core.db_parts` collection.
 - 2026-04-12 Note: 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
 - 2026-04-12 Note: import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
-- 2026-04-11 기준 추가 hidden import/datas 증설은 필요하지 않으며, 현재 spec 범위로 패키징이 유지됩니다.
+- 2026-04-13 기준 spec 추가 자산은 payload manifest 1건이며, 현재 spec에 반영되어 있습니다.

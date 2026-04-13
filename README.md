@@ -86,7 +86,7 @@
 ## 🖥️ 시스템 요구사항
 
 - **OS**: Windows 10/11
-- **Python**: 3.10 이상 (소스 실행 시)
+- **Python**: 3.10-3.14 (소스 실행/로컬 빌드 검증 기준)
 - **메모리**: 50MB 이상
 
 ---
@@ -130,13 +130,15 @@ python scripts/preflight_local.py
 pyinstaller --clean smartclipboard.spec
 ```
 
-결과물: `dist/SmartClipboard.exe` (~40MB, UPX 압축 적용 시)
+결과물: `dist/SmartClipboard.exe` (기본 spec 기준 UPX 비활성)
 
-payload만 다시 생성해야 할 때는:
+payload와 manifest만 다시 생성해야 할 때는:
 
 ```powershell
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 ```
+
+위 명령은 `legacy_main_payload.marshal`과 함께 `legacy_main_payload.manifest.json`도 갱신합니다.
 
 ## ✅ 로컬 프리플라이트
 
@@ -144,7 +146,7 @@ python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.
 python scripts/preflight_local.py
 ```
 
-`preflight_local.py`는 payload 재생성, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
+`preflight_local.py`는 payload 재생성, payload smoke import, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
 현재 핵심 회귀 범위에는 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`가 포함됩니다.
 `pyright`는 별도 단계이며 루트 `pyrightconfig.json` 기준으로 현행 유지보수 대상만 분석합니다.
 현재 repo-wide `pyright`에는 `smartclipboard_core/db_parts/*.py` mixin attribute typing 노이즈가 남아 있으므로, 로컬 게이트는 `preflight_local.py`이고 `pyright`는 변경 파일 기준 보조 검증으로 사용합니다.
@@ -377,7 +379,9 @@ smartclipboard/
 ├── smartclipboard_app/
 │   ├── bootstrap.py
 │   ├── legacy_main.py               # legacy payload loader
+│   ├── legacy_payload.py            # payload manifest/hash helper
 │   ├── legacy_main_payload.marshal  # 런타임 payload
+│   ├── legacy_main_payload.manifest.json  # Python/source sync manifest
 │   ├── managers/
 │   └── ui/
 │       ├── clipboard_guard.py       # internal copy flag helper
@@ -422,7 +426,8 @@ smartclipboard/
 
 - `smartclipboard_app/legacy_main.py`는 레거시 런타임을 로드하는 하이브리드 모듈입니다.
 - 기본값(권장): payload 모드 (`smartclipboard_app/legacy_main_payload.marshal`) (env: 미설정 또는 `SMARTCLIPBOARD_LEGACY_IMPL=payload`)
-- payload 로딩 실패(파일 누락/파싱 실패/실행 실패) 시 `legacy_main_src.py`로 자동 폴백하며, `LEGACY_IMPL_ACTIVE`/`LEGACY_IMPL_FALLBACK_REASON` 상수로 상태를 확인할 수 있습니다.
+- payload는 `legacy_main_payload.manifest.json`으로 현재 Python minor/source hash를 검증합니다.
+- payload 로딩 실패(파일 누락/파싱 실패/manifest 불일치/실행 실패) 시 `legacy_main_src.py`로 자동 폴백하며, `LEGACY_IMPL_ACTIVE`/`LEGACY_IMPL_FALLBACK_REASON` 상수로 상태를 확인할 수 있습니다.
 - 소스 모드(정적 분석/클래스/시그널 추적용): env `SMARTCLIPBOARD_LEGACY_IMPL=src`
 - 복원된 원본 소스: `smartclipboard_app/legacy_main_src.py` (원본: `legacy/클립모드 매니저 (legacy).py`)
 - Pylance/pyright는 루트 `pyrightconfig.json`을 기준으로 현행 유지보수 코드만 검사합니다.
@@ -474,7 +479,7 @@ MIT License
 - `history.file_signature` 컬럼과 인덱스를 사용해 `FILE` 중복 판별을 전체 row 순회 대신 canonicalized path signature lookup으로 처리합니다.
 - 보안 보관함 복호화 텍스트는 프로세스 내 armed clipboard state로 추적되며, 30초 조건부 clear와 앱 종료 시 즉시 clear를 모두 수행합니다.
 - 설정 저장 시 `mini_window_enabled` 변경으로 핫키 재등록이 실패하면 그 설정만 되돌리고 실제 `_last_hotkey_error`를 경고로 노출합니다.
-- `smartclipboard.spec`은 이번 안정화에서도 추가 hidden import/datas 변경 없이 충분합니다.
+- `smartclipboard.spec`은 이번 안정화 기준으로 payload manifest(`legacy_main_payload.manifest.json`)까지 포함하도록 정리되어 있으며, 별도 추가 hidden import 증설은 필요하지 않습니다.
 
 ## MainWindow 분할 구조 (2026-03-07)
 
@@ -487,12 +492,12 @@ MIT License
 - 시그널 스냅샷 검증(`scripts/refactor_signal_snapshot.py`, `tests/test_signal_snapshot.py`)은 `legacy_main_src.py`와 `mainwindow_parts/*.py`를 함께 스캔합니다.
 - 로컬 사전검증(`scripts/preflight_local.py`)의 `py_compile` 단계에 `mainwindow_parts/*.py`가 포함됩니다.
 
-## 문서 정합성 기준 (2026-03-07)
+## 문서 정합성 기준 (2026-04-13)
 
 - 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `legacy/README (modular).md`는 동일 기준을 따릅니다.
 - 권장 회귀 테스트 기준은 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`입니다.
-- PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`) 포함과 함께 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하고, payload에서 직접 참조하는 대화상자 모듈(`smartclipboard_app.ui.dialogs.collections` 포함)을 명시적으로 유지합니다.
-- 2026-04-11 후속 수정은 기존 패키징 범위 안에서 처리되므로 추가 hidden import/datas 변경 없이 현재 spec을 유지합니다.
+- PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`)와 payload manifest(`legacy_main_payload.manifest.json`)를 함께 포함하고, `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하며, payload에서 직접 참조하는 대화상자 모듈(`smartclipboard_app.ui.dialogs.collections` 포함)을 명시적으로 유지합니다.
+- 2026-04-13 기준 추가 패키징 자산은 payload manifest 1건이며, 현재 spec에 반영되어 있습니다.
 
 ## Refactor Layout (2026-03-12)
 

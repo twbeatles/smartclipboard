@@ -25,11 +25,12 @@ OPTIONAL_DEPENDENCIES = [
 ]
 
 
-def run_step(cmd: list[str]) -> int:
+def run_step(label: str, cmd: list[str]) -> int:
+    print(f">>> {label}")
     print(f">>> {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=REPO_ROOT)
     if result.returncode != 0:
-        print(f"step failed with code {result.returncode}")
+        print(f"step '{label}' failed with code {result.returncode}")
     return result.returncode
 
 
@@ -110,9 +111,29 @@ def main(argv: list[str] | None = None) -> int:
     if optional_dep_code != 0:
         return optional_dep_code
 
-    steps: list[list[str]] = []
+    print(f">>> runtime python")
+    print(f"python: {sys.version.split()[0]}")
+    print(f"executable: {sys.executable}")
+
+    steps: list[tuple[str, list[str]]] = []
     if not args.skip_payload_build:
         steps.append(
+            (
+                "payload build",
+                [
+                    python,
+                    "scripts/build_legacy_payload.py",
+                    "--src",
+                    "smartclipboard_app/legacy_main_src.py",
+                    "--out",
+                    "smartclipboard_app/legacy_main_payload.marshal",
+                ],
+            )
+        )
+
+    steps.append(
+        (
+            "payload smoke import",
             [
                 python,
                 "scripts/build_legacy_payload.py",
@@ -120,15 +141,15 @@ def main(argv: list[str] | None = None) -> int:
                 "smartclipboard_app/legacy_main_src.py",
                 "--out",
                 "smartclipboard_app/legacy_main_payload.marshal",
-                "--smoke-import",
-            ]
+                "--smoke-import-only",
+            ],
         )
+    )
+    steps.append(("py_compile", [python, "-m", "py_compile", *compile_targets()]))
+    steps.append(("unittest", [python, "-m", "unittest", "discover", "-s", "tests", "-v"]))
 
-    steps.append([python, "-m", "py_compile", *compile_targets()])
-    steps.append([python, "-m", "unittest", "discover", "-s", "tests", "-v"])
-
-    for step in steps:
-        code = run_step(step)
+    for label, step in steps:
+        code = run_step(label, step)
         if code != 0:
             return code
 

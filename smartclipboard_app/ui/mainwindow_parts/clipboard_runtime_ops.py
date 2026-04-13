@@ -27,10 +27,10 @@ def process_clipboard_impl(self, logger):
 
     try:
         mime_data = self.clipboard.mimeData()
+        if mime_data.hasUrls() and process_file_clipboard_impl(self, mime_data, logger):
+            return
         if mime_data.hasImage():
             self._process_image_clipboard(mime_data)
-            return
-        if mime_data.hasUrls() and process_file_clipboard_impl(self, mime_data, logger):
             return
         if mime_data.hasText():
             self._process_text_clipboard(mime_data)

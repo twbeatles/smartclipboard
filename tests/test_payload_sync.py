@@ -1,6 +1,7 @@
 ﻿import hashlib
 import importlib
 import inspect
+import json
 import marshal
 import os
 import pathlib
@@ -8,6 +9,7 @@ import unittest
 
 from PyQt6.QtWidgets import QApplication
 
+from smartclipboard_app.legacy_payload import compute_source_sha256
 from scripts.refactor_symbol_inventory import build_inventory
 
 
@@ -37,13 +39,33 @@ class PayloadSyncTests(unittest.TestCase):
             "kw_defaults_count": kw_defaults_count,
         }
 
+    def _reload_payload_module(self):
+        old_impl = os.environ.get("SMARTCLIPBOARD_LEGACY_IMPL")
+        try:
+            os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = "payload"
+            importlib.invalidate_caches()
+            module = importlib.import_module("smartclipboard_app.legacy_main")
+            module = importlib.reload(module)
+        finally:
+            if old_impl is None:
+                os.environ.pop("SMARTCLIPBOARD_LEGACY_IMPL", None)
+            else:
+                os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = old_impl
+
+        self.assertEqual(module.LEGACY_IMPL_ACTIVE, "payload", getattr(module, "LEGACY_IMPL_FALLBACK_REASON", None))
+        return module
+
     def test_payload_matches_compiled_source(self):
         src = pathlib.Path("smartclipboard_app/legacy_main_src.py")
         payload = pathlib.Path("smartclipboard_app/legacy_main_payload.marshal")
+        manifest_path = pathlib.Path("smartclipboard_app/legacy_main_payload.manifest.json")
         self.assertTrue(src.exists(), "missing source file")
         self.assertTrue(payload.exists(), "missing payload file")
+        self.assertTrue(manifest_path.exists(), "missing payload manifest")
         self.assertGreater(payload.stat().st_size, 0, "empty payload file")
         marshal.loads(payload.read_bytes())  # parse guard
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest.get("source_sha256"), compute_source_sha256(src))
 
         source_inventory = build_inventory(src)
         source_classes = {
@@ -53,16 +75,7 @@ class PayloadSyncTests(unittest.TestCase):
         source_functions = {f["name"]: f["signature"] for f in source_inventory["top_functions"]}
         source_constants = set(source_inventory["constants"])
 
-        old_impl = os.environ.get("SMARTCLIPBOARD_LEGACY_IMPL")
-        try:
-            os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = "payload"
-            module = importlib.import_module("smartclipboard_app.legacy_main")
-            module = importlib.reload(module)
-        finally:
-            if old_impl is None:
-                os.environ.pop("SMARTCLIPBOARD_LEGACY_IMPL", None)
-            else:
-                os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = old_impl
+        module = self._reload_payload_module()
 
         payload_classes = {}
         for cls_name, cls_obj in inspect.getmembers(module, inspect.isclass):
@@ -116,21 +129,12 @@ class PayloadSyncTests(unittest.TestCase):
         self.assertTrue(source_constants.issubset(payload_constants), "payload missing source constants")
 
     def test_payload_mode_snippet_signature_accepts_signal_args(self):
-        old_impl = os.environ.get("SMARTCLIPBOARD_LEGACY_IMPL")
-        try:
-            os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = "payload"
-            module = importlib.import_module("smartclipboard_app.legacy_main")
-            module = importlib.reload(module)
+        module = self._reload_payload_module()
 
-            method = module.SnippetManagerDialog.use_snippet
-            params = list(inspect.signature(method).parameters.values())
-            has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
-            self.assertTrue(has_varargs, "payload SnippetManagerDialog.use_snippet must accept signal args")
-        finally:
-            if old_impl is None:
-                os.environ.pop("SMARTCLIPBOARD_LEGACY_IMPL", None)
-            else:
-                os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = old_impl
+        method = module.SnippetManagerDialog.use_snippet
+        params = list(inspect.signature(method).parameters.values())
+        has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
+        self.assertTrue(has_varargs, "payload SnippetManagerDialog.use_snippet must accept signal args")
 
     def test_payload_fetch_title_uses_first_extracted_url(self):
         class FakeActionDB:
@@ -140,33 +144,24 @@ class PayloadSyncTests(unittest.TestCase):
             def update_url_title(self, item_id, title):
                 return True
 
-        old_impl = os.environ.get("SMARTCLIPBOARD_LEGACY_IMPL")
-        try:
-            os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = "payload"
-            module = importlib.import_module("smartclipboard_app.legacy_main")
-            module = importlib.reload(module)
+        module = self._reload_payload_module()
 
-            manager = module.ClipboardActionManager(FakeActionDB())
-            captured = {}
+        manager = module.ClipboardActionManager(FakeActionDB())
+        captured = {}
 
-            def fake_fetch(url, item_id, action_name):
-                captured["url"] = url
-                captured["item_id"] = item_id
-                captured["action_name"] = action_name
+        def fake_fetch(url, item_id, action_name):
+            captured["url"] = url
+            captured["item_id"] = item_id
+            captured["action_name"] = action_name
 
-            manager.fetch_url_title_async = fake_fetch
-            results = manager.process("prefix https://example.com/path?q=1 suffix", item_id=9)
+        manager.fetch_url_title_async = fake_fetch
+        results = manager.process("prefix https://example.com/path?q=1 suffix", item_id=9)
 
-            self.assertEqual(captured.get("url"), "https://example.com/path?q=1")
-            self.assertEqual(captured.get("item_id"), 9)
-            self.assertEqual(captured.get("action_name"), "fetch")
-            self.assertEqual(len(results), 1)
-            self.assertEqual(results[0][1]["type"], "notify")
-        finally:
-            if old_impl is None:
-                os.environ.pop("SMARTCLIPBOARD_LEGACY_IMPL", None)
-            else:
-                os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = old_impl
+        self.assertEqual(captured.get("url"), "https://example.com/path?q=1")
+        self.assertEqual(captured.get("item_id"), 9)
+        self.assertEqual(captured.get("action_name"), "fetch")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][1]["type"], "notify")
 
     def test_payload_fetch_title_without_url_returns_notify(self):
         class FakeActionDB:
@@ -176,30 +171,21 @@ class PayloadSyncTests(unittest.TestCase):
             def update_url_title(self, item_id, title):
                 return True
 
-        old_impl = os.environ.get("SMARTCLIPBOARD_LEGACY_IMPL")
-        try:
-            os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = "payload"
-            module = importlib.import_module("smartclipboard_app.legacy_main")
-            module = importlib.reload(module)
+        module = self._reload_payload_module()
 
-            manager = module.ClipboardActionManager(FakeActionDB())
-            called = {"count": 0}
+        manager = module.ClipboardActionManager(FakeActionDB())
+        called = {"count": 0}
 
-            def fake_fetch(url, item_id, action_name):
-                called["count"] += 1
+        def fake_fetch(url, item_id, action_name):
+            called["count"] += 1
 
-            manager.fetch_url_title_async = fake_fetch
-            results = manager.process("url 없음", item_id=3)
+        manager.fetch_url_title_async = fake_fetch
+        results = manager.process("url 없음", item_id=3)
 
-            self.assertEqual(called["count"], 0)
-            self.assertEqual(len(results), 1)
-            self.assertEqual(results[0][1]["type"], "notify")
-            self.assertIn("URL", results[0][1]["message"])
-        finally:
-            if old_impl is None:
-                os.environ.pop("SMARTCLIPBOARD_LEGACY_IMPL", None)
-            else:
-                os.environ["SMARTCLIPBOARD_LEGACY_IMPL"] = old_impl
+        self.assertEqual(called["count"], 0)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][1]["type"], "notify")
+        self.assertIn("URL", results[0][1]["message"])
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS, HotkeySetting
 from smartclipboard_app.ui.dialogs.import_dialog import ImportDialog
 from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
+from smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops import process_clipboard_impl
 from smartclipboard_app.ui.mainwindow_parts.status_lifecycle_ops import quit_app_impl
 from smartclipboard_app.ui.dialogs.snippets import SnippetDialog, SnippetManagerDialog, validate_snippet_shortcut
 from smartclipboard_app.ui.mainwindow_parts.table_ops import get_display_items_impl, populate_table_impl
@@ -31,6 +32,7 @@ class _FakeSettingsDB:
     def __init__(self, values=None):
         self.values = dict(values or {})
         self.saved = {}
+        self.cleanup_calls = 0
 
     def get_setting(self, key, default=None):
         return self.values.get(key, default)
@@ -38,6 +40,9 @@ class _FakeSettingsDB:
     def set_setting(self, key, value):
         self.saved[key] = value
         self.values[key] = value
+
+    def cleanup(self):
+        self.cleanup_calls += 1
 
 
 class _FakeImportExportManager:
@@ -308,6 +313,8 @@ class _FakeSettingsParent(QWidget):
         self._last_hotkey_error = "mini registration failed"
         self.register_calls = 0
         self.theme_changes = []
+        self.load_calls = 0
+        self.status_updates = 0
 
     def register_hotkeys(self):
         self.register_calls += 1
@@ -315,6 +322,12 @@ class _FakeSettingsParent(QWidget):
 
     def change_theme(self, theme_name: str):
         self.theme_changes.append(theme_name)
+
+    def load_data(self):
+        self.load_calls += 1
+
+    def update_status_bar(self):
+        self.status_updates += 1
 
 
 class _FakeClipboardWriter:
@@ -418,6 +431,47 @@ class _FakePasteLastDB:
 
     def get_content(self, pid):
         return self.contents.get(pid)
+
+    def increment_use_count(self, pid):
+        self.incremented.append(pid)
+
+
+class _FakeMimeData:
+    def __init__(self, has_urls=False, has_image=False, has_text=False):
+        self._has_urls = has_urls
+        self._has_image = has_image
+        self._has_text = has_text
+
+    def hasUrls(self):
+        return self._has_urls
+
+    def hasImage(self):
+        return self._has_image
+
+    def hasText(self):
+        return self._has_text
+
+
+class _FakeRuntimeClipboard:
+    def __init__(self, mime_data):
+        self._mime_data = mime_data
+
+    def mimeData(self):
+        return self._mime_data
+
+
+class _FakeClipboardRuntimeWindow:
+    def __init__(self, mime_data):
+        self.is_monitoring_paused = False
+        self.clipboard = _FakeRuntimeClipboard(mime_data)
+        self.image_calls = 0
+        self.text_calls = 0
+
+    def _process_image_clipboard(self, _mime_data):
+        self.image_calls += 1
+
+    def _process_text_clipboard(self, _mime_data):
+        self.text_calls += 1
 
     def increment_use_count(self, pid):
         self.incremented.append(pid)
@@ -660,6 +714,20 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             dialog.close()
             parent.close()
 
+    def test_settings_dialog_runs_cleanup_immediately_when_max_history_decreases(self):
+        db = _FakeSettingsDB({"max_history": 200, "mini_window_enabled": "true", "log_level": "INFO"})
+        parent = _FakeSettingsParent()
+        dialog = SettingsDialog(parent, db, current_theme="dark", themes=FALLBACK_THEMES, max_history=200)
+        try:
+            dialog.max_history_spin.setValue(120)
+            dialog.save_settings()
+            self.assertEqual(db.cleanup_calls, 1)
+            self.assertEqual(parent.load_calls, 1)
+            self.assertEqual(parent.status_updates, 1)
+        finally:
+            dialog.close()
+            parent.close()
+
     def test_import_dialog_csv_warns_and_shows_summary(self):
         dialog = ImportDialog(None, _FakeImportExportManager())
         try:
@@ -870,6 +938,32 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             self.assertEqual(restored_paths, [os.path.normcase(os.path.normpath(file_a))])
             self.assertEqual(window.db.incremented, [20])
             self.assertEqual(keyboard.sent, ["ctrl+v"])
+
+    def test_process_clipboard_prefers_file_urls_over_image_payload(self):
+        window = _FakeClipboardRuntimeWindow(_FakeMimeData(has_urls=True, has_image=True, has_text=True))
+
+        with mock.patch(
+            "smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops.process_file_clipboard_impl",
+            return_value=True,
+        ) as file_mock:
+            process_clipboard_impl(window, mock.Mock())
+
+        self.assertTrue(file_mock.called)
+        self.assertEqual(window.image_calls, 0)
+        self.assertEqual(window.text_calls, 0)
+
+    def test_process_clipboard_falls_back_to_image_when_urls_do_not_restore_files(self):
+        window = _FakeClipboardRuntimeWindow(_FakeMimeData(has_urls=True, has_image=True, has_text=True))
+
+        with mock.patch(
+            "smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops.process_file_clipboard_impl",
+            return_value=False,
+        ) as file_mock:
+            process_clipboard_impl(window, mock.Mock())
+
+        self.assertTrue(file_mock.called)
+        self.assertEqual(window.image_calls, 1)
+        self.assertEqual(window.text_calls, 0)
 
     def test_display_sort_keeps_pinned_rows_above_unpinned_in_descending_order(self):
         window = _FakeTableWindow()

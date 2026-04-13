@@ -9,6 +9,7 @@
 - 레거시 런타임:
   - `smartclipboard_app/legacy_main.py`는 **marshal payload 로더**
   - 실제 본문은 `smartclipboard_app/legacy_main_payload.marshal`
+  - payload 동기화 메타데이터는 `smartclipboard_app/legacy_main_payload.manifest.json`
 
 ## 2. 작업 우선순위
 
@@ -18,11 +19,11 @@
 
 ## 3. 변경 시 주의사항
 
-- `legacy_main_payload.marshal`은 텍스트 diff/리뷰가 어려운 바이너리 payload입니다.
+- `legacy_main_payload.marshal`은 텍스트 diff/리뷰가 어려운 바이너리 payload이며, `legacy_main_payload.manifest.json`과 세트로 관리합니다.
 - `legacy_main.py`를 소스 본문 파일로 가정하고 리팩토링하면 안 됩니다.
 - `legacy_main.py`는 payload 로딩 실패 시 `legacy_main_src.py`로 자동 폴백하며, `LEGACY_IMPL_ACTIVE`/`LEGACY_IMPL_FALLBACK_REASON`로 활성 구현과 폴백 사유를 확인할 수 있습니다.
 - `pyright`/Pylance 진단은 기본적으로 `legacy/클립모드 매니저 (legacy).py`와 `smartclipboard_app/legacy_main_src.py`를 제외한 현행 코드 기준으로 맞춥니다.
-- UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`을 재생성한 뒤 빌드해야 합니다.
+- UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`과 manifest를 함께 재생성한 뒤 빌드해야 합니다.
 - `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
 - `fetch_title`은 로컬/사설/메타데이터 주소를 기본 차단하고, HTML 응답만 제한 크기로 읽는 정책을 유지합니다.
 - 동일 비이미지 재복사는 기존 history row를 갱신하는 정책이며, 메타데이터(tags/note/bookmark/collection/pin/use_count)를 유지해야 합니다.
@@ -49,7 +50,7 @@
 - Windows 테스트 임시 경로는 시스템 temp 대신 repo-local `.tmp-unittest/`를 사용합니다.
 - 핫키 저장 경로는 등록 실패 시 이전 글로벌 핫키 상태로 롤백되어야 합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지하고, payload에서 직접 참조하는 `smartclipboard_app.ui.dialogs.collections`도 명시적으로 포함합니다.
-- 2026-04-11 후속 수정은 기존 패키징 범위 안에서 처리되므로 `smartclipboard.spec`의 datas/hidden import 증설 없이 유지 가능합니다.
+- 2026-04-13 기준 `smartclipboard.spec` 추가 자산은 payload manifest(`legacy_main_payload.manifest.json`) 1건이며, 현재 spec에 반영되어 있습니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
   - `scripts/refactor_signal_snapshot.py`
@@ -107,6 +108,7 @@ pyinstaller --clean smartclipboard.spec
 빌드 결과:
 
 - `dist/SmartClipboard.exe`
+- payload/runtime sync: `smartclipboard_app/legacy_main_payload.marshal` + `smartclipboard_app/legacy_main_payload.manifest.json`
 
 ## 6. 소스 복원 필요성
 

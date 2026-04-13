@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import sys
 import unittest
@@ -40,6 +41,22 @@ class LegacyLoaderTests(unittest.TestCase):
         reason = (module.LEGACY_IMPL_FALLBACK_REASON or "").lower()
         self.assertTrue("marshal" in reason or "typeerror" in reason)
         self.assertTrue(hasattr(module, "MainWindow"))
+
+    def test_manifest_mismatch_falls_back_to_src(self):
+        manifest_path = Path("smartclipboard_app/legacy_main_payload.manifest.json")
+        original_manifest = manifest_path.read_text(encoding="utf-8")
+        try:
+            manifest = json.loads(original_manifest)
+            manifest["source_sha256"] = "0" * 64
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            module = self._reload_legacy_main("payload")
+        finally:
+            manifest_path.write_text(original_manifest, encoding="utf-8")
+
+        self.assertEqual(module.LEGACY_IMPL_REQUESTED, "payload")
+        self.assertEqual(module.LEGACY_IMPL_ACTIVE, "src")
+        reason = (module.LEGACY_IMPL_FALLBACK_REASON or "").lower()
+        self.assertIn("source hash mismatch", reason)
 
 
 if __name__ == "__main__":

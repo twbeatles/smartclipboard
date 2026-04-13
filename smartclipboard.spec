@@ -15,12 +15,12 @@ Notes:
     - Repo-wide pyright still has db_parts mixin attribute-typing noise, so
       targeted pyright is supplemental to preflight.
     - Runtime behavior is restored via legacy marshal payload.
+    - Payload builds now carry a sidecar manifest with Python/source sync metadata.
     - FILE clipboard/history support depends on smartclipboard_core.file_paths
       and repo-local temp usage during Windows test runs.
-    - 2026-04-11 and 2026-04-12 stabilization stay inside already-packaged
-      modules, so no extra datas/hiddenimports are required for fetch_title
-      dedupe/backpressure, vault clipboard cleanup hardening, import/export
-      reporting, or FILE signature lookup changes.
+    - 2026-04-11 through 2026-04-13 stabilization stays inside already-packaged
+      modules; the only new packaged data asset is the legacy payload manifest
+      that is wired below alongside the marshal payload.
     - CI now enforces optional runtime dependency presence via
       `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps`.
     - If legacy source changes, rebuild payload first and keep tests green
@@ -38,9 +38,12 @@ APP_VERSION = "10.6"
 MAIN_SCRIPT = "클립모드 매니저.py"
 ICON_FILE = "smartclipboard.ico"
 LEGACY_PAYLOAD = Path("smartclipboard_app/legacy_main_payload.marshal")
+LEGACY_PAYLOAD_MANIFEST = Path("smartclipboard_app/legacy_main_payload.manifest.json")
 
 if not LEGACY_PAYLOAD.exists():
     raise FileNotFoundError(f"Required legacy payload not found: {LEGACY_PAYLOAD}")
+if not LEGACY_PAYLOAD_MANIFEST.exists():
+    raise FileNotFoundError(f"Required legacy payload manifest not found: {LEGACY_PAYLOAD_MANIFEST}")
 
 # Keep refactor-safe module coverage for payload runtime imports.
 CORE_SUBMODULES = collect_submodules("smartclipboard_core")
@@ -84,6 +87,7 @@ HIDDEN_IMPORTS = [
     "urllib.parse",
     "smartclipboard_app.bootstrap",
     "smartclipboard_app.legacy_main",
+    "smartclipboard_app.legacy_payload",
     "smartclipboard_app.legacy_main_src",
     "smartclipboard_app.ui.main_window",
     "smartclipboard_app.ui.clipboard_guard",
@@ -146,6 +150,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(LEGACY_PAYLOAD), "smartclipboard_app"),
+        (str(LEGACY_PAYLOAD_MANIFEST), "smartclipboard_app"),
     ],
     hiddenimports=HIDDEN_IMPORTS,
     hookspath=[],
@@ -210,5 +215,6 @@ print(f"""
   Optimization: Level {a.optimize}
   Excluded: {len(EXCLUDES)} modules
   Legacy payload: {LEGACY_PAYLOAD}
+  Payload manifest: {LEGACY_PAYLOAD_MANIFEST}
 {'='*50}
 """)

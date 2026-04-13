@@ -180,12 +180,15 @@ class TagsCollectionsMixin:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
+                if not self._collection_exists(cursor, collection_id):
+                    logger.warning("Collection Delete Error: missing collection_id=%s", collection_id)
+                    return False
                 # 해당 컬렉션의 항목들 연결 해제
                 cursor.execute("UPDATE history SET collection_id = NULL WHERE collection_id = ?", (collection_id,))
                 cursor.execute("UPDATE deleted_history SET collection_id = NULL WHERE collection_id = ?", (collection_id,))
                 cursor.execute("DELETE FROM collections WHERE id = ?", (collection_id,))
                 self.conn.commit()
-                return True
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Collection Delete Error: {e}")
                 self.conn.rollback()
@@ -199,9 +202,13 @@ class TagsCollectionsMixin:
                 if collection_id is not None and not self._collection_exists(cursor, collection_id):
                     logger.warning("Assign Collection Error: invalid collection_id=%s", collection_id)
                     return False
+                cursor.execute("SELECT 1 FROM history WHERE id = ? LIMIT 1", (item_id,))
+                if cursor.fetchone() is None:
+                    logger.warning("Assign Collection Error: missing item_id=%s", item_id)
+                    return False
                 cursor.execute("UPDATE history SET collection_id = ? WHERE id = ?", (collection_id, item_id))
                 self.conn.commit()
-                return True
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Assign Collection Error: {e}")
                 self.conn.rollback()

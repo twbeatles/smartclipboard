@@ -46,9 +46,11 @@ class FakeActionDB:
 
 
 class _FakeHTMLResponse:
-    def __init__(self, body, content_type="text/html; charset=utf-8", status_code=200):
+    def __init__(self, body, content_type="text/html; charset=utf-8", status_code=200, headers=None):
         self._body = body.encode("utf-8") if isinstance(body, str) else body
         self.headers = {"Content-Type": content_type}
+        if headers:
+            self.headers.update(headers)
         self.status_code = status_code
         self.encoding = "utf-8"
         self.closed = False
@@ -128,12 +130,44 @@ class CoreActionTests(unittest.TestCase):
     @unittest.skipUnless(HAS_WEB, "web libraries not installed")
     def test_fetch_title_logic_returns_html_title_for_safe_url(self):
         response = _FakeHTMLResponse("<html><head><title>Example Title</title></head><body></body></html>")
-        with mock.patch("smartclipboard_core.actions.requests.get", return_value=response):
+        with mock.patch(
+            "smartclipboard_core.actions.socket.getaddrinfo",
+            return_value=[(0, 0, 0, "", ("93.184.216.34", 443))],
+        ), mock.patch("smartclipboard_core.actions.requests.get", return_value=response):
             result = ClipboardActionManager._fetch_title_logic("https://example.com/path", 8)
 
         self.assertEqual(result["title"], "Example Title")
         self.assertEqual(result["item_id"], 8)
         self.assertTrue(response.closed)
+
+    @unittest.skipUnless(HAS_WEB, "web libraries not installed")
+    def test_fetch_title_logic_blocks_private_hostname_after_dns_resolution(self):
+        with mock.patch(
+            "smartclipboard_core.actions.socket.getaddrinfo",
+            return_value=[(0, 0, 0, "", ("10.0.0.8", 80))],
+        ), mock.patch("smartclipboard_core.actions.requests.get") as get_mock:
+            result = ClipboardActionManager._fetch_title_logic("http://internal.example/path", 6)
+
+        get_mock.assert_not_called()
+        self.assertEqual(result["title"], None)
+        self.assertIn("blocked", result.get("error", ""))
+
+    @unittest.skipUnless(HAS_WEB, "web libraries not installed")
+    def test_fetch_title_logic_blocks_redirect_to_private_target(self):
+        redirect_response = _FakeHTMLResponse(
+            "",
+            status_code=302,
+            headers={"Location": "http://10.0.0.5/admin"},
+        )
+        with mock.patch(
+            "smartclipboard_core.actions.socket.getaddrinfo",
+            return_value=[(0, 0, 0, "", ("93.184.216.34", 80))],
+        ), mock.patch("smartclipboard_core.actions.requests.get", return_value=redirect_response) as get_mock:
+            result = ClipboardActionManager._fetch_title_logic("http://example.com/start", 10)
+
+        self.assertEqual(get_mock.call_count, 1)
+        self.assertEqual(result["title"], None)
+        self.assertIn("blocked", result.get("error", ""))
 
     def test_format_phone_supports_expanded_korean_patterns(self):
         manager = ClipboardActionManager(FakeActionDB([]))
@@ -397,6 +431,67 @@ class CoreDatabaseTests(unittest.TestCase):
         uncategorized_contents = {row[1] for row in self.db.get_items_uncategorized()}
         self.assertIn("orphan-collection-item", uncategorized_contents)
 
+    def test_restore_item_merges_duplicate_text_without_creating_new_row(self):
+        deleted_item_id = self.db.add_item("same-text", None, "TEXT")
+        self.db.set_item_tags(deleted_item_id, "alpha")
+        self.db.set_note(deleted_item_id, "from trash")
+        self.db.toggle_bookmark(deleted_item_id)
+        self.db.increment_use_count(deleted_item_id)
+        self.db.increment_use_count(deleted_item_id)
+        self.assertTrue(self.db.soft_delete(deleted_item_id))
+
+        active_item_id = self.db.add_item("same-text", None, "TEXT")
+        self.db.set_item_tags(active_item_id, "beta")
+        self.db.toggle_pin(active_item_id)
+        self.db.increment_use_count(active_item_id)
+
+        deleted_id = self.db.get_deleted_items()[0][0]
+        self.assertTrue(self.db.restore_item(deleted_id))
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT id, tags, note, bookmark, pinned, use_count FROM history WHERE content = ?",
+                ("same-text",),
+            )
+            rows = cursor.fetchall()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], active_item_id)
+        self.assertEqual(rows[0][1], "beta, alpha")
+        self.assertEqual(rows[0][2], "from trash")
+        self.assertEqual(rows[0][3], 1)
+        self.assertEqual(rows[0][4], 1)
+        self.assertEqual(rows[0][5], 3)
+
+    def test_restore_item_merges_duplicate_file_without_creating_new_row(self):
+        file_content = file_content_from_paths([os.path.join(self.tmpdir.name, "a.txt")])
+        deleted_item_id = self.db.add_item(file_content, None, "FILE")
+        self.db.set_item_tags(deleted_item_id, "archive")
+        self.db.increment_use_count(deleted_item_id)
+        self.assertTrue(self.db.soft_delete(deleted_item_id))
+
+        active_item_id = self.db.add_item(file_content, None, "FILE")
+        self.db.set_note(active_item_id, "active note")
+        self.db.increment_use_count(active_item_id)
+
+        deleted_id = self.db.get_deleted_items()[0][0]
+        self.assertTrue(self.db.restore_item(deleted_id))
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT id, tags, note, use_count FROM history WHERE type = 'FILE' AND content = ?",
+                (file_content,),
+            )
+            rows = cursor.fetchall()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], active_item_id)
+        self.assertEqual(rows[0][1], "archive")
+        self.assertEqual(rows[0][2], "active note")
+        self.assertEqual(rows[0][3], 2)
+
     def test_cleanup_vacuum_uses_separate_counter(self):
         calls = {"vacuum": 0}
 
@@ -441,6 +536,14 @@ class CoreDatabaseTests(unittest.TestCase):
             )
             assigned = cursor.fetchone()[0]
         self.assertEqual(assigned, 3)
+
+    def test_delete_collection_returns_false_for_missing_target(self):
+        self.assertFalse(self.db.delete_collection(999999))
+
+    def test_assign_to_collection_returns_false_for_missing_item(self):
+        collection_id = self.db.add_collection("assign-target")
+        self.assertTrue(collection_id)
+        self.assertFalse(self.db.assign_to_collection(999999, collection_id))
 
     def test_duplicate_text_updates_existing_row_and_preserves_metadata(self):
         item_id = self.db.add_item("duplicate-text", None, "TEXT")

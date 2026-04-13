@@ -54,4 +54,5 @@ build/**/localpycs/
 
 # Keep tracked payload that the app needs at runtime:
 !smartclipboard_app/legacy_main_payload.marshal
+!smartclipboard_app/legacy_main_payload.manifest.json
 

@@ -38,7 +38,9 @@ FALLBACK_THEMES = {
 
 
 class _HotkeyParent(Protocol):
-    def register_hotkeys(self) -> None: ...
+    _last_hotkey_error: str
+
+    def register_hotkeys(self) -> bool: ...
 
 
 class _ThemeParent(Protocol):
@@ -249,10 +251,17 @@ class SettingsDialog(QDialog):
     def save_settings(self):
         selected_theme = cast(str, self.theme_combo.currentData() or self.current_theme)
         current_theme = self.current_theme
+        previous_max_history = _parse_int_setting(
+            self.db.get_setting("max_history", self.max_history),
+            int(self.max_history),
+            10,
+            500,
+        )
         previous_mini_enabled = str(self.db.get_setting("mini_window_enabled", "true") or "true")
+        new_max_history = self.max_history_spin.value()
 
         self.db.set_setting("theme", selected_theme)
-        self.db.set_setting("max_history", self.max_history_spin.value())
+        self.db.set_setting("max_history", new_max_history)
 
         selected_log_level = cast(str, self.log_level_combo.currentData() or "INFO")
         self.db.set_setting("log_level", selected_log_level)
@@ -288,6 +297,17 @@ class SettingsDialog(QDialog):
                 )
         else:
             self.db.set_setting("mini_window_enabled", mini_enabled)
+
+        if new_max_history < previous_max_history and hasattr(self.db, "cleanup"):
+            try:
+                self.db.cleanup()
+                parent = self.parent()
+                if parent is not None and hasattr(parent, "load_data"):
+                    parent.load_data()
+                if parent is not None and hasattr(parent, "update_status_bar"):
+                    parent.update_status_bar()
+            except Exception as cleanup_exc:
+                self.logger.warning("Immediate cleanup after max_history change failed: %s", cleanup_exc)
 
         if selected_theme != current_theme:
             theme_parent = _theme_parent(self.parent())

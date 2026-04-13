@@ -9,16 +9,18 @@
 - 레거시 런타임:
   - `smartclipboard_app/legacy_main.py`는 로더
   - `smartclipboard_app/legacy_main_payload.marshal`을 실행해 기존 동작을 복원
+  - `smartclipboard_app/legacy_main_payload.manifest.json`으로 Python/source 동기화를 검증
 
 ## 작업 원칙
 
 1. 신규 수정은 `smartclipboard_core/`와 `smartclipboard_app/ui/` 우선
 2. `클립모드 매니저.py`의 외부 호환 API(export) 유지
-3. 빌드 산출물이 payload를 포함하도록 `smartclipboard.spec` 유지
+3. 빌드 산출물이 payload와 payload manifest를 함께 포함하도록 `smartclipboard.spec` 유지
 
 ## 주의
 
 - `legacy_main_payload.marshal`은 바이너리 payload입니다.
+- `legacy_main_payload.manifest.json`은 payload와 세트로 관리하는 런타임 동기화 메타데이터입니다.
 - `legacy_main.py`에 기존 대형 소스가 있다고 가정하고 라인 단위 리팩토링하면 안 됩니다.
 - `pyright`/Pylance 기준선은 현행 유지보수 코드에 맞춰 관리하며, 레거시 보관본과 `legacy_main_src.py`는 기본 분석 범위에서 제외합니다.
 - 구조 인벤토리/시그널 스냅샷은 로더 구조 특성상 소스 본문 검증과 의미가 달라질 수 있습니다.
@@ -41,7 +43,7 @@
 - 보안 보관함 복사 버튼은 비밀번호 변경 직후에도 최신 DB row를 다시 읽어 복호화해야 합니다.
 - Windows 테스트 임시 경로는 repo-local `.tmp-unittest/`를 사용합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
-- 2026-04-11 후속 수정은 기존 패키징 범위 안에서 처리되므로 spec의 datas/hidden import 증설은 필요하지 않습니다.
+- 2026-04-13 기준 spec 추가 자산은 `legacy_main_payload.manifest.json` 1건이며, 현재 spec에 반영되어 있습니다.
 
 ## 검증 커맨드
 

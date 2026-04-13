@@ -6,8 +6,9 @@ import ipaddress
 import json
 import logging
 import re
+import socket
 from typing import Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from PyQt6.QtCore import QObject, QThreadPool, pyqtSignal
 
@@ -31,6 +32,7 @@ from .worker import Worker
 logger = logging.getLogger(__name__)
 TITLE_FETCH_MAX_BYTES = 1024 * 1024
 TITLE_FETCH_MAX_THREADS = 4
+TITLE_FETCH_MAX_REDIRECTS = 5
 URL_TRAILING_PUNCTUATION = ".,!?:;"
 BLOCKED_TITLE_HOSTS = {
     "localhost",
@@ -43,26 +45,63 @@ def _normalize_extracted_url(url: str) -> str:
     return url.rstrip(URL_TRAILING_PUNCTUATION)
 
 
-def _is_safe_title_fetch_url(url: str) -> bool:
+def _resolve_title_fetch_host_ips(hostname: str, scheme: str) -> list[ipaddress._BaseAddress]:
+    try:
+        return [ipaddress.ip_address(hostname)]
+    except ValueError:
+        pass
+
+    default_port = 443 if scheme == "https" else 80
+    resolved_ips: list[ipaddress._BaseAddress] = []
+    seen: set[str] = set()
+    addrinfo = socket.getaddrinfo(hostname, default_port, type=socket.SOCK_STREAM)
+    for _family, _socktype, _proto, _canonname, sockaddr in addrinfo:
+        if not sockaddr:
+            continue
+        host_value = str(sockaddr[0] or "").strip()
+        if not host_value or host_value in seen:
+            continue
+        seen.add(host_value)
+        resolved_ips.append(ipaddress.ip_address(host_value))
+    return resolved_ips
+
+
+def _validate_title_fetch_url(url: str) -> tuple[bool, str]:
     try:
         parsed = urlparse(url)
     except Exception:
-        return False
+        return False, "invalid url"
 
     if parsed.scheme not in {"http", "https"}:
-        return False
+        return False, "invalid scheme"
 
     hostname = (parsed.hostname or "").strip().lower()
     if not hostname:
-        return False
+        return False, "missing hostname"
     if hostname in BLOCKED_TITLE_HOSTS:
-        return False
+        return False, f"blocked metadata hostname: {hostname}"
 
     try:
-        host_ip = ipaddress.ip_address(hostname)
-    except ValueError:
-        return True
-    return host_ip.is_global
+        resolved_ips = _resolve_title_fetch_host_ips(hostname, parsed.scheme)
+    except (socket.gaierror, TypeError, ValueError) as exc:
+        return False, f"dns resolution failed: {exc}"
+
+    if not resolved_ips:
+        return False, "dns resolution returned no addresses"
+
+    for host_ip in resolved_ips:
+        if not host_ip.is_global:
+            return False, f"blocked non-global address: {host_ip}"
+
+    return True, "ok"
+
+
+def _is_safe_title_fetch_url(url: str) -> bool:
+    return _validate_title_fetch_url(url)[0]
+
+
+def _is_blocked_title_fetch_reason(reason: str) -> bool:
+    return str(reason or "").startswith("blocked")
 
 
 def extract_first_url(text: str) -> Optional[str]:
@@ -172,10 +211,19 @@ class ClipboardActionManager(QObject):
         if not HAS_WEB:
             self.action_completed.emit(action_name, {"type": "notify", "message": "웹 요청 라이브러리가 없어 URL 제목을 가져올 수 없습니다."})
             return
-        if not _is_safe_title_fetch_url(url):
+        is_safe, reason = _validate_title_fetch_url(url)
+        if not is_safe:
+            logger.info("Title fetch precheck rejected %s: %s", url, reason)
             self.action_completed.emit(
                 action_name,
-                {"type": "notify", "message": "보안상 로컬/사설 주소의 제목 가져오기는 건너뜁니다."},
+                {
+                    "type": "notify",
+                    "message": (
+                        "보안상 로컬/사설 주소의 제목 가져오기는 건너뜁니다."
+                        if _is_blocked_title_fetch_reason(reason)
+                        else "URL 제목을 가져오기 전에 주소 검증에 실패했습니다."
+                    ),
+                },
             )
             return
 
@@ -208,33 +256,57 @@ class ClipboardActionManager(QObject):
         try:
             if requests is None or BeautifulSoup is None:
                 return {"title": None, "item_id": item_id, "url": url, "error": "web libraries unavailable"}
-            if not _is_safe_title_fetch_url(url):
-                return {"title": None, "item_id": item_id, "url": url, "error": "blocked local/private url"}
+            current_url = url
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            response = requests.get(url, headers=headers, timeout=(3, 5), verify=True, stream=True)
-            response.raise_for_status()
-            content_type = str(response.headers.get("Content-Type", "") or "").lower()
-            if content_type and "html" not in content_type:
-                return {"title": None, "item_id": item_id, "url": url, "error": f"unsupported content type: {content_type}"}
+            for _redirect_index in range(TITLE_FETCH_MAX_REDIRECTS + 1):
+                is_safe, reason = _validate_title_fetch_url(current_url)
+                if not is_safe:
+                    logger.info("Title fetch blocked for %s: %s", current_url, reason)
+                    return {"title": None, "item_id": item_id, "url": url, "error": reason}
 
-            html_chunks: list[bytes] = []
-            bytes_read = 0
-            for chunk in response.iter_content(chunk_size=65536):
-                if not chunk:
+                response = requests.get(
+                    current_url,
+                    headers=headers,
+                    timeout=(3, 5),
+                    verify=True,
+                    stream=True,
+                    allow_redirects=False,
+                )
+                if 300 <= response.status_code < 400:
+                    location = str(response.headers.get("Location", "") or "").strip()
+                    if not location:
+                        return {"title": None, "item_id": item_id, "url": url, "error": "redirect missing location"}
+                    next_url = _normalize_extracted_url(urljoin(current_url, location))
+                    response.close()
+                    response = None
+                    current_url = next_url
                     continue
-                remaining = TITLE_FETCH_MAX_BYTES - bytes_read
-                if remaining <= 0:
-                    break
-                limited_chunk = chunk[:remaining]
-                html_chunks.append(limited_chunk)
-                bytes_read += len(limited_chunk)
-                if bytes_read >= TITLE_FETCH_MAX_BYTES:
-                    break
 
-            html_text = b"".join(html_chunks).decode(response.encoding or "utf-8", errors="replace")
-            soup = BeautifulSoup(html_text, "html.parser")
-            title = soup.title.string if soup.title else None
-            return {"title": title.strip() if title else None, "item_id": item_id, "url": url}
+                response.raise_for_status()
+                content_type = str(response.headers.get("Content-Type", "") or "").lower()
+                if content_type and "html" not in content_type:
+                    return {"title": None, "item_id": item_id, "url": url, "error": f"unsupported content type: {content_type}"}
+
+                html_chunks: list[bytes] = []
+                bytes_read = 0
+                for chunk in response.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    remaining = TITLE_FETCH_MAX_BYTES - bytes_read
+                    if remaining <= 0:
+                        break
+                    limited_chunk = chunk[:remaining]
+                    html_chunks.append(limited_chunk)
+                    bytes_read += len(limited_chunk)
+                    if bytes_read >= TITLE_FETCH_MAX_BYTES:
+                        break
+
+                html_text = b"".join(html_chunks).decode(response.encoding or "utf-8", errors="replace")
+                soup = BeautifulSoup(html_text, "html.parser")
+                title = soup.title.string if soup.title else None
+                return {"title": title.strip() if title else None, "item_id": item_id, "url": url, "final_url": current_url}
+
+            return {"title": None, "item_id": item_id, "url": url, "error": "too many redirects"}
         except Exception as exc:
             logger.debug("Fetch title error: %s", exc)
             return {"title": None, "item_id": item_id, "url": url, "error": str(exc)}
