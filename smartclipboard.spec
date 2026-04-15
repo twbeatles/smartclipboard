@@ -18,9 +18,9 @@ Notes:
     - Payload builds now carry a sidecar manifest with Python/source sync metadata.
     - FILE clipboard/history support depends on smartclipboard_core.file_paths
       and repo-local temp usage during Windows test runs.
-    - 2026-04-11 through 2026-04-13 stabilization stays inside already-packaged
-      modules; the only new packaged data asset is the legacy payload manifest
-      that is wired below alongside the marshal payload.
+    - 2026-04-11 through 2026-04-15 stabilization/refactor keeps the same payload
+      data assets and expands hidden-import collection to feature/core
+      subpackages (`smartclipboard_app.features`, `smartclipboard_core.automation`).
     - CI now enforces optional runtime dependency presence via
       `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps`.
     - If legacy source changes, rebuild payload first and keep tests green
@@ -48,6 +48,8 @@ if not LEGACY_PAYLOAD_MANIFEST.exists():
 # Keep refactor-safe module coverage for payload runtime imports.
 CORE_SUBMODULES = collect_submodules("smartclipboard_core")
 DB_PARTS_SUBMODULES = collect_submodules("smartclipboard_core.db_parts")
+AUTOMATION_SUBMODULES = collect_submodules("smartclipboard_core.automation")
+FEATURE_SUBMODULES = collect_submodules("smartclipboard_app.features")
 MAINWINDOW_PARTS_SUBMODULES = collect_submodules("smartclipboard_app.ui.mainwindow_parts")
 
 EXCLUDES = [
@@ -140,7 +142,7 @@ def _append_hidden_import(module_name: str) -> None:
 for optional_module in OPTIONAL_HIDDEN_IMPORTS:
     _append_hidden_import(optional_module)
 
-for submodule in CORE_SUBMODULES + DB_PARTS_SUBMODULES + MAINWINDOW_PARTS_SUBMODULES:
+for submodule in CORE_SUBMODULES + DB_PARTS_SUBMODULES + AUTOMATION_SUBMODULES + FEATURE_SUBMODULES + MAINWINDOW_PARTS_SUBMODULES:
     if submodule not in HIDDEN_IMPORTS:
         HIDDEN_IMPORTS.append(submodule)
 

@@ -282,6 +282,17 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertLessEqual(unpinned_count, 10)
         self.assertEqual(pinned_count, 2)
 
+    def test_cleanup_returns_deleted_history_row_count(self):
+        kept_id = None
+        for i in range(3):
+            kept_id = self.db.add_item(f"cleanup-count-{i}", None, "TEXT")
+
+        deleted_count = self.db.cleanup(max_history=1)
+
+        self.assertEqual(deleted_count, 2)
+        rows = self.db.get_items("", "전체")
+        self.assertEqual([row[0] for row in rows], [kept_id])
+
     def test_backup_db_creates_target_file(self):
         target_file = os.path.join(self.tmpdir.name, "manual_backup.db")
         ok = self.db.backup_db(target_path=target_file, force=True)

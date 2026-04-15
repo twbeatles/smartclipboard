@@ -1,18 +1,7 @@
-"""Lifecycle and cleanup controller."""
+"""Compatibility facade for the lifecycle controller."""
 
+from __future__ import annotations
 
-class LifecycleController:
-    def __init__(self, window):
-        self.window = window
+from smartclipboard_app.features.shell.controller import LifecycleController
 
-    def check_vault_timeout(self):
-        return self.window.check_vault_timeout()
-
-    def run_periodic_cleanup(self):
-        return self.window.run_periodic_cleanup()
-
-    def close_event(self, event):
-        return self.window.closeEvent(event)
-
-    def quit_app(self):
-        return self.window.quit_app()
+__all__ = ["LifecycleController"]

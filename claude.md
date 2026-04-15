@@ -49,7 +49,7 @@
 - 보안 보관함 복사 버튼은 비밀번호 변경 직후에도 최신 DB row를 다시 조회해 복호화해야 합니다.
 - Windows 테스트 임시 경로는 시스템 temp 대신 repo-local `.tmp-unittest/`를 사용합니다.
 - 핫키 저장 경로는 등록 실패 시 이전 글로벌 핫키 상태로 롤백되어야 합니다.
-- `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지하고, payload에서 직접 참조하는 `smartclipboard_app.ui.dialogs.collections`도 명시적으로 포함합니다.
+- `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지하고, payload에서 직접 참조하는 `smartclipboard_app.ui.dialogs.collections`도 명시적으로 포함합니다.
 - 2026-04-13 기준 `smartclipboard.spec` 추가 자산은 payload manifest(`legacy_main_payload.manifest.json`) 1건이며, 현재 spec에 반영되어 있습니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
@@ -127,20 +127,19 @@ pyinstaller --clean smartclipboard.spec
 ## 8. MainWindow 분할 리팩토링 작업 규칙 (2026-03-07)
 
 - `legacy_main_src.MainWindow` 메서드 시그니처는 외부 계약으로 간주하고 유지합니다.
-- 본문 분할은 `smartclipboard_app/ui/mainwindow_parts/` helper 함수로 수행합니다.
+- 실제 구현은 `smartclipboard_app/features/` 도메인 패키지와 controller 계층으로 이동하고, `smartclipboard_app/ui/mainwindow_parts/`는 shim으로 유지합니다.
 - `eventFilter` helper에서는 module-level `super()`를 사용하지 않고, 원본 클래스의 fallback 이벤트 필터를 주입받아 호출합니다.
-- `scripts/refactor_signal_snapshot.py` 스냅샷은 `legacy_main_src.py` + `mainwindow_parts/*.py`를 모두 포함해야 합니다.
-- 수동 `py_compile` 검증 시 helper 모듈도 함께 포함해야 하며, 기본적으로는 `python scripts/preflight_local.py` 실행을 우선합니다.
+- `scripts/refactor_signal_snapshot.py` 스냅샷은 `legacy_main_src.py` + shim 파일 + feature 구현 파일을 모두 포함해야 합니다.
+- 수동 `py_compile` 검증 시 helper/shim뿐 아니라 `features/**/*.py`, `db_parts/**/*.py`, `automation/**/*.py`까지 함께 포함해야 하며, 기본적으로는 `python scripts/preflight_local.py` 실행을 우선합니다.
 
 ## 9. Refactor Notes (2026-03-12)
 
 - `smartclipboard_core/database.py` has been split into mixins under `smartclipboard_core/db_parts/`.
-- `smartclipboard_app/ui/mainwindow_parts/` now includes additional helper modules:
-  - `theme_style_sections.py`
-  - `ui_init_sections.py`, `ui_dragdrop_ops.py`
-  - `tray_hotkey_ops.py`, `status_lifecycle_ops.py`, `clipboard_runtime_ops.py`
+- `smartclipboard_core/db_parts/`는 flat facade + subpackage 구조(`search/`, `automation/`, `catalog/`, `retention/`)로 유지합니다.
+- `smartclipboard_core/actions.py`는 facade이고 실제 구현은 `smartclipboard_core/automation/`에 있습니다.
+- `smartclipboard_app/ui/mainwindow_parts/`는 shim이며 실제 구현은 `smartclipboard_app/features/` 아래에 있습니다.
 - Keep `MainWindow` and `ClipboardDB` public signatures stable.
-- `scripts/preflight_local.py` now compiles `smartclipboard_core/db_parts/*.py` as part of local guard checks.
+- `scripts/preflight_local.py` now compiles `smartclipboard_core/db_parts/**/*.py`, `smartclipboard_core/automation/**/*.py`, `smartclipboard_app/features/**/*.py` as part of local guard checks.
 - Added API surface regression check:
   - `tests/test_public_surfaces.py`
   - `tests/baseline/clipboarddb_public_methods.txt`

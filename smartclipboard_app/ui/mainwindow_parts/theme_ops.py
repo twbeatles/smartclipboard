@@ -1,11 +1,7 @@
-"""Extracted MainWindow helper operations."""
+"""Compatibility shim for theme operations."""
 
 from __future__ import annotations
 
-from .theme_style_sections import build_theme_style
+from smartclipboard_app.features.settings.services import apply_theme_impl
 
-
-def apply_theme_impl(self, THEMES, GLASS_STYLES):
-    theme = THEMES.get(self.current_theme, THEMES["dark"])
-    glass = GLASS_STYLES.get(self.current_theme, GLASS_STYLES["dark"])
-    self.setStyleSheet(build_theme_style(theme, glass))
+__all__ = ["apply_theme_impl"]

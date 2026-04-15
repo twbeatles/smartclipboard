@@ -361,9 +361,10 @@ class HistoryOpsMixin:
                 max_history = fallback
         return min(max(max_history, 10), 500)
 
-    def cleanup(self, max_history: int | None = None) -> None:
+    def cleanup(self, max_history: int | None = None) -> int:
         """오래된 항목 정리 - 이미지 제한 및 전체 제한 적용."""
         with self.lock:
+            deleted_total = 0
             try:
                 cursor = self.conn.cursor()
 
@@ -386,6 +387,7 @@ class HistoryOpsMixin:
                         """,
                         (diff,),
                     )
+                    deleted_total += max(cursor.rowcount or 0, 0)
                     logger.info(f"오래된 이미지 {diff}개 정리됨")
 
                 # 전체 히스토리 제한 (설정값 반영)
@@ -394,7 +396,7 @@ class HistoryOpsMixin:
                 result = cursor.fetchone()
                 if not result:
                     self.conn.commit()
-                    return
+                    return deleted_total
 
                 count = result[0]
                 if count > effective_max_history:
@@ -412,6 +414,7 @@ class HistoryOpsMixin:
                         """,
                         (diff,),
                     )
+                    deleted_total += max(cursor.rowcount or 0, 0)
                     self.conn.commit()
                     logger.info(f"오래된 항목 {diff}개 정리")
                 else:
@@ -423,8 +426,11 @@ class HistoryOpsMixin:
                     self.cleanup_count = 0
                     self.conn.execute("VACUUM")
                     logger.info("Database VACUUM completed")
+                return deleted_total
             except sqlite3.Error as e:
                 logger.error(f"DB Cleanup Error: {e}")
+                self.conn.rollback()
+                return 0
 
     def backup_db(self, target_path: str | None = None, force: bool = False) -> bool:
         """WAL 안전 온라인 백업. target_path가 없으면 일일 자동 백업."""

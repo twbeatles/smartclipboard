@@ -13,7 +13,7 @@
 
 ## 작업 원칙
 
-1. 신규 수정은 `smartclipboard_core/`와 `smartclipboard_app/ui/` 우선
+1. 신규 수정은 `smartclipboard_core/`와 `smartclipboard_app/features/` 우선, `smartclipboard_app/ui/`는 호환 shim/조립 레이어로 취급
 2. `클립모드 매니저.py`의 외부 호환 API(export) 유지
 3. 빌드 산출물이 payload와 payload manifest를 함께 포함하도록 `smartclipboard.spec` 유지
 
@@ -42,7 +42,7 @@
 - 컬렉션 삭제는 휴지통 row의 `collection_id`도 같이 정리하고, 복원 시 없는 컬렉션 참조는 `NULL`로 복원해야 합니다.
 - 보안 보관함 복사 버튼은 비밀번호 변경 직후에도 최신 DB row를 다시 읽어 복호화해야 합니다.
 - Windows 테스트 임시 경로는 repo-local `.tmp-unittest/`를 사용합니다.
-- `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
+- `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
 - 2026-04-13 기준 spec 추가 자산은 `legacy_main_payload.manifest.json` 1건이며, 현재 spec에 반영되어 있습니다.
 
 ## 검증 커맨드
@@ -67,6 +67,7 @@ python -m unittest discover -s tests -v
 - `tests/test_core.py`
 - `tests/test_ui_dialogs_widgets.py`
 - `tests/test_payload_sync.py`
+- `tests/test_legacy_loader.py`
 - `tests/test_migration_collections.py`
 - `tests/test_legacy_ui_contracts.py`
 - `tests/test_signal_snapshot.py`
@@ -89,16 +90,20 @@ pyinstaller --clean smartclipboard.spec
 
 ## Refactor Sync (2026-03-12)
 
-- `smartclipboard_core/database.py` is now split into `smartclipboard_core/db_parts/*.py` mixins.
-- `smartclipboard_app/ui/mainwindow_parts/` now includes:
-  - `theme_style_sections.py`
-  - `ui_init_sections.py`, `ui_dragdrop_ops.py`
-  - `tray_hotkey_ops.py`, `status_lifecycle_ops.py`, `clipboard_runtime_ops.py`
-- `scripts/preflight_local.py` compiles `db_parts/*.py` and `mainwindow_parts/*.py`.
+- `smartclipboard_core/database.py` is now split into `smartclipboard_core/db_parts/*.py` facades plus subpackages under `search/`, `automation/`, `catalog/`, `retention/`.
+- `smartclipboard_core/actions.py` is a public facade and the implementation lives in `smartclipboard_core/automation/`.
+- `smartclipboard_app/ui/mainwindow_parts/` is a compatibility shim layer, while actual MainWindow feature logic now lives in `smartclipboard_app/features/`.
+- `scripts/preflight_local.py` compiles `db_parts/**/*.py`, `automation/**/*.py`, `features/**/*.py`, `ui/**/*.py` recursively.
 - Added API surface regression checks:
   - `tests/test_public_surfaces.py`
   - `tests/baseline/clipboarddb_public_methods.txt`
-- `smartclipboard.spec` explicitly collects `smartclipboard_core.db_parts` submodules.
+- `smartclipboard.spec` explicitly collects `smartclipboard_core.db_parts`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` submodules.
+
+## 2026-04-15 Structure Refactor Notes
+
+- `legacy_main_src.MainWindow` keeps its public method surface but now delegates to feature controllers for clipboard, history/table, tray_hotkey, lifecycle, settings, and shell_ui.
+- `smartclipboard_app/features/shared/state.py` binds `WindowState`, `WindowServices`, `WindowWidgets` so feature controllers do not depend on the raw Qt window indiscriminately.
+- `tests/test_signal_snapshot.py` and `scripts/refactor_signal_snapshot.py` now scan both shim files and feature implementation files to preserve the legacy signal contract while the implementation is split.
 
 ## 2026-04-12 Stabilization Notes
 

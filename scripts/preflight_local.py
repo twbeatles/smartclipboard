@@ -35,7 +35,7 @@ def run_step(label: str, cmd: list[str]) -> int:
 
 
 def compile_targets() -> list[str]:
-    targets = [
+    targets = {
         "클립모드 매니저.py",
         "smartclipboard_app/bootstrap.py",
         "smartclipboard_app/legacy_main.py",
@@ -43,30 +43,41 @@ def compile_targets() -> list[str]:
         "smartclipboard_core/database.py",
         "smartclipboard_core/actions.py",
         "smartclipboard_core/worker.py",
-    ]
+    }
 
     ui_dir = REPO_ROOT / "smartclipboard_app" / "ui"
     if ui_dir.exists():
-        targets.extend(
+        targets.update(
             str(path.relative_to(REPO_ROOT)).replace("\\", "/")
-            for path in sorted(ui_dir.glob("*.py"))
+            for path in sorted(ui_dir.rglob("*.py"))
+            if "__pycache__" not in path.parts
         )
 
-    helper_dir = REPO_ROOT / "smartclipboard_app" / "ui" / "mainwindow_parts"
-    if helper_dir.exists():
-        targets.extend(
+    feature_dir = REPO_ROOT / "smartclipboard_app" / "features"
+    if feature_dir.exists():
+        targets.update(
             str(path.relative_to(REPO_ROOT)).replace("\\", "/")
-            for path in sorted(helper_dir.glob("*.py"))
+            for path in sorted(feature_dir.rglob("*.py"))
+            if "__pycache__" not in path.parts
         )
 
     db_parts_dir = REPO_ROOT / "smartclipboard_core" / "db_parts"
     if db_parts_dir.exists():
-        targets.extend(
+        targets.update(
             str(path.relative_to(REPO_ROOT)).replace("\\", "/")
-            for path in sorted(db_parts_dir.glob("*.py"))
+            for path in sorted(db_parts_dir.rglob("*.py"))
+            if "__pycache__" not in path.parts
         )
 
-    return targets
+    automation_dir = REPO_ROOT / "smartclipboard_core" / "automation"
+    if automation_dir.exists():
+        targets.update(
+            str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+            for path in sorted(automation_dir.rglob("*.py"))
+            if "__pycache__" not in path.parts
+        )
+
+    return sorted(targets)
 
 
 def check_optional_dependencies(strict: bool) -> int:

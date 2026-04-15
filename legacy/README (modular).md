@@ -38,11 +38,14 @@ smartclipboard-main/
 │   ├── legacy_main.py                  # marshal loader
 │   ├── legacy_main_payload.marshal     # legacy runtime payload
 │   ├── legacy_main_payload.manifest.json # payload sync manifest
+│   ├── features/                       # 현재 MainWindow 기능 도메인 구현
 │   ├── managers/
-│   └── ui/
+│   └── ui/                             # 호환 shim/controller 레이어
 ├── smartclipboard_core/
 │   ├── database.py
-│   ├── actions.py
+│   ├── actions.py                      # public facade
+│   ├── automation/                     # action manager 구현
+│   ├── db_parts/                       # facade + subpackages
 │   └── worker.py
 └── tests/
 ```
@@ -79,6 +82,7 @@ python -m unittest discover -s tests -v
 - `tests/test_core.py`
 - `tests/test_ui_dialogs_widgets.py`
 - `tests/test_payload_sync.py`
+- `tests/test_legacy_loader.py`
 - `tests/test_migration_collections.py`
 - `tests/test_legacy_ui_contracts.py`
 - `tests/test_signal_snapshot.py`
@@ -94,7 +98,7 @@ pyinstaller --clean smartclipboard.spec
 
 - `dist/SmartClipboard.exe`
 
-`smartclipboard.spec`는 `smartclipboard_app/legacy_main_payload.marshal`과 `smartclipboard_app/legacy_main_payload.manifest.json`을 `datas`로 포함하며, `smartclipboard_core`와 `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집합니다.
+`smartclipboard.spec`는 `smartclipboard_app/legacy_main_payload.marshal`과 `smartclipboard_app/legacy_main_payload.manifest.json`을 `datas`로 포함하며, `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집합니다.
 
 ## 중요 참고
 
@@ -122,3 +126,9 @@ pyinstaller --clean smartclipboard.spec
 - 2026-04-12 Note: 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
 - 2026-04-12 Note: import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
 - 2026-04-13 기준 spec 추가 자산은 payload manifest 1건이며, 현재 spec에 반영되어 있습니다.
+
+## 2026-04-15 Structure Refactor
+
+- `legacy_main_src.MainWindow`는 공개 시그니처를 유지한 채 feature controller 조합 방식으로 얇아졌습니다.
+- 실제 구현은 `smartclipboard_app/features/` 아래 `clipboard`, `history`, `settings`, `shell`, `shell_ui`, `tray_hotkey`, `shared`, `import_export`, `vault` 패키지로 이동했습니다.
+- `smartclipboard_core/actions.py`와 `smartclipboard_app/managers/*.py`는 facade를 유지하고, 실제 구현은 각각 `smartclipboard_core/automation/`, `smartclipboard_app/features/import_export/`, `smartclipboard_app/features/vault/`로 분리되었습니다.

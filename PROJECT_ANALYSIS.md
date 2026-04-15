@@ -38,7 +38,7 @@ SmartClipboard Pro는 **PyQt6** 기반 Windows 전용 클립보드 관리 데스
 | 진입점 | `클립모드 매니저.py` |
 | UI 프레임워크 | PyQt6 ≥ 6.4.0 |
 | 데이터 저장 | SQLite 3 (WAL 모드) |
-| 빌드 산출물 | `dist/SmartClipboard.exe` (기본 spec 기준 UPX 비활성) |
+| 빌드 산출물 | `dist/SmartClipboard.exe` (`smartclipboard.spec`는 `upx=True`를 요청하지만 실제 빌드 출력은 로컬 UPX 도구 가용성에 따라 달라질 수 있음) |
 | 대상 OS | Windows 10/11 |
 | Python 지원 | 3.10 / 3.11 / 3.12 / 3.13 / 3.14 |
 
@@ -746,5 +746,21 @@ pyinstaller --clean smartclipboard.spec
 
 ---
 
-*이 문서는 2026-03-21 기준 v10.6 코드베이스를 분석하여 작성되었습니다.*
-*코드 변경 시 해당 섹션을 업데이트해 주세요.*
+## 13. 2026-04-15 구조 분할 델타
+
+- `smartclipboard_app/features/`가 새 도메인 루트다.
+  - `settings/`: 테마/QSS/controller
+  - `shell_ui/`: 레이아웃 초기화, drag-drop, UI controller
+  - `history/`: 메뉴/테이블 표시/controller
+  - `clipboard/`: runtime pipeline/controller
+  - `tray_hotkey/`: 시스템 트레이/글로벌 핫키/controller
+  - `shell/`: 상태바/정리/종료/controller
+  - `import_export/`, `vault/`, `shared/`: manager 분리 구현과 공통 bundle
+- `smartclipboard_app/ui/mainwindow_parts/*.py`는 더 이상 실구현이 아니라 feature 모듈 재수출 shim이다.
+- `smartclipboard_app/ui/controllers/*.py`도 feature controller facade로 축소되었다.
+- `legacy_main_src.MainWindow`는 feature controller를 조합해 helper 기반 메서드를 위임하면서 공개 시그니처를 유지한다.
+- `smartclipboard_core/actions.py`는 facade이고 실제 구현은 `smartclipboard_core/automation/`로 이동했다.
+- `smartclipboard_core/db_parts/*.py`는 facade이고, 분리된 구현은 `db_parts/search/`, `automation/`, `catalog/`, `retention/` 하위 패키지로 이동했다.
+- `scripts/preflight_local.py`와 `scripts/refactor_signal_snapshot.py`는 새 feature/core 하위 패키지를 재귀적으로 포함하도록 갱신되어야 하며, `smartclipboard.spec`도 `smartclipboard_app.features`/`smartclipboard_core.automation` hidden import 수집을 포함한다.
+
+*이 문서는 2026-03-21 기준 v10.6 코드베이스를 기반으로 작성되었고, 2026-04-15 구조 분할 델타를 추가 반영했습니다.*

@@ -38,10 +38,30 @@ def _collect_connect_lines(lines: list[str], start: int = 1, end: int | None = N
 
 
 def _discover_helper_paths(target: pathlib.Path) -> list[pathlib.Path]:
-    helper_dir = target.parent / "ui" / "mainwindow_parts"
-    if not helper_dir.exists():
-        return []
-    return sorted(p for p in helper_dir.glob("*.py") if p.name != "__init__.py")
+    repo_root = target.parent.parent
+    ordered_paths = [
+        repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "clipboard_runtime_ops.py",
+        repo_root / "smartclipboard_app" / "features" / "clipboard" / "pipeline.py",
+        repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "menu_ops.py",
+        repo_root / "smartclipboard_app" / "features" / "history" / "menu.py",
+        repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "status_lifecycle_ops.py",
+        repo_root / "smartclipboard_app" / "features" / "shell" / "services.py",
+        repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "table_ops.py",
+        repo_root / "smartclipboard_app" / "features" / "history" / "view.py",
+        repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "tray_hotkey_ops.py",
+        repo_root / "smartclipboard_app" / "features" / "tray_hotkey" / "services.py",
+        repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "ui_dragdrop_ops.py",
+        repo_root / "smartclipboard_app" / "features" / "shell_ui" / "dragdrop.py",
+        repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "ui_init_sections.py",
+        repo_root / "smartclipboard_app" / "features" / "shell_ui" / "sections.py",
+        repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "ui_ops.py",
+        repo_root / "smartclipboard_app" / "features" / "shell_ui" / "view.py",
+    ]
+    return [path for path in ordered_paths if path.exists() and path.name != "__init__.py"]
+
+
+def discover_helper_paths(path: str | pathlib.Path = "smartclipboard_app/legacy_main_src.py") -> list[pathlib.Path]:
+    return _discover_helper_paths(pathlib.Path(path))
 
 
 def build_snapshot(
@@ -58,7 +78,7 @@ def build_snapshot(
     class_start, class_end = bounds
     snapshot = _collect_connect_lines(target_lines, start=class_start, end=class_end)
 
-    helpers = _discover_helper_paths(target) if helper_paths is None else [pathlib.Path(p) for p in helper_paths]
+    helpers = discover_helper_paths(target) if helper_paths is None else [pathlib.Path(p) for p in helper_paths]
     target_resolved = target.resolve()
     for helper_path in helpers:
         if helper_path.resolve() == target_resolved:

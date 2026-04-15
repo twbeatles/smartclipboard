@@ -29,7 +29,6 @@ import base64
 import uuid
 import csv
 import hashlib  # v10.1: 모듈 레벨 import로 이동 (성능 최적화)
-from urllib.parse import quote  # v10.3: URL 인코딩용
 
 try:
     import keyboard
@@ -117,10 +116,18 @@ from smartclipboard_app.ui.dialogs.settings import SettingsDialog as AppSettings
 from smartclipboard_app.ui.dialogs.statistics import StatisticsDialog as AppStatisticsDialog
 from smartclipboard_app.ui.dialogs.tags import TagEditDialog as AppTagEditDialog
 from smartclipboard_app.ui.dialogs.trash_dialog import TrashDialog as AppTrashDialog
+from smartclipboard_app.features.clipboard.controller import ClipboardController
+from smartclipboard_app.features.history.controller import HistoryController
+from smartclipboard_app.features.settings.controller import SettingsController
+from smartclipboard_app.features.shared import bind_window_facets
+from smartclipboard_app.features.shell.controller import LifecycleController
+from smartclipboard_app.features.shell_ui.controller import ShellUiController
+from smartclipboard_app.features.tray_hotkey.controller import TrayHotkeyController
 from smartclipboard_app.ui.mainwindow_parts import (
     analyze_text_impl,
     apply_theme_impl,
     apply_copy_rules_impl,
+    build_google_search_url,
     check_vault_timeout_impl,
     event_filter_impl,
     get_display_items_impl,
@@ -580,6 +587,14 @@ class MainWindow(QMainWindow):
             self.current_collection_filter = "__all__"  # 컬렉션 필터
             self.sort_column = 3  # 기본 정렬: 시간 컨럼
             self.sort_order = Qt.SortOrder.DescendingOrder  # 기본: 내림차순
+            bind_window_facets(self)
+            self.clipboard_controller = ClipboardController(self)
+            self.history_controller = HistoryController(self)
+            self.table_controller = self.history_controller
+            self.tray_hotkey_controller = TrayHotkeyController(self)
+            self.lifecycle_controller = LifecycleController(self)
+            self.settings_controller = SettingsController(self)
+            self.shell_ui_controller = ShellUiController(self)
             
             # v10.0: 복사 규칙 캐싱 (성능 최적화)
             self._rules_cache = None
@@ -596,6 +611,7 @@ class MainWindow(QMainWindow):
             self.init_ui()
             self.init_tray()
             self.init_shortcuts()
+            bind_window_facets(self)
             
             # v8.0: 핫키 시그널 연결 (스레드 안전)
             self.toggle_mini_signal.connect(self._toggle_mini_window_slot)
@@ -665,8 +681,7 @@ class MainWindow(QMainWindow):
 
     def register_hotkeys(self, hotkeys_override=None, persist=False):
         """v10.2: custom hotkey registration."""
-        return register_hotkeys_impl(
-            self,
+        return self.tray_hotkey_controller.register_hotkeys(
             logger,
             keyboard,
             json,
@@ -681,7 +696,7 @@ class MainWindow(QMainWindow):
     
     def _toggle_mini_window_slot(self):
         """Mini window toggle slot on main thread."""
-        return toggle_mini_window_slot_impl(self, logger)
+        return self.tray_hotkey_controller.toggle_mini_window_slot(logger)
     
     def paste_last_item(self):
         """마지막 항목 즉시 붙여넣기 (외부에서 호출 시 시그널 사용)"""
@@ -689,15 +704,15 @@ class MainWindow(QMainWindow):
     
     def _paste_last_item_slot(self):
         """Paste last clipboard item slot on main thread."""
-        return paste_last_item_slot_impl(self, logger, QPixmap, QTimer, keyboard)
+        return self.tray_hotkey_controller.paste_last_item_slot(logger, QPixmap, QTimer, keyboard)
     
     def check_vault_timeout(self):
         """Auto-lock secure vault on inactivity."""
-        return check_vault_timeout_impl(self, logger)
+        return self.lifecycle_controller.check_vault_timeout(logger)
     
     def run_periodic_cleanup(self):
         """Periodic cleanup for expired data and trash."""
-        return run_periodic_cleanup_impl(self, logger)
+        return self.lifecycle_controller.run_periodic_cleanup(logger)
 
     def run_daily_backup_if_needed(self):
         """하루 1회 자동 백업 실행 (앱 재시작 없이 날짜 변경 대응)."""
@@ -759,7 +774,7 @@ class MainWindow(QMainWindow):
 
     def quit_app(self):
         """Shutdown app and cleanup resources."""
-        return quit_app_impl(self, logger, keyboard, QApplication)
+        return self.lifecycle_controller.quit_app(logger, keyboard, QApplication)
 
     def toggle_privacy_mode(self):
         """프라이버시 모드 토글"""
@@ -807,6 +822,8 @@ class MainWindow(QMainWindow):
             
         file_name, _ = QFileDialog.getOpenFileName(self, "데이터 복원", "", "SQLite DB Files (*.db);;All Files (*)")
         if file_name:
+            target_db_file = getattr(self.db, "db_file", DB_FILE)
+            target_app_dir = getattr(self.db, "app_dir", APP_DIR)
             try:
                 # DB 연결 종료 시도 (안전한 복사를 위해)
                 try:
@@ -815,15 +832,13 @@ class MainWindow(QMainWindow):
                     pass
                 self.action_manager.shutdown()
                 self.db.close()
-                import shutil
-                target_db_file = getattr(self.db, "db_file", DB_FILE)
                 shutil.copy2(file_name, target_db_file)
-                QMessageBox.information(self, "복원 완료", "데이터가 복원되었습니다.\n프로그램을 재시작합니다.")
+                QMessageBox.information(self, "복원 완료", "데이터가 복원되었습니다.\n앱을 종료합니다. 다시 실행해주세요.")
                 self.quit_app()
             except Exception as e:
                 QMessageBox.critical(self, "복원 오류", f"복원 중 오류가 발생했습니다:\n{e}")
                 # v10.2: 연결 재수립 및 모든 매니저 갱신
-                self.db = ClipboardDB()
+                self.db = ClipboardDB(db_file=target_db_file, app_dir=target_app_dir)
                 self.vault_manager = SecureVaultManager(self.db)
                 self.action_manager = ClipboardActionManager(self.db)
                 self.action_manager.action_completed.connect(self.on_action_completed)
@@ -870,23 +885,22 @@ class MainWindow(QMainWindow):
         return QIcon(pixmap)
 
     def apply_theme(self):
-        return apply_theme_impl(self, THEMES, GLASS_STYLES)
+        return self.settings_controller.apply_theme(THEMES, GLASS_STYLES)
         # Note: 단축키는 init_shortcuts()에서 등록됨 (중복 방지)
 
     def eventFilter(self, source, event):
-        return event_filter_impl(
-            self,
+        return self.shell_ui_controller.event_filter(
             source,
             event,
             lambda event_source, event_obj: QMainWindow.eventFilter(self, event_source, event_obj),
         )
 
     def _handle_drop_event(self, event):
-        return handle_drop_event_impl(self, event, THEMES, logger)
+        return self.shell_ui_controller.handle_drop_event(event, THEMES, logger)
 
 
     def init_menu(self):
-        return init_menu_impl(self, THEMES)
+        return self.history_controller.init_menu(THEMES)
 
     def change_theme(self, theme_key):
         self.current_theme = theme_key
@@ -1135,7 +1149,7 @@ class MainWindow(QMainWindow):
         self.load_data()
 
     def init_ui(self):
-        return init_ui_impl(self, HAS_QRCODE)
+        return self.shell_ui_controller.init_ui(HAS_QRCODE)
 
     # --- v10.5: 비동기 액션 완료 핸들러 ---
     def on_action_completed(self, action_name, result):
@@ -1175,7 +1189,7 @@ class MainWindow(QMainWindow):
             logger.error(f"Action Handler Error: {e}")
 
     def init_tray(self):
-        return init_tray_impl(self, VERSION, QAction, QMenu, QSystemTrayIcon)
+        return self.tray_hotkey_controller.init_tray(VERSION, QAction, QMenu, QSystemTrayIcon)
 
     def toggle_monitoring_pause(self):
         """v10.6: 모니터링 일시정지 토글"""
@@ -1289,11 +1303,11 @@ class MainWindow(QMainWindow):
 
     def update_tray_theme(self):
         """Apply active theme to tray menu."""
-        return update_tray_theme_impl(self, THEMES)
+        return self.lifecycle_controller.update_tray_theme(THEMES)
 
     def update_status_bar(self, selection_count=0):
         """Refresh status bar message."""
-        return update_status_bar_impl(self, selection_count, Qt)
+        return self.lifecycle_controller.update_status_bar(selection_count, Qt)
 
     # --- 기능 로직 ---
     def toggle_always_on_top(self):
@@ -1362,11 +1376,43 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if confirm == QMessageBox.StandardButton.Yes:
+            previous_max_history = self.db._get_max_history() if hasattr(self.db, "_get_max_history") else MAX_HISTORY
+            previous_mini_enabled = str(self.db.get_setting("mini_window_enabled", "true") or "true")
+            previous_hotkeys = self.db.get_setting("hotkeys", json.dumps(DEFAULT_HOTKEYS))
+            if isinstance(previous_hotkeys, dict):
+                previous_hotkeys = json.dumps(previous_hotkeys)
+
+            default_hotkeys_json = json.dumps(DEFAULT_HOTKEYS)
             self.db.set_setting("theme", "dark")
-            self.db.set_setting("opacity", "1.0")
+            self.db.set_setting("max_history", MAX_HISTORY)
+            self.db.set_setting("mini_window_enabled", "true")
+            self.db.set_setting("hotkeys", default_hotkeys_json)
+            self.db.set_setting("log_level", "INFO")
             self.current_theme = "dark"
             self.apply_theme()
-            QMessageBox.information(self, "완료", "설정이 초기화되었습니다.")
+            self.apply_saved_log_level()
+
+            hotkey_warning = ""
+            if self.register_hotkeys() is False:
+                hotkey_error = getattr(self, "_last_hotkey_error", "") or "unknown hotkey registration error"
+                self.db.set_setting("mini_window_enabled", previous_mini_enabled)
+                self.db.set_setting("hotkeys", previous_hotkeys)
+                self.register_hotkeys()
+                hotkey_warning = (
+                    "핵심 설정 초기화는 완료됐지만 핫키 재적용에 실패해 핫키 관련 설정만 이전 값으로 되돌렸습니다.\n\n"
+                    f"오류: {hotkey_error}"
+                )
+
+            if MAX_HISTORY < previous_max_history and hasattr(self.db, "cleanup"):
+                self.db.cleanup()
+
+            self.load_data()
+            self.update_status_bar()
+
+            if hotkey_warning:
+                QMessageBox.warning(self, "일부 설정 되돌림", hotkey_warning)
+            else:
+                QMessageBox.information(self, "완료", "핵심 설정이 초기화되었습니다.")
 
     def reset_clipboard_monitor(self):
         """v10.5: 클립보드 모니터링 강제 재시작"""
@@ -1445,8 +1491,7 @@ class MainWindow(QMainWindow):
     def search_google(self):
         text = self.detail_text.toPlainText()
         if text:
-            # v10.3: URL 인코딩 추가 - 특수문자 처리
-            url = f"https://www.google.com/search?q={quote(text)}"
+            url = build_google_search_url(text)
             webbrowser.open(url)
 
     def generate_qr(self):
@@ -1482,29 +1527,36 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "QR 오류", str(e))
 
     def on_tray_activated(self, reason):
-        return on_tray_activated_impl(self, reason, QSystemTrayIcon)
+        return self.tray_hotkey_controller.on_tray_activated(reason, QSystemTrayIcon)
 
     def show_window_from_tray(self):
-        return show_window_from_tray_impl(self)
+        return self.tray_hotkey_controller.show_window_from_tray()
 
     def on_clipboard_change(self):
         """Clipboard changed callback with debounce."""
-        return on_clipboard_change_impl(self, QTimer)
+        return self.clipboard_controller.on_clipboard_change(QTimer)
 
     def process_clipboard(self):
-        return process_clipboard_impl(self, logger)
+        return self.clipboard_controller.process_clipboard(logger)
 
     def _process_image_clipboard(self, mime_data):
-        return process_image_clipboard_impl(self, mime_data, logger, QByteArray, QBuffer, hashlib, ToastNotification)
+        return self.clipboard_controller.process_image_clipboard(
+            mime_data,
+            logger,
+            QByteArray,
+            QBuffer,
+            hashlib,
+            ToastNotification,
+        )
 
     def _process_text_clipboard(self, mime_data):
-        return process_text_clipboard_impl(self, mime_data, logger)
+        return self.clipboard_controller.process_text_clipboard(mime_data, logger)
 
     def _process_actions(self, text, item_id):
-        return process_actions_impl(self, text, item_id, logger, ToastNotification)
+        return self.clipboard_controller.process_actions(text, item_id, logger, ToastNotification)
 
     def apply_copy_rules(self, text):
-        return apply_copy_rules_impl(self, text, logger, re)
+        return self.clipboard_controller.apply_copy_rules(text, logger, re)
     
     def invalidate_rules_cache(self):
         """v10.0: 규칙 캐시 무효화 (규칙 변경 시 호출)"""
@@ -1512,10 +1564,17 @@ class MainWindow(QMainWindow):
         logger.debug("Copy rules cache invalidated")
 
     def analyze_text(self, text):
-        return analyze_text_impl(text, RE_URL, RE_HEX_COLOR, RE_RGB_COLOR, RE_HSL_COLOR, CODE_INDICATORS)
+        return self.clipboard_controller.analyze_text(
+            text,
+            RE_URL,
+            RE_HEX_COLOR,
+            RE_RGB_COLOR,
+            RE_HSL_COLOR,
+            CODE_INDICATORS,
+        )
 
     def load_data(self):
-        return load_data_impl(self, THEMES, logger)
+        return self.history_controller.load_data(THEMES, logger)
 
     def on_search_text_changed(self, text):
         # Reset fallback notification on clear, so we can notify again later if needed.
@@ -1524,17 +1583,17 @@ class MainWindow(QMainWindow):
         self._search_debounce_timer.start()
 
     def _get_display_items(self):
-        return get_display_items_impl(self)
+        return self.history_controller.get_display_items()
 
     def _show_empty_state(self, theme):
-        return show_empty_state_impl(self, theme)
+        return self.history_controller.show_empty_state(theme)
 
     def _populate_table(self, items, theme):
-        return populate_table_impl(self, items, theme, TYPE_ICONS)
+        return self.history_controller.populate_table(items, theme, TYPE_ICONS)
 
 
     def on_selection_changed(self):
-        return on_selection_changed_impl(self, HAS_QRCODE, THEMES)
+        return self.history_controller.on_selection_changed(HAS_QRCODE, THEMES)
 
     def is_light_color(self, hex_color):
         """색상이 밝은지 판단"""
@@ -1804,7 +1863,7 @@ class MainWindow(QMainWindow):
         return item_ids[0] if item_ids else None
 
     def show_context_menu(self, pos):
-        return show_context_menu_impl(self, pos, THEMES, webbrowser)
+        return self.history_controller.show_context_menu(pos, THEMES, webbrowser)
 
 
 if __name__ == "__main__":

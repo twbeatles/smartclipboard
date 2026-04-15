@@ -7,8 +7,10 @@ from contextlib import contextmanager
 from unittest import mock
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMessageBox, QPushButton, QTableWidget, QWidget
+from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QTableWidget, QWidget
 
+import smartclipboard_app.legacy_main_src as legacy_main_src
+import smartclipboard_app.ui.mainwindow_parts.menu_ops as menu_ops
 from smartclipboard_core.file_paths import file_content_from_paths
 from smartclipboard_app.ui.dialogs.clipboard_actions import ClipboardActionsDialog
 from smartclipboard_app.ui.dialogs.collections import CollectionManagerDialog
@@ -19,7 +21,7 @@ from smartclipboard_app.ui.dialogs.import_dialog import ImportDialog
 from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
 from smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops import process_clipboard_impl
-from smartclipboard_app.ui.mainwindow_parts.status_lifecycle_ops import quit_app_impl
+from smartclipboard_app.ui.mainwindow_parts.status_lifecycle_ops import quit_app_impl, run_periodic_cleanup_impl
 from smartclipboard_app.ui.dialogs.snippets import SnippetDialog, SnippetManagerDialog, validate_snippet_shortcut
 from smartclipboard_app.ui.mainwindow_parts.table_ops import get_display_items_impl, populate_table_impl
 from smartclipboard_app.ui.mainwindow_parts.tray_hotkey_ops import paste_last_item_slot_impl
@@ -43,6 +45,9 @@ class _FakeSettingsDB:
 
     def cleanup(self):
         self.cleanup_calls += 1
+
+    def _get_max_history(self):
+        return int(self.values.get("max_history", 100))
 
 
 class _FakeImportExportManager:
@@ -672,6 +677,233 @@ class _FakeDragWindow:
         self.load_calls += 1
 
 
+class _FakeMenuWindow(QMainWindow):
+    def __init__(self, always_on_top=False):
+        super().__init__()
+        self.current_theme = "dark"
+        self.always_on_top = always_on_top
+
+    def export_history(self):
+        return None
+
+    def backup_data(self):
+        return None
+
+    def restore_data(self):
+        return None
+
+    def quit_app(self):
+        return None
+
+    def clear_all_history(self):
+        return None
+
+    def show_snippet_manager(self):
+        return None
+
+    def show_export_dialog(self):
+        return None
+
+    def show_import_dialog(self):
+        return None
+
+    def show_trash(self):
+        return None
+
+    def show_statistics(self):
+        return None
+
+    def toggle_mini_window(self):
+        return None
+
+    def toggle_always_on_top(self):
+        return None
+
+    def change_theme(self, _theme_key):
+        return None
+
+    def check_startup_registry(self):
+        return False
+
+    def toggle_startup(self):
+        return None
+
+    def show_copy_rules(self):
+        return None
+
+    def show_collection_manager(self):
+        return None
+
+    def show_clipboard_actions(self):
+        return None
+
+    def show_hotkey_settings(self):
+        return None
+
+    def show_settings(self):
+        return None
+
+    def show_secure_vault(self):
+        return None
+
+    def toggle_privacy_mode(self):
+        return None
+
+    def toggle_debug_mode(self):
+        return None
+
+    def show_shortcuts_dialog(self):
+        return None
+
+    def show_about_dialog(self):
+        return None
+
+
+class _FakeContextIndex:
+    def __init__(self, row):
+        self._row = row
+
+    def row(self):
+        return self._row
+
+
+class _FakeContextSelectionModel:
+    def __init__(self, table):
+        self._table = table
+
+    def selectedRows(self):
+        return [_FakeContextIndex(row) for row in self._table.selected_rows]
+
+
+class _FakeContextItem:
+    def __init__(self, row):
+        self._row = row
+
+
+class _FakeContextTable:
+    def __init__(self, clicked_row, selected_rows):
+        self.clicked_row = clicked_row
+        self.selected_rows = list(selected_rows)
+        self.clear_calls = 0
+        self.selected_via_click = []
+
+    def itemAt(self, _pos):
+        if self.clicked_row is None:
+            return None
+        return _FakeContextItem(self.clicked_row)
+
+    def row(self, item):
+        return item._row
+
+    def selectionModel(self):
+        return _FakeContextSelectionModel(self)
+
+    def clearSelection(self):
+        self.clear_calls += 1
+        self.selected_rows = []
+
+    def selectRow(self, row):
+        self.selected_rows = [row]
+        self.selected_via_click.append(row)
+
+
+class _FakeCleanupDB:
+    def __init__(self, expired_count=0, history_deleted=0):
+        self.expired_count = expired_count
+        self.history_deleted = history_deleted
+        self.trash_cleanup_calls = 0
+
+    def cleanup_expired_items(self):
+        return self.expired_count
+
+    def cleanup_expired_trash(self):
+        self.trash_cleanup_calls += 1
+
+    def cleanup(self):
+        return self.history_deleted
+
+
+class _FakeCleanupWindow:
+    def __init__(self, db, visible=True):
+        self.db = db
+        self._visible = visible
+        self.load_calls = 0
+        self.status_calls = 0
+        self.is_data_dirty = False
+
+    def isVisible(self):
+        return self._visible
+
+    def load_data(self):
+        self.load_calls += 1
+
+    def update_status_bar(self):
+        self.status_calls += 1
+
+
+class _FakeResetWindow:
+    def __init__(self, db, fail_hotkeys=False):
+        self.db = db
+        self.current_theme = str(db.get_setting("theme", "dark"))
+        self.fail_hotkeys = fail_hotkeys
+        self.register_calls = 0
+        self.theme_apply_calls = 0
+        self.log_apply_calls = 0
+        self.load_calls = 0
+        self.status_calls = 0
+        self._last_hotkey_error = "reset hotkey registration failed"
+
+    def apply_theme(self):
+        self.theme_apply_calls += 1
+
+    def apply_saved_log_level(self):
+        self.log_apply_calls += 1
+
+    def register_hotkeys(self):
+        self.register_calls += 1
+        if self.fail_hotkeys and self.register_calls == 1:
+            return False
+        self._last_hotkey_error = ""
+        return True
+
+    def load_data(self):
+        self.load_calls += 1
+
+    def update_status_bar(self):
+        self.status_calls += 1
+
+
+class _FakeRestoreSignal:
+    def __init__(self):
+        self.disconnect_calls = 0
+        self.connect_calls = 0
+
+    def disconnect(self, _slot):
+        self.disconnect_calls += 1
+
+    def connect(self, _slot):
+        self.connect_calls += 1
+
+
+class _FakeRestoreActionManager:
+    def __init__(self):
+        self.action_completed = _FakeRestoreSignal()
+        self.shutdown_calls = 0
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+
+
+class _FakeRestoreDB:
+    def __init__(self, db_file, app_dir):
+        self.db_file = db_file
+        self.app_dir = app_dir
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 class UiDialogsWidgetsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -727,6 +959,117 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         finally:
             dialog.close()
             parent.close()
+
+    def test_reset_settings_resets_only_core_settings(self):
+        db = _FakeSettingsDB(
+            {
+                "theme": "ocean",
+                "max_history": 200,
+                "mini_window_enabled": "false",
+                "hotkeys": json.dumps(
+                    {
+                        "show_main": "ctrl+alt+1",
+                        "show_mini": "ctrl+alt+2",
+                        "paste_last": "ctrl+alt+3",
+                    }
+                ),
+                "log_level": "DEBUG",
+                "last_auto_backup_date": "20260415",
+            }
+        )
+        window = _FakeResetWindow(db)
+
+        with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes), mock.patch.object(
+            QMessageBox, "information"
+        ) as info_mock, mock.patch.object(QMessageBox, "warning") as warning_mock:
+            legacy_main_src.MainWindow.reset_settings(window)
+
+        self.assertEqual(db.values["theme"], "dark")
+        self.assertEqual(db.values["max_history"], legacy_main_src.MAX_HISTORY)
+        self.assertEqual(db.values["mini_window_enabled"], "true")
+        self.assertEqual(json.loads(db.values["hotkeys"]), DEFAULT_HOTKEYS)
+        self.assertEqual(db.values["log_level"], "INFO")
+        self.assertEqual(db.values["last_auto_backup_date"], "20260415")
+        self.assertNotIn("opacity", db.saved)
+        self.assertEqual(db.cleanup_calls, 1)
+        self.assertEqual(window.theme_apply_calls, 1)
+        self.assertEqual(window.log_apply_calls, 1)
+        self.assertEqual(window.register_calls, 1)
+        self.assertEqual(window.load_calls, 1)
+        self.assertEqual(window.status_calls, 1)
+        self.assertTrue(info_mock.called)
+        self.assertFalse(warning_mock.called)
+
+    def test_reset_settings_rolls_back_only_hotkey_related_values_on_failure(self):
+        original_hotkeys = json.dumps(
+            {
+                "show_main": "ctrl+alt+1",
+                "show_mini": "ctrl+alt+2",
+                "paste_last": "ctrl+alt+3",
+            }
+        )
+        db = _FakeSettingsDB(
+            {
+                "theme": "ocean",
+                "max_history": 200,
+                "mini_window_enabled": "false",
+                "hotkeys": original_hotkeys,
+                "log_level": "DEBUG",
+            }
+        )
+        window = _FakeResetWindow(db, fail_hotkeys=True)
+
+        with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes), mock.patch.object(
+            QMessageBox, "warning"
+        ) as warning_mock, mock.patch.object(QMessageBox, "information") as info_mock:
+            legacy_main_src.MainWindow.reset_settings(window)
+
+        self.assertEqual(db.values["theme"], "dark")
+        self.assertEqual(db.values["max_history"], legacy_main_src.MAX_HISTORY)
+        self.assertEqual(db.values["log_level"], "INFO")
+        self.assertEqual(db.values["mini_window_enabled"], "false")
+        self.assertEqual(db.values["hotkeys"], original_hotkeys)
+        self.assertEqual(db.cleanup_calls, 1)
+        self.assertEqual(window.register_calls, 2)
+        self.assertTrue(warning_mock.called)
+        self.assertFalse(info_mock.called)
+
+    def test_init_menu_syncs_always_on_top_check_state_with_runtime_flag(self):
+        window = _FakeMenuWindow(always_on_top=False)
+        try:
+            menu_ops.init_menu_impl(window, FALLBACK_THEMES)
+            self.assertFalse(window.action_ontop.isChecked())
+        finally:
+            window.close()
+
+    def test_context_menu_selection_replaces_external_selection(self):
+        window = mock.Mock()
+        window.table = _FakeContextTable(clicked_row=4, selected_rows=[1, 2])
+
+        item = menu_ops._sync_context_menu_selection(window, object())
+
+        self.assertIsNotNone(item)
+        self.assertEqual(window.table.selected_rows, [4])
+        self.assertEqual(window.table.clear_calls, 1)
+        self.assertEqual(window.table.selected_via_click, [4])
+
+    def test_context_menu_selection_keeps_existing_multi_selection_for_clicked_row(self):
+        window = mock.Mock()
+        window.table = _FakeContextTable(clicked_row=2, selected_rows=[1, 2])
+
+        item = menu_ops._sync_context_menu_selection(window, object())
+
+        self.assertIsNotNone(item)
+        self.assertEqual(window.table.selected_rows, [1, 2])
+        self.assertEqual(window.table.clear_calls, 0)
+        self.assertEqual(window.table.selected_via_click, [])
+
+    def test_google_search_helper_encodes_reserved_characters(self):
+        url = menu_ops.build_google_search_url("https://example.com/a b?x=1&y=한글")
+
+        self.assertTrue(url.startswith("https://www.google.com/search?q="))
+        self.assertIn("%2F%2Fexample.com%2Fa%20b%3Fx%3D1%26y%3D", url)
+        self.assertIn("%ED%95%9C%EA%B8%80", url)
 
     def test_import_dialog_csv_warns_and_shows_summary(self):
         dialog = ImportDialog(None, _FakeImportExportManager())
@@ -1213,6 +1556,81 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertEqual(clipboard.text(), "different-text")
         self.assertTrue(window.db.closed)
         self.assertIsNone(window._vault_clipboard_expected_text)
+
+    def test_run_periodic_cleanup_refreshes_visible_window_when_history_rows_deleted(self):
+        window = _FakeCleanupWindow(_FakeCleanupDB(expired_count=0, history_deleted=2), visible=True)
+
+        run_periodic_cleanup_impl(window, mock.Mock())
+
+        self.assertEqual(window.load_calls, 1)
+        self.assertEqual(window.status_calls, 1)
+        self.assertFalse(window.is_data_dirty)
+
+    def test_run_periodic_cleanup_marks_hidden_window_dirty_when_history_rows_deleted(self):
+        window = _FakeCleanupWindow(_FakeCleanupDB(expired_count=0, history_deleted=1), visible=False)
+
+        run_periodic_cleanup_impl(window, mock.Mock())
+
+        self.assertEqual(window.load_calls, 0)
+        self.assertEqual(window.status_calls, 0)
+        self.assertTrue(window.is_data_dirty)
+
+    def test_restore_data_failure_reuses_runtime_db_path(self):
+        current_db = _FakeRestoreDB(db_file="D:/runtime/custom.db", app_dir="D:/runtime")
+        current_action_manager = _FakeRestoreActionManager()
+        new_db = _FakeRestoreDB(db_file=current_db.db_file, app_dir=current_db.app_dir)
+        new_action_manager = _FakeRestoreActionManager()
+        new_vault_manager = object()
+        new_export_manager = object()
+        window = mock.Mock()
+        window.db = current_db
+        window.action_manager = current_action_manager
+        window.on_action_completed = object()
+
+        with mock.patch.object(
+            legacy_main_src.QMessageBox,
+            "warning",
+            return_value=QMessageBox.StandardButton.Yes,
+        ), mock.patch.object(
+            legacy_main_src.QFileDialog,
+            "getOpenFileName",
+            return_value=("backup.db", "SQLite DB Files (*.db)"),
+        ), mock.patch.object(
+            legacy_main_src.QMessageBox,
+            "critical",
+        ) as critical_mock, mock.patch.object(
+            legacy_main_src,
+            "ClipboardDB",
+            return_value=new_db,
+        ) as db_ctor, mock.patch.object(
+            legacy_main_src,
+            "SecureVaultManager",
+            return_value=new_vault_manager,
+        ), mock.patch.object(
+            legacy_main_src,
+            "ClipboardActionManager",
+            return_value=new_action_manager,
+        ), mock.patch.object(
+            legacy_main_src,
+            "ExportImportManager",
+            return_value=new_export_manager,
+        ), mock.patch.object(
+            legacy_main_src.shutil,
+            "copy2",
+            side_effect=RuntimeError("copy failed"),
+        ):
+            legacy_main_src.MainWindow.restore_data(window)
+
+        self.assertTrue(current_db.closed)
+        self.assertEqual(current_action_manager.shutdown_calls, 1)
+        self.assertEqual(current_action_manager.action_completed.disconnect_calls, 1)
+        db_ctor.assert_called_once_with(db_file="D:/runtime/custom.db", app_dir="D:/runtime")
+        self.assertIs(window.db, new_db)
+        self.assertIs(window.vault_manager, new_vault_manager)
+        self.assertIs(window.action_manager, new_action_manager)
+        self.assertIs(window.export_manager, new_export_manager)
+        self.assertEqual(new_action_manager.action_completed.connect_calls, 1)
+        self.assertTrue(critical_mock.called)
 
 
 if __name__ == "__main__":

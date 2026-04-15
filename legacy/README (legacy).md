@@ -3,7 +3,7 @@
 > 고급 클립보드 매니저 - PyQt6 기반의 현대적이고 강력한 클립보드 관리 도구
 
 > ⚠️ 이 문서는 레거시 보관본입니다. 최신 실행 동작/검증 절차는 루트 `README.md`를 우선 기준으로 확인하세요.
-> ℹ️ 2026-03 정합성 패치(첫 URL 제목추출, 복합필터 검색 통합, 휴지통 다중선택, JSON 컬렉션 remap)는 루트 `README.md`와 테스트 스위트(`test_payload_sync`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`)를 기준으로 관리됩니다.
+> ℹ️ 2026-03 정합성 패치(첫 URL 제목추출, 복합필터 검색 통합, 휴지통 다중선택, JSON 컬렉션 remap)는 루트 `README.md`와 테스트 스위트(`test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`)를 기준으로 관리됩니다.
 > ℹ️ Pylance/pyright 기준선은 루트 `pyrightconfig.json`을 따르며, 이 레거시 보관본과 `smartclipboard_app/legacy_main_src.py`는 기본 분석 범위에서 제외됩니다.
 
 ![Version](https://img.shields.io/badge/version-10.6-blue)
@@ -125,7 +125,7 @@ python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.
 pyinstaller --clean smartclipboard.spec
 ```
 
-결과물: `dist/SmartClipboard.exe` (기본 spec 기준 UPX 비활성)
+결과물: `dist/SmartClipboard.exe` (`smartclipboard.spec`는 `upx=True`를 요청하지만 실제 빌드 출력은 로컬 UPX 도구 가용성에 따라 `Enabled` 또는 `Disabled`로 달라질 수 있음)
 
 ## ✅ 로컬 프리플라이트
 
@@ -305,14 +305,25 @@ pyright
 
 ## 📁 프로젝트 구조
 
-```
+```text
 smartclipboard-main/
-├── 클립모드 매니저.py    # 메인 애플리케이션 (6,000+ lines)
-├── requirements.txt      # Python 의존성
-├── smartclipboard.spec   # PyInstaller 빌드 설정
-├── README.md             # 문서
-├── claude.md             # AI 가이드
-└── clipboard_history_v6.db  # SQLite 데이터베이스 (자동 생성)
+├── 클립모드 매니저.py                # 외부 호환 파사드
+├── requirements.txt                  # Python 의존성
+├── smartclipboard.spec               # PyInstaller 빌드 설정
+├── smartclipboard_app/
+│   ├── bootstrap.py
+│   ├── legacy_main.py                # payload loader
+│   ├── legacy_main_payload.marshal
+│   ├── legacy_main_payload.manifest.json
+│   ├── features/                     # 현행 MainWindow 기능 구현
+│   ├── managers/                     # public facade managers
+│   └── ui/                           # shim / dialogs / widgets
+├── smartclipboard_core/
+│   ├── database.py
+│   ├── actions.py                    # public facade
+│   ├── automation/                   # ClipboardActionManager 구현
+│   └── db_parts/                     # facade + subpackages
+└── tests/
 ```
 
 ---
@@ -373,3 +384,9 @@ MIT License
 - 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
 - import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
 - payload/spec 동기화 기준은 `legacy_main_payload.marshal` + `legacy_main_payload.manifest.json` 세트를 루트 `README.md` 기준으로 관리합니다.
+
+## 2026-04-15 Structure Refactor Notes
+
+- `legacy_main_src.MainWindow`의 공개 메서드 시그니처는 유지되며, 내부 구현은 feature controller 기반으로 분리되었습니다.
+- `smartclipboard_app/ui/mainwindow_parts/`는 legacy import 호환 shim으로 남아 있고, 실제 구현은 `smartclipboard_app/features/`로 이동했습니다.
+- `smartclipboard.spec`는 현재 `smartclipboard_core.automation`과 `smartclipboard_app.features` 하위 모듈도 hidden import로 자동 수집합니다.

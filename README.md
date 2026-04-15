@@ -130,7 +130,7 @@ python scripts/preflight_local.py
 pyinstaller --clean smartclipboard.spec
 ```
 
-결과물: `dist/SmartClipboard.exe` (기본 spec 기준 UPX 비활성)
+결과물: `dist/SmartClipboard.exe` (`smartclipboard.spec`는 `upx=True`로 요청하지만, 실제 빌드 출력은 로컬 UPX 도구 가용성에 따라 `Enabled` 또는 `Disabled`로 달라질 수 있음)
 
 payload와 manifest만 다시 생성해야 할 때는:
 
@@ -382,13 +382,16 @@ smartclipboard/
 │   ├── legacy_payload.py            # payload manifest/hash helper
 │   ├── legacy_main_payload.marshal  # 런타임 payload
 │   ├── legacy_main_payload.manifest.json  # Python/source sync manifest
+│   ├── features/                   # 기능 도메인 구현체
 │   ├── managers/
 │   └── ui/
 │       ├── clipboard_guard.py       # internal copy flag helper
-│       └── mainwindow_parts/        # MainWindow helper 분리 모듈
+│       └── mainwindow_parts/        # legacy 호환 shim (실구현은 features/)
 ├── smartclipboard_core/
 │   ├── actions.py
+│   ├── automation/                 # ClipboardActionManager 분리 구현
 │   ├── database.py
+│   ├── db_parts/                   # mixin facade + 하위 subpackage
 │   └── worker.py
 ├── tests/
 └── legacy/                          # 참조용 레거시 보관본
@@ -484,13 +487,15 @@ MIT License
 ## MainWindow 분할 구조 (2026-03-07)
 
 - `smartclipboard_app/legacy_main_src.py`의 `MainWindow` 공개 메서드 시그니처는 유지됩니다.
-- 실제 대형 메서드 본문은 `smartclipboard_app/ui/mainwindow_parts/`로 위임되었습니다.
-  - `theme_ops.py`: `apply_theme`
-  - `ui_ops.py`: `init_ui`, `eventFilter`, `_handle_drop_event`
-  - `menu_ops.py`: `init_menu`, `show_context_menu`
-  - `table_ops.py`: `load_data`, `_get_display_items`, `_show_empty_state`, `_populate_table`, `on_selection_changed`
-- 시그널 스냅샷 검증(`scripts/refactor_signal_snapshot.py`, `tests/test_signal_snapshot.py`)은 `legacy_main_src.py`와 `mainwindow_parts/*.py`를 함께 스캔합니다.
-- 로컬 사전검증(`scripts/preflight_local.py`)의 `py_compile` 단계에 `mainwindow_parts/*.py`가 포함됩니다.
+- 실제 구현은 `smartclipboard_app/features/` 도메인 패키지로 이동했고, `smartclipboard_app/ui/mainwindow_parts/`는 import 호환용 shim으로 유지됩니다.
+  - `features/settings`: 테마/QSS/controller
+  - `features/shell_ui`: 메인 레이아웃, drag-drop, UI controller
+  - `features/history`: 메뉴/테이블/view/controller
+  - `features/clipboard`: runtime pipeline/controller
+  - `features/tray_hotkey`: 시스템 트레이/핫키/controller
+  - `features/shell`: 상태바/정리/종료 controller
+- 시그널 스냅샷 검증(`scripts/refactor_signal_snapshot.py`, `tests/test_signal_snapshot.py`)은 `legacy_main_src.py`와 shim+feature 구현 파일을 함께 스캔합니다.
+- 로컬 사전검증(`scripts/preflight_local.py`)의 `py_compile` 단계는 `ui/**/*.py`, `features/**/*.py`, `db_parts/**/*.py`, `automation/**/*.py`를 재귀 포함합니다.
 
 ## 문서 정합성 기준 (2026-04-13)
 
@@ -502,15 +507,19 @@ MIT License
 ## Refactor Layout (2026-03-12)
 
 - `smartclipboard_core/database.py` is now a composition entrypoint.
-- Database implementation is split under `smartclipboard_core/db_parts/`:
-  - `schema_search.py`
-  - `history_ops.py`
-  - `rules_snippets_actions.py`
-  - `tags_collections.py`
-  - `vault_trash.py`
-- MainWindow helper logic in `smartclipboard_app/ui/mainwindow_parts/` is expanded:
-  - `theme_style_sections.py` (theme QSS builder split)
-  - `ui_init_sections.py`, `ui_dragdrop_ops.py` (`ui_ops.py` wrappers)
-  - `tray_hotkey_ops.py`, `status_lifecycle_ops.py`, `clipboard_runtime_ops.py`
+- Database implementation now keeps flat facades in `smartclipboard_core/db_parts/*.py` and subpackages in:
+  - `db_parts/search/`
+  - `db_parts/automation/`
+  - `db_parts/catalog/`
+  - `db_parts/retention/`
+- `smartclipboard_core/actions.py` is a public facade; implementation lives in `smartclipboard_core/automation/`.
+- `smartclipboard_app/managers/export_import.py` / `secure_vault.py` are public facades; implementations live in `smartclipboard_app/features/import_export/` and `smartclipboard_app/features/vault/`.
 - `scripts/preflight_local.py` now compiles both `mainwindow_parts/*.py` and `db_parts/*.py`.
 - Added surface-guard test: `tests/test_public_surfaces.py` and baseline `tests/baseline/clipboarddb_public_methods.txt`.
+
+## 2026-04-15 Structure Refactor Delta
+
+- `legacy_main_src.MainWindow` now composes feature controllers (`clipboard`, `history/table`, `tray_hotkey`, `lifecycle`, `settings`, `shell_ui`) while preserving public method signatures.
+- `smartclipboard_app/features/shared/state.py` provides `WindowState`, `WindowServices`, `WindowWidgets` bundles and `bind_window_facets()` for controller synchronization.
+- `smartclipboard_app/ui/controllers/*.py` and `ui/mainwindow_parts/*.py` remain compatibility layers so external imports and payload contracts stay intact.
+- `smartclipboard.spec` now collects `smartclipboard_app.features` and `smartclipboard_core.automation` submodules as hidden imports in addition to the legacy shim modules.
