@@ -258,7 +258,10 @@ class ClipboardDB(
 | `notify` | 토스트 알림 표시 |
 | `transform` | 텍스트 변환 (trim/upper/lower) |
 
-**`fetch_title` 규칙:** 텍스트 전체가 아닌 **첫 URL만** 추출해서 제목 요청.
+**액션 체인 규칙:**
+- `format_phone` / `format_email` / `transform`은 `replace_text` 결과를 반환하고 working text를 즉시 갱신한다.
+- `fetch_title`은 동기 치환이 끝난 뒤 최종 텍스트에서 **첫 URL만** 다시 추출해서 제목 요청한다.
+- 텍스트 치환이 발생하면 같은 history row와 clipboard도 함께 갱신해 UI/DB/clipboard 정합성을 유지한다.
 
 #### `smartclipboard_core/worker.py` — `Worker` / `WorkerSignals`
 
@@ -417,6 +420,7 @@ class Worker(QRunnable):
 1. **FTS5** — 토큰화 검색, BM25 관련성 순위 (가능 시)
 2. **LIKE 폴백** — FTS5 미지원 환경
 3. **복합 필터** — query + type + tag + collection_id + bookmark + uncategorized 동시 적용
+4. **UI 정렬 규칙** — query가 있을 때는 relevance 순서를 기본 유지하고, 사용자가 헤더 정렬을 명시적으로 바꾼 경우에만 client-side sort override 적용
 
 ---
 
@@ -764,3 +768,11 @@ pyinstaller --clean smartclipboard.spec
 - `scripts/preflight_local.py`와 `scripts/refactor_signal_snapshot.py`는 새 feature/core 하위 패키지를 재귀적으로 포함하도록 갱신되어야 하며, `smartclipboard.spec`도 `smartclipboard_app.features`/`smartclipboard_core.automation` hidden import 수집을 포함한다.
 
 *이 문서는 2026-03-21 기준 v10.6 코드베이스를 기반으로 작성되었고, 2026-04-15 구조 분할 델타를 추가 반영했습니다.*
+
+## 14. 2026-04-16 기능 후속 정합성 메모
+
+- `process_actions_impl()`는 텍스트 치환 액션 결과를 누적 적용한 뒤 같은 history row와 clipboard를 함께 갱신한다.
+- JSON import가 컬렉션을 생성하면 `refresh_collection_filter_options()`를 먼저 호출해 상단 컬렉션 필터가 즉시 최신 상태를 반영한다.
+- `get_display_items_impl()`는 query가 있을 때 DB/FTS relevance 순서를 유지하고, `_search_sort_override`가 켜진 경우에만 client-side sort를 적용한다.
+- `load_data_impl()`는 검색 0건/빈 히스토리 경로에서도 `update_status_bar(0)`을 호출해 stale 상태 표시를 방지한다.
+- 이번 후속 수정은 packaging scope를 바꾸지 않으므로 `smartclipboard.spec`의 hidden imports/datas 목록은 그대로 유지한다.

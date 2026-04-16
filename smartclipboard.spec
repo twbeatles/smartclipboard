@@ -21,6 +21,9 @@ Notes:
     - 2026-04-11 through 2026-04-15 stabilization/refactor keeps the same payload
       data assets and expands hidden-import collection to feature/core
       subpackages (`smartclipboard_app.features`, `smartclipboard_core.automation`).
+    - 2026-04-16 functional follow-up keeps packaging scope unchanged:
+      action-chain writeback, search relevance preservation, and import filter
+      refresh did not require new hidden imports or datas.
     - CI now enforces optional runtime dependency presence via
       `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps`.
     - If legacy source changes, rebuild payload first and keep tests green

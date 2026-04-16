@@ -587,6 +587,7 @@ class MainWindow(QMainWindow):
             self.current_collection_filter = "__all__"  # 컬렉션 필터
             self.sort_column = 3  # 기본 정렬: 시간 컨럼
             self.sort_order = Qt.SortOrder.DescendingOrder  # 기본: 내림차순
+            self._search_sort_override = False
             bind_window_facets(self)
             self.clipboard_controller = ClipboardController(self)
             self.history_controller = HistoryController(self)
@@ -967,6 +968,7 @@ class MainWindow(QMainWindow):
         """가져오기 다이얼로그"""
         dialog = ImportDialog(self, self.export_manager)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.refresh_collection_filter_options()
             self.load_data()
             self.statusBar().showMessage("✅ 가져오기 완료", 3000)
     
@@ -1137,6 +1139,9 @@ class MainWindow(QMainWindow):
         else:
             self.sort_column = section
             self.sort_order = Qt.SortOrder.AscendingOrder
+        self._search_sort_override = not (
+            self.sort_column == 3 and self.sort_order == Qt.SortOrder.DescendingOrder
+        )
         
         # 헤더 라벨 업데이트 (정렬 표시자)
         header_labels = ["📌", "유형", "내용", "시간", "사용"]
@@ -1155,7 +1160,18 @@ class MainWindow(QMainWindow):
     def on_action_completed(self, action_name, result):
         """비동기 액션 완료 처리"""
         try:
+            if not isinstance(result, dict):
+                return
             res_type = result.get("type")
+            if res_type == "notify":
+                ToastNotification.show_toast(
+                    self,
+                    f"⚡{action_name}",
+                    detail=result.get("message", ""),
+                    duration=2500,
+                    toast_type="info",
+                )
+                return
             if res_type == "title":
                 title = result.get("title")
                 if title:

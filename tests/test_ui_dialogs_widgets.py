@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMainWindow, QMessage
 import smartclipboard_app.legacy_main_src as legacy_main_src
 import smartclipboard_app.ui.mainwindow_parts.menu_ops as menu_ops
 from smartclipboard_core.file_paths import file_content_from_paths
+from smartclipboard_core.database import ClipboardDB
 from smartclipboard_app.ui.dialogs.clipboard_actions import ClipboardActionsDialog
 from smartclipboard_app.ui.dialogs.collections import CollectionManagerDialog
 from smartclipboard_app.ui.dialogs.copy_rules import CopyRuleEditDialog
@@ -20,10 +21,10 @@ from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS, HotkeySetting
 from smartclipboard_app.ui.dialogs.import_dialog import ImportDialog
 from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
-from smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops import process_clipboard_impl
+from smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops import process_actions_impl, process_clipboard_impl
 from smartclipboard_app.ui.mainwindow_parts.status_lifecycle_ops import quit_app_impl, run_periodic_cleanup_impl
 from smartclipboard_app.ui.dialogs.snippets import SnippetDialog, SnippetManagerDialog, validate_snippet_shortcut
-from smartclipboard_app.ui.mainwindow_parts.table_ops import get_display_items_impl, populate_table_impl
+from smartclipboard_app.ui.mainwindow_parts.table_ops import get_display_items_impl, load_data_impl, populate_table_impl
 from smartclipboard_app.ui.mainwindow_parts.tray_hotkey_ops import paste_last_item_slot_impl
 from smartclipboard_app.ui.mainwindow_parts.tray_hotkey_ops import register_hotkeys_impl
 from smartclipboard_app.ui.mainwindow_parts.ui_dragdrop_ops import handle_drop_event_body
@@ -357,6 +358,27 @@ class _FakeClipboardWriter:
         return self.mime_data
 
 
+class _FakeActionProcessManager:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    def process(self, text, item_id=None):
+        self.calls.append((text, item_id))
+        return list(self.results)
+
+
+class _FakeActionProcessWindow:
+    def __init__(self, db, results):
+        self.db = db
+        self.action_manager = _FakeActionProcessManager(results)
+        self.clipboard = _FakeClipboardWriter()
+        self.is_internal_copy = False
+
+    def analyze_text(self, _text):
+        return "TEXT"
+
+
 class _FakeQuitDB:
     def __init__(self):
         self.closed = False
@@ -530,6 +552,48 @@ class _FakeTableWindow:
         self.current_collection_filter = "__all__"
         self.sort_column = 2
         self.sort_order = Qt.SortOrder.DescendingOrder
+
+
+class _FakeRelevantSearchDB:
+    def search_items(self, *_args, **_kwargs):
+        return [
+            (1, "high-relevance", "TEXT", "2026-04-01 09:00:00", 1, 0, 0),
+            (2, "low-relevance", "TEXT", "2026-04-01 10:00:00", 1, 0, 1),
+            (3, "normal-row", "TEXT", "2026-04-01 08:00:00", 0, 0, 0),
+        ]
+
+
+class _FakeSearchWindow:
+    def __init__(self, override=False):
+        self.db = _FakeRelevantSearchDB()
+        self.search_input = _StaticTextControl("relevance")
+        self.filter_combo = _StaticTextControl("전체")
+        self.current_tag_filter = None
+        self.current_collection_filter = "__all__"
+        self.sort_column = 3
+        self.sort_order = Qt.SortOrder.DescendingOrder
+        self._search_sort_override = override
+
+
+class _FakeStatusLoadWindow:
+    def __init__(self):
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.search_input = _StaticTextControl("")
+        self.current_tag_filter = None
+        self.current_collection_filter = "__all__"
+        self.current_theme = "dark"
+        self.is_data_dirty = True
+        self.status_calls = []
+
+    def _get_display_items(self):
+        return []
+
+    def _show_empty_state(self, _theme):
+        self.table.setRowCount(1)
+
+    def update_status_bar(self, selection_count=0):
+        self.status_calls.append(selection_count)
 
 
 class _PasswordRotatingVaultDB:
@@ -757,6 +821,40 @@ class _FakeMenuWindow(QMainWindow):
 
     def show_about_dialog(self):
         return None
+
+
+class _FakeShowImportStatusBar:
+    def __init__(self):
+        self.messages = []
+
+    def showMessage(self, message, duration):
+        self.messages.append((message, duration))
+
+
+class _AcceptedImportDialog:
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def exec(self):
+        from PyQt6.QtWidgets import QDialog
+
+        return QDialog.DialogCode.Accepted
+
+
+class _FakeShowImportWindow:
+    def __init__(self):
+        self.export_manager = object()
+        self.status_bar = _FakeShowImportStatusBar()
+        self.calls = []
+
+    def refresh_collection_filter_options(self):
+        self.calls.append("refresh")
+
+    def load_data(self):
+        self.calls.append("load")
+
+    def statusBar(self):
+        return self.status_bar
 
 
 class _FakeContextIndex:
@@ -1090,6 +1188,15 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_show_import_dialog_refreshes_collection_filters_before_reload(self):
+        window = _FakeShowImportWindow()
+
+        with mock.patch.object(legacy_main_src, "ImportDialog", _AcceptedImportDialog):
+            legacy_main_src.MainWindow.show_import_dialog(window)
+
+        self.assertEqual(window.calls, ["refresh", "load"])
+        self.assertEqual(window.status_bar.messages, [("✅ 가져오기 완료", 3000)])
+
     def test_export_dialog_shows_report_summary_for_multiple_formats(self):
         dialog = ExportDialog(None, _FakeImportExportManager())
         try:
@@ -1308,12 +1415,65 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertEqual(window.image_calls, 1)
         self.assertEqual(window.text_calls, 0)
 
+    def test_process_actions_impl_updates_history_and_clipboard_for_replace_text(self):
+        with _workspace_tempdir() as tmpdir:
+            db = ClipboardDB(
+                db_file=os.path.join(tmpdir, "clipboard_history_v6.db"),
+                app_dir=tmpdir,
+            )
+            try:
+                item_id = db.add_item("01012345678", None, "TEXT")
+                window = _FakeActionProcessWindow(
+                    db,
+                    [
+                        ("format_phone", {"type": "replace_text", "text": "010-1234-5678", "formatted": "010-1234-5678"}),
+                    ],
+                )
+
+                process_actions_impl(window, "01012345678", item_id, mock.Mock(), mock.Mock())
+
+                self.assertEqual(db.get_content(item_id), ("010-1234-5678", None, "TEXT"))
+                self.assertEqual(window.clipboard.text_value, "010-1234-5678")
+                self.assertTrue(window.is_internal_copy)
+            finally:
+                db.close()
+
     def test_display_sort_keeps_pinned_rows_above_unpinned_in_descending_order(self):
         window = _FakeTableWindow()
 
         items = get_display_items_impl(window)
 
         self.assertEqual([row[0] for row in items], [2, 1, 3])
+
+    def test_search_results_keep_db_relevance_order_without_user_sort_override(self):
+        window = _FakeSearchWindow(override=False)
+
+        items = get_display_items_impl(window)
+
+        self.assertEqual([row[0] for row in items], [1, 2, 3])
+
+    def test_search_results_apply_client_sort_after_user_override(self):
+        window = _FakeSearchWindow(override=True)
+
+        items = get_display_items_impl(window)
+
+        self.assertEqual([row[0] for row in items], [2, 1, 3])
+
+    def test_load_data_updates_status_bar_for_empty_state(self):
+        window = _FakeStatusLoadWindow()
+
+        load_data_impl(
+            window,
+            {
+                "dark": {
+                    "text_secondary": "#888888",
+                }
+            },
+            mock.Mock(),
+        )
+
+        self.assertEqual(window.status_calls, [0])
+        self.assertEqual(window.table.rowCount(), 1)
 
     def test_table_ops_file_rows_show_missing_status_before_restore(self):
         with _workspace_tempdir() as tmpdir:

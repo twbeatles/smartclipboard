@@ -37,6 +37,7 @@
 - 전화번호 자동 포맷팅 (`02`, 일반 지역번호, `0505`, `1588/1661/1800`류 대표번호 포함)
 - 이메일 정규화
 - 텍스트 변환 (대소문자, 트림 등)
+- 동기 텍스트 액션(`format_phone`/`format_email`/`transform`)은 결과를 같은 history row와 clipboard에 다시 반영하고, 같은 배치의 후속 액션은 변환된 텍스트 기준으로 평가
 - **v10.2**: 정규식 패턴 유효성 검증
 
 ### 🗑️ 휴지통 기능
@@ -62,6 +63,7 @@
 - JSON 마이그레이션 모드 (히스토리 항목의 태그/메모/북마크 + 컬렉션 정의/ID 매핑 정보 포함, 스니펫/규칙/핫키/보안 보관함 제외)
 - JSON import는 ISO-8601/tz timestamp를 원본 시각 기준 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체
 - CSV import는 이미지 플레이스홀더 row를 복원하지 않으며, JSON import는 remap 실패/누락된 `collection_id`를 `NULL`로 정리
+- JSON import가 새 컬렉션을 만들면 메인 상단 컬렉션 필터 옵션을 즉시 새로고침
 - `FILE` 항목은 복원 전에 목록/상세/미니 창에서 누락 경로(stale) 여부를 미리 표시
 - 백업 및 마이그레이션 용이
 
@@ -483,6 +485,14 @@ MIT License
 - 보안 보관함 복호화 텍스트는 프로세스 내 armed clipboard state로 추적되며, 30초 조건부 clear와 앱 종료 시 즉시 clear를 모두 수행합니다.
 - 설정 저장 시 `mini_window_enabled` 변경으로 핫키 재등록이 실패하면 그 설정만 되돌리고 실제 `_last_hotkey_error`를 경고로 노출합니다.
 - `smartclipboard.spec`은 이번 안정화 기준으로 payload manifest(`legacy_main_payload.manifest.json`)까지 포함하도록 정리되어 있으며, 별도 추가 hidden import 증설은 필요하지 않습니다.
+
+## 2026-04-16 Functional Follow-up
+
+- `ClipboardActionManager`의 동기 텍스트 액션(`format_phone`, `format_email`, `transform`)은 순차적으로 working text를 갱신하며, `fetch_title`은 동기 치환이 끝난 최종 텍스트에서 URL을 다시 추출합니다.
+- 액션 결과가 텍스트 치환이면 history row(`content/type/url_title/file_path/file_signature`)와 clipboard를 함께 갱신해 UI/저장소/실제 clipboard가 같은 값을 유지합니다.
+- JSON import로 컬렉션이 추가되면 `refresh_collection_filter_options()`를 먼저 호출해 메인 상단 필터가 즉시 최신 목록을 반영합니다.
+- 검색 결과는 query가 있을 때 DB/FTS relevance 순서를 기본으로 유지하고, 사용자가 헤더 정렬을 직접 바꾼 경우에만 client-side sort override를 적용합니다.
+- 검색 0건/빈 히스토리 경로에서도 `update_status_bar(0)`을 호출해 이전 카운트가 남지 않도록 유지합니다.
 
 ## MainWindow 분할 구조 (2026-03-07)
 

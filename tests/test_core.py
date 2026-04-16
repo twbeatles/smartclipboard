@@ -106,6 +106,23 @@ class CoreActionTests(unittest.TestCase):
         self.assertEqual(results[0][1]["type"], "notify")
         self.assertIn("URL", results[0][1]["message"])
 
+    def test_process_chains_replace_text_results_for_later_actions(self):
+        db = FakeActionDB(
+            [
+                (1, "lower", r"^FOO$", "transform", '{"mode":"lower"}', 1, 2),
+                (2, "notify", r"^foo$", "notify", '{"message":"lowered"}', 1, 1),
+            ]
+        )
+        manager = ClipboardActionManager(db)
+
+        results = manager.process("FOO", item_id=15)
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0][1]["type"], "replace_text")
+        self.assertEqual(results[0][1]["text"], "foo")
+        self.assertEqual(results[1][1]["type"], "notify")
+        self.assertEqual(results[1][1]["message"], "lowered")
+
     def test_handle_title_result_ignores_updates_after_shutdown(self):
         db = FakeActionDB([(1, "fetch", r".*", "fetch_title", "{}", 1, 0)])
         manager = ClipboardActionManager(db)

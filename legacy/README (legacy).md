@@ -390,3 +390,10 @@ MIT License
 - `legacy_main_src.MainWindow`의 공개 메서드 시그니처는 유지되며, 내부 구현은 feature controller 기반으로 분리되었습니다.
 - `smartclipboard_app/ui/mainwindow_parts/`는 legacy import 호환 shim으로 남아 있고, 실제 구현은 `smartclipboard_app/features/`로 이동했습니다.
 - `smartclipboard.spec`는 현재 `smartclipboard_core.automation`과 `smartclipboard_app.features` 하위 모듈도 hidden import로 자동 수집합니다.
+
+## 2026-04-16 Functional Follow-up
+
+- 동기 텍스트 액션(`format_phone`, `format_email`, `transform`)은 변환 결과를 같은 history row와 clipboard에 다시 기록하고, 같은 배치의 후속 액션은 변환된 텍스트 기준으로 평가됩니다.
+- `fetch_title`은 동기 치환이 끝난 최종 텍스트에서 첫 URL만 다시 추출합니다.
+- query가 있을 때 검색 결과는 relevance 순서를 기본 유지하고, 사용자가 헤더 정렬을 직접 바꾼 경우에만 client-side sort가 적용됩니다.
+- JSON import가 새 컬렉션을 만들면 메인 상단 컬렉션 필터가 즉시 새로고침되며, 빈 검색 결과/빈 히스토리에서도 상태바는 `0`건으로 갱신됩니다.

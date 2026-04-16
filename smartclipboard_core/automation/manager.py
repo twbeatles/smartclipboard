@@ -16,7 +16,7 @@ from .fetch_title import (
     is_blocked_title_fetch_reason,
     validate_title_fetch_url,
 )
-from .formatters import format_email, format_phone, transform_text
+from .formatters import format_email, format_phone, replacement_text_from_result, transform_text
 from ..worker import Worker
 
 logger = logging.getLogger(__name__)
@@ -65,11 +65,13 @@ class ClipboardActionManager(QObject):
 
     def process(self, text, item_id=None):
         results = []
+        current_text = text
+        pending_fetch_actions: list[str] = []
         for action in self.actions_cache:
             if not action["enabled"]:
                 continue
             try:
-                if not action["compiled"].search(text):
+                if not action["compiled"].search(current_text):
                     continue
                 params_json = action["params"]
                 try:
@@ -80,19 +82,25 @@ class ClipboardActionManager(QObject):
                 action_type = action["type"]
                 name = action["name"]
                 if action_type == "fetch_title":
-                    url = extract_first_url(text)
-                    if not url:
-                        results.append((name, {"type": "notify", "message": "URL을 찾지 못해 제목 가져오기를 건너뛰었습니다."}))
-                        continue
-                    self.fetch_url_title_async(url, item_id, name)
+                    pending_fetch_actions.append(name)
                 else:
-                    result = self.execute_action(action_type, text, params, item_id)
+                    result = self.execute_action(action_type, current_text, params, item_id)
                     if result:
                         results.append((name, result))
+                        replacement_text = replacement_text_from_result(result)
+                        if replacement_text is not None:
+                            current_text = replacement_text
             except re.error as exc:
                 logger.warning("Invalid regex in action '%s': %s", action["name"], exc)
             except Exception as exc:
                 logger.warning("Action processing error '%s': %s", action["name"], exc)
+
+        for name in pending_fetch_actions:
+            url = extract_first_url(current_text)
+            if not url:
+                results.append((name, {"type": "notify", "message": "URL을 찾지 못해 제목 가져오기를 건너뛰었습니다."}))
+                continue
+            self.fetch_url_title_async(url, item_id, name)
         return results
 
     def execute_action(self, action_type, text, params, item_id):

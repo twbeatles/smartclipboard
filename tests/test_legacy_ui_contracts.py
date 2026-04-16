@@ -74,6 +74,20 @@ class _FakeSearchInput:
 
 
 class LegacyUiRuntimeSafetyTests(unittest.TestCase):
+    def test_on_action_completed_shows_notify_toast(self):
+        fake_window = type("FakeWindow", (), {})()
+
+        with mock.patch.object(legacy_main_src.ToastNotification, "show_toast") as toast_mock:
+            legacy_main_src.MainWindow.on_action_completed(
+                fake_window,
+                "fetch",
+                {"type": "notify", "message": "blocked"},
+            )
+
+        toast_mock.assert_called_once()
+        self.assertEqual(toast_mock.call_args[0][1], "⚡fetch")
+        self.assertEqual(toast_mock.call_args.kwargs["detail"], "blocked")
+
     def test_on_action_completed_reconnects_clipboard_when_toast_raises(self):
         fake_window = type("FakeWindow", (), {})()
         fake_window.clipboard = _FakeClipboard()

@@ -37,6 +37,7 @@ def load_data_impl(self, THEMES, logger):
             theme = THEMES.get(self.current_theme, THEMES["dark"])
             if not items:
                 self._show_empty_state(theme)
+                self.update_status_bar(0)
                 return
             self._populate_table(items, theme)
             self.update_status_bar()
@@ -85,7 +86,12 @@ def get_display_items_impl(self):
         else:
             items = self.db.get_items(search_query, filter_type)
 
-    if items and self.sort_column > 0:
+    search_has_query = bool((search_query or "").strip())
+    should_apply_client_sort = self.sort_column > 0 and (
+        not search_has_query or bool(getattr(self, "_search_sort_override", False))
+    )
+
+    if items and should_apply_client_sort:
         def get_sort_key(item):
             _pid, content, ptype, timestamp, _pinned, use_count, _pin_order = item
             col = self.sort_column

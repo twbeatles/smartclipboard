@@ -63,10 +63,15 @@
 - JSON/CSV import는 항상 pre-import backup을 만든 뒤 파일 단위 단일 트랜잭션으로 반영하며, 실패 시 전체 rollback 됩니다.
 - `search_items()`는 FTS-first 정책을 유지하고 FTS 0건일 때만 LIKE 보완 검색을 수행합니다. `_last_search_fallback`은 실제 FTS 오류일 때만 UI 경고용으로 사용합니다.
 - `ClipboardActionManager.fetch_title`은 URL dedupe/cache와 전용 `QThreadPool(maxThreadCount=4)` 위에서 동작하며, stale URL 결과는 현재 row URL을 다시 확인한 뒤에만 저장합니다.
+- `ClipboardActionManager`의 동기 텍스트 액션(`format_phone`/`format_email`/`transform`)은 순차적으로 working text를 갱신해야 하며, `fetch_title`은 그 최종 텍스트를 기준으로 URL을 다시 추출해야 합니다.
+- 텍스트 치환 액션 결과는 UI 토스트만 띄우고 끝내지 말고, 같은 history row와 실제 clipboard에도 다시 기록해 저장 상태와 실제 clipboard를 맞춰야 합니다.
 - `FILE` duplicate detection은 `history.file_signature` lookup을 사용하므로 path canonicalization 규칙을 깨면 안 됩니다.
 - 보안 보관함 복호화 텍스트는 armed clipboard state로 추적되며 30초 조건부 clear와 종료 시 즉시 clear를 모두 유지합니다.
 - `mini_window_enabled` 변경 후 hotkey 재등록이 실패하면 그 설정만 rollback 하고 실제 `_last_hotkey_error`를 사용자 경고로 노출합니다.
 - `smartclipboard.spec`은 이번 안정화에서도 추가 hidden import/datas 증설 없이 유지 가능합니다.
+- 검색 query가 있을 때는 DB/FTS relevance 순서를 기본으로 유지하고, 사용자가 명시적으로 헤더 정렬을 바꿨을 때만 client-side sort override를 적용합니다.
+- JSON import가 컬렉션을 추가했다면 `load_data()` 전에 `refresh_collection_filter_options()`를 먼저 호출해야 상단 필터가 즉시 최신 상태를 반영합니다.
+- 빈 검색 결과/빈 히스토리 경로에서도 `update_status_bar(0)`이 호출되어 이전 카운트가 남지 않아야 합니다.
 
 ## 4. 필수 검증
 

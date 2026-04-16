@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from smartclipboard_app.ui.clipboard_guard import extract_local_file_paths
+from smartclipboard_app.ui.clipboard_guard import extract_local_file_paths, mark_internal_copy
+from smartclipboard_core.automation.formatters import replacement_text_from_result
 from smartclipboard_core.file_paths import describe_file_paths, file_content_from_paths
 
 
@@ -122,21 +123,65 @@ def process_file_clipboard_impl(self, mime_data, logger):
         return False
 
 
+def _update_text_item_after_actions(self, item_id, new_text, logger):
+    normalized_text = str(new_text or "")
+    if not normalized_text:
+        return False
+
+    item_type = self.analyze_text(normalized_text.strip()) if normalized_text.strip() else "TEXT"
+    with self.db.lock:
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT 1 FROM history WHERE id = ? LIMIT 1", (item_id,))
+            if cursor.fetchone() is None:
+                return False
+            cursor.execute(
+                "UPDATE history SET content = ?, image_data = NULL, type = ?, file_path = '', file_signature = '', url_title = '' "
+                "WHERE id = ?",
+                (normalized_text, item_type, item_id),
+            )
+            self.db.conn.commit()
+            return cursor.rowcount == 1
+        except Exception as exc:
+            self.db.conn.rollback()
+            logger.debug("Action text update error: %s", exc)
+            return False
+
+
 def process_actions_impl(self, text, item_id, logger, toast_cls):
     try:
         action_results = self.action_manager.process(text, item_id)
+        updated_text = text
+        updated_by_actions: list[str] = []
         for action_name, result in action_results:
-            if result and result.get("type") == "notify":
+            if not isinstance(result, dict):
+                continue
+            result_type = result.get("type")
+            if result_type == "notify":
                 toast_cls.show_toast(
                     self,
                     f"⚡{action_name}: {result.get('message', '')}",
                     duration=3000,
                     toast_type="info",
                 )
-            elif result and result.get("type") == "title":
+            elif result_type == "title":
                 title = result.get("title")
                 if title:
                     toast_cls.show_toast(self, f"🔗 {title[:50]}...", duration=2500, toast_type="info")
+            elif result_type == "replace_text":
+                replacement_text = replacement_text_from_result(result)
+                if replacement_text is None or replacement_text == updated_text:
+                    continue
+                updated_text = replacement_text
+                updated_by_actions.append(action_name)
+
+        if updated_by_actions and updated_text != text:
+            if _update_text_item_after_actions(self, item_id, updated_text, logger):
+                mark_internal_copy(self)
+                self.clipboard.setText(updated_text)
+                logger.info("Applied clipboard action text replacement: %s", ", ".join(updated_by_actions))
+            else:
+                logger.warning("Clipboard action text replacement skipped; item %s is unavailable", item_id)
     except Exception as action_err:
         logger.debug(f"Action processing error: {action_err}")
 

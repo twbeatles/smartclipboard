@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
   "payload_name": "legacy_main_payload.marshal",
-  "payload_size": 107421,
+  "payload_size": 108004,
   "python_implementation": "cpython",
   "python_minor": "3.14",
   "source_name": "legacy_main_src.py",
-  "source_sha256": "3abc1380b9349bfa131cd96b17d226d7a01d9043cfe2f84e69fca84f3eb64132"
+  "source_sha256": "8fd9878d50bee1e4538b4509b4477b8a977654a9860f239c74d2f4b698bc98a7"
 }

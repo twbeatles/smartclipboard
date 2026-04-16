@@ -111,7 +111,12 @@ pyinstaller --clean smartclipboard.spec
 - JSON/CSV import now always creates a pre-import backup and applies each file inside one DB transaction, so partial writes do not survive failures.
 - `search_items()` remains FTS-first and only uses LIKE as a zero-hit supplement or true FTS-error fallback. UI warning state should only represent real FTS errors.
 - `ClipboardActionManager.fetch_title` uses URL-level in-flight dedupe, an in-memory title cache, and a dedicated `QThreadPool(maxThreadCount=4)`. Late results must re-check the current row URL before saving.
+- Synchronous text actions (`format_phone`, `format_email`, `transform`) must update the working text sequentially, and `fetch_title` must resolve its URL from the post-transform final text.
+- Replace-text action results must be written back to both the same history row and the live clipboard so stored state and clipboard contents do not diverge.
 - `FILE` duplicate detection now depends on `history.file_signature`; keep path canonicalization rules aligned across insert/update/restore code paths.
 - Vault clipboard plaintext is tracked only in-process via an armed state and must be conditionally cleared after 30 seconds and again on shutdown if still present.
 - `mini_window_enabled` save failures should roll back only that setting and surface `_last_hotkey_error` to the user.
 - For CI-equivalent dependency verification, run `python scripts/preflight_local.py --strict-optional-deps`.
+- Search queries should preserve DB/FTS relevance order by default, and only apply a client-side sort when the user has explicitly overridden the header sort.
+- If JSON import creates collections, refresh `refresh_collection_filter_options()` before reloading the table so the top filter stays in sync.
+- Empty search/empty-history paths should still call `update_status_bar(0)` so stale item counts are cleared.
