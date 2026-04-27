@@ -22,10 +22,11 @@
 - `legacy_main_payload.marshal`은 텍스트 diff/리뷰가 어려운 바이너리 payload이며, `legacy_main_payload.manifest.json`과 세트로 관리합니다.
 - `legacy_main.py`를 소스 본문 파일로 가정하고 리팩토링하면 안 됩니다.
 - `legacy_main.py`는 payload 로딩 실패 시 `legacy_main_src.py`로 자동 폴백하며, `LEGACY_IMPL_ACTIVE`/`LEGACY_IMPL_FALLBACK_REASON`로 활성 구현과 폴백 사유를 확인할 수 있습니다.
-- `pyright`/Pylance 진단은 기본적으로 `legacy/클립모드 매니저 (legacy).py`와 `smartclipboard_app/legacy_main_src.py`를 제외한 현행 코드 기준으로 맞춥니다.
+- `pyright`/Pylance 진단은 기본적으로 `legacy/클립모드 매니저 (legacy).py`와 `smartclipboard_app/legacy_main_src.py`를 제외한 현행 코드 기준 repo-wide 0 errors를 유지합니다.
 - UI/DB 기능 변경을 EXE에 반영하려면 `scripts/build_legacy_payload.py`로 `legacy_main_payload.marshal`과 manifest를 함께 재생성한 뒤 빌드해야 합니다.
+- payload manifest는 source hash뿐 아니라 payload size/SHA-256도 검증하므로 payload와 manifest는 항상 세트로 갱신합니다.
 - `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
-- `fetch_title`은 로컬/사설/메타데이터 주소를 기본 차단하고, HTML 응답만 제한 크기로 읽는 정책을 유지합니다.
+- `fetch_title`은 로컬/사설/메타데이터 주소를 기본 차단하고, HTML 응답만 제한 크기로 읽으며, URL title cache는 256개/24시간 TTL 제한을 유지합니다.
 - 동일 비이미지 재복사는 기존 history row를 갱신하는 정책이며, 메타데이터(tags/note/bookmark/collection/pin/use_count)를 유지해야 합니다.
 - 동일 `FILE` path 집합 재복사도 기존 history row를 갱신하는 정책이며, `content`는 newline-joined absolute paths, `file_path`는 첫 경로로 유지합니다.
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅합니다.
@@ -35,12 +36,14 @@
 - JSON 마이그레이션 문구는 히스토리 메타데이터 + 컬렉션 범위만 의미하며, 스니펫/규칙/핫키/보안 보관함 상태까지 포함하는 것으로 확장하지 않습니다.
 - JSON export/import는 `IMAGE` 항목의 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB 대신 플레이스홀더만 기록합니다.
 - JSON export/import는 `FILE` 항목의 `file_paths`/`file_path`/newline content round-trip을 지원하고, CSV import는 `IMAGE` 플레이스홀더 row를 복원하지 않습니다.
-- import는 호환성보다 정합성을 우선하며, JSON import에서 remap 불가 `collection_id`는 `NULL`, 비표준 timestamp는 앱 표준 시각으로 정규화하거나 import 시각으로 대체합니다.
+- CSV import는 export된 고정 상태와 사용 횟수를 복원하되, CSV에 pin order가 없으므로 pinned 항목은 기존 pinned 목록 뒤에 import 순서대로 붙입니다.
+- import는 호환성보다 정합성을 우선하며, JSON import에서 `items`가 list가 아니면 실패하고, remap 불가 `collection_id`는 `NULL`, 비표준 timestamp는 앱 표준 시각으로 정규화하거나 import 시각으로 대체합니다.
 - 현재 timestamp 정규화는 timezone-aware ISO 입력의 원본 wall-clock을 보존하는 정책입니다.
 - `format_phone`은 `02`, 일반 지역번호, `0505`, `15xx/16xx/18xx` 대표번호까지 지원하는 쪽으로 유지합니다.
 - `copy_rules`의 `custom_replace`는 빈 replacement를 허용하며, 빈 문자열은 “삭제 치환”으로 해석합니다.
 - 스니펫 `shortcut`은 app-local 단축키이며 기본 앱 단축키·글로벌 핫키·다른 스니펫과 충돌하면 저장되지 않아야 합니다.
 - 전체 기록 삭제는 영구 삭제가 아니라 고정 제외 후 휴지통 이동 정책을 유지합니다.
+- 단, `max_history` 감소와 자동 cleanup은 고정되지 않은 오래된 항목을 휴지통 없이 영구 삭제하는 정책이므로 UI/문서 경고를 유지합니다.
 - 보안 보관함은 마스터 비밀번호 변경과 복호화 클립보드 30초 자동 삭제 흐름을 포함하며, `unlock()` 실패 시 `fernet/is_unlocked` 상태가 반드시 함께 초기화되어야 합니다.
 - 보안 보관함은 `vault_salt`와 `vault_verification`이 모두 있어야 정상 구성으로 간주하고, 손상 시 잠금 화면 Reset 복구 경로를 유지합니다.
 - `Ctrl+Shift+Z` paste-last는 pinned 정렬과 무관하게 가장 최근 복사된 항목(`timestamp DESC`, tie-break `id DESC`)을 사용해야 합니다.
@@ -50,7 +53,7 @@
 - Windows 테스트 임시 경로는 시스템 temp 대신 repo-local `.tmp-unittest/`를 사용합니다.
 - 핫키 저장 경로는 등록 실패 시 이전 글로벌 핫키 상태로 롤백되어야 합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지하고, payload에서 직접 참조하는 `smartclipboard_app.ui.dialogs.collections`도 명시적으로 포함합니다.
-- 2026-04-13 기준 `smartclipboard.spec` 추가 자산은 payload manifest(`legacy_main_payload.manifest.json`) 1건이며, 현재 spec에 반영되어 있습니다.
+- 2026-04-27 기준 `smartclipboard.spec` 추가 자산은 없으며, `smartclipboard_core.app_paths`, DB typing helper, import/export hardening 모듈은 기존 `collect_submodules` 규칙으로 포함됩니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
   - `scripts/refactor_signal_snapshot.py`
@@ -77,17 +80,17 @@
 
 ```powershell
 python scripts/preflight_local.py
-pyright <touched-files>
+pyright
 ```
 
 optional runtime dependency까지 CI와 같은 강도로 확인하려면 `python scripts/preflight_local.py --strict-optional-deps`를 추가 실행합니다.
 
-- 현재 repo-wide `pyright`는 `smartclipboard_core/db_parts/*.py` mixin attribute-access 노이즈가 남아 있으므로, 최소 게이트는 `preflight_local.py`이고 `pyright`는 변경 파일 기준으로 병행합니다.
+- `pyright`는 루트 `pyrightconfig.json` 기준 repo-wide 0 errors를 유지합니다.
 
 또는 단계별 실행:
 
 ```powershell
-pyright <touched-files>
+pyright
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_app/legacy_main_src.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
 python -m unittest discover -s tests -v

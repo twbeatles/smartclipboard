@@ -6,9 +6,10 @@ import sqlite3
 from smartclipboard_core.file_paths import file_signature_from_content
 
 from ..shared import logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class TrashRetentionMixin:
+class TrashRetentionMixin(DBRuntimeMixin):
     @staticmethod
     def _tag_tokens(tags_value) -> list[str]:
         normalized = str(tags_value or "").replace("，", ",")

@@ -172,7 +172,7 @@ class ClipboardActionsDialog(QDialog):
         super().__init__(parent)
         self.db = db
         self.action_manager = action_manager
-        self.actions = []
+        self._action_rows = []
         self.setWindowTitle("⚡ 클립보드 액션")
         self.setMinimumSize(760, 420)
         self.init_ui()
@@ -242,9 +242,9 @@ class ClipboardActionsDialog(QDialog):
 
     def _selected_action(self):
         row = self._selected_row()
-        if row is None or row >= len(self.actions):
+        if row is None or row >= len(self._action_rows):
             return None
-        return self.actions[row]
+        return self._action_rows[row]
 
     def _reload_manager(self):
         self.action_manager.reload_actions()
@@ -264,10 +264,10 @@ class ClipboardActionsDialog(QDialog):
         return "-"
 
     def load_actions(self):
-        self.actions = list(self.db.get_clipboard_actions())
+        self._action_rows = list(self.db.get_clipboard_actions())
         self.table.setRowCount(0)
 
-        for row_idx, (aid, name, pattern, action_type, params_json, enabled, _priority) in enumerate(self.actions):
+        for row_idx, (aid, name, pattern, action_type, params_json, enabled, _priority) in enumerate(self._action_rows):
             self.table.insertRow(row_idx)
 
             cb = QCheckBox()
@@ -315,10 +315,10 @@ class ClipboardActionsDialog(QDialog):
         if row is None:
             return
         target = row + direction
-        if target < 0 or target >= len(self.actions):
+        if target < 0 or target >= len(self._action_rows):
             return
-        self.actions[row], self.actions[target] = self.actions[target], self.actions[row]
-        ordered_ids = [action[0] for action in self.actions]
+        self._action_rows[row], self._action_rows[target] = self._action_rows[target], self._action_rows[row]
+        ordered_ids = [action[0] for action in self._action_rows]
         if hasattr(self.db, "update_clipboard_action_priorities") and self.db.update_clipboard_action_priorities(ordered_ids):
             self._reload_manager()
             self.load_actions()

@@ -198,6 +198,9 @@ class ExportImportManager:
                 data = json.load(fh)
             if not isinstance(data, dict):
                 raise ValueError("JSON import payload must be an object")
+            items_payload = data.get("items")
+            if not isinstance(items_payload, list):
+                raise ValueError("JSON import payload must contain an items list")
 
             report["backup_path"] = create_pre_import_backup(self.db)
             collections_payload = data.get("collections", [])
@@ -208,7 +211,7 @@ class ExportImportManager:
                 cursor.execute("BEGIN")
                 try:
                     collection_id_map = import_collections_locked(self.db, cursor, collections_payload, report)
-                    for item in data.get("items", []):
+                    for item in items_payload:
                         if not isinstance(item, dict):
                             report["skipped"] += 1
                             append_warning(report, "일부 item payload가 잘못된 형식이라 건너뛰었습니다.")

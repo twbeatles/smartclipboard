@@ -4,9 +4,10 @@ import datetime
 import sqlite3
 
 from ..shared import logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class SnippetSettingsMixin:
+class SnippetSettingsMixin(DBRuntimeMixin):
     def add_snippet(self, name, content, shortcut="", category="일반"):
         with self.lock:
             try:
@@ -14,7 +15,7 @@ class SnippetSettingsMixin:
                 created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 cursor.execute(
                     "INSERT INTO snippets (name, content, shortcut, category, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (name, content, shortcut, category, created_at),
+                    (name, content, str(shortcut or "").strip(), category, created_at),
                 )
                 self.conn.commit()
                 return True
@@ -42,7 +43,7 @@ class SnippetSettingsMixin:
                 cursor = self.conn.cursor()
                 cursor.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
                 self.conn.commit()
-                return True
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Snippet Delete Error: {e}")
                 self.conn.rollback()
@@ -54,10 +55,10 @@ class SnippetSettingsMixin:
                 cursor = self.conn.cursor()
                 cursor.execute(
                     "UPDATE snippets SET name=?, content=?, shortcut=?, category=? WHERE id=?",
-                    (name, content, shortcut, category, snippet_id),
+                    (name, content, str(shortcut or "").strip(), category, snippet_id),
                 )
                 self.conn.commit()
-                return True
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Snippet Update Error: {e}")
                 self.conn.rollback()
@@ -74,12 +75,14 @@ class SnippetSettingsMixin:
                 logger.debug(f"Setting get error: {e}")
                 return default
 
-    def set_setting(self, key, value):
+    def set_setting(self, key, value) -> bool:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
                 cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
                 self.conn.commit()
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Setting Save Error: {e}")
                 self.conn.rollback()
+                return False

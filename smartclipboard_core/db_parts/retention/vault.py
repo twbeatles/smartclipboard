@@ -4,9 +4,10 @@ import datetime
 import sqlite3
 
 from ..shared import logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class VaultRetentionMixin:
+class VaultRetentionMixin(DBRuntimeMixin):
     def add_vault_item(self, encrypted_content, label):
         with self.lock:
             try:

@@ -3,9 +3,10 @@ from __future__ import annotations
 import sqlite3
 
 from ..shared import logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class CopyRulesMixin:
+class CopyRulesMixin(DBRuntimeMixin):
     def get_copy_rules(self):
         with self.lock:
             try:
@@ -103,9 +104,11 @@ class CopyRulesMixin:
                 cursor = self.conn.cursor()
                 cursor.execute("UPDATE copy_rules SET enabled = ? WHERE id = ?", (enabled, rule_id))
                 self.conn.commit()
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Rule Toggle Error: {e}")
                 self.conn.rollback()
+                return False
 
     def delete_copy_rule(self, rule_id):
         with self.lock:
@@ -113,6 +116,8 @@ class CopyRulesMixin:
                 cursor = self.conn.cursor()
                 cursor.execute("DELETE FROM copy_rules WHERE id = ?", (rule_id,))
                 self.conn.commit()
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Rule Delete Error: {e}")
                 self.conn.rollback()
+                return False

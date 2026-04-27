@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from PyQt6.QtCore import QPoint, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QMouseEvent, QPixmap, QShowEvent
@@ -48,6 +48,7 @@ class _MiniParent(Protocol):
 
     def show(self) -> None: ...
     def activateWindow(self) -> None: ...
+    def statusBar(self) -> Any: ...
 
 
 class _KeyboardSender(Protocol):
@@ -236,9 +237,10 @@ class FloatingMiniWindow(QWidget):
                         parent = _mini_parent(self.parent_window)
                         if parent is not None and hasattr(parent, "statusBar"):
                             status_bar = parent.statusBar()
+                            available_paths = restore_result.get("available_paths", [])
                             if status_bar is not None:
                                 status_bar.showMessage(
-                                    f"⚠️ 일부 파일이 없어 {len(restore_result['available_paths'])}개만 복원했습니다.",
+                                    f"⚠️ 일부 파일이 없어 {len(available_paths) if isinstance(available_paths, list) else 0}개만 복원했습니다.",
                                     2500,
                                 )
                 else:

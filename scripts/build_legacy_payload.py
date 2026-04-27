@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: missing payload manifest: {manifest_path}", file=sys.stderr)
             return 2
         manifest = load_payload_manifest(manifest_path)
-        ok, reason = validate_payload_manifest(manifest, src_path=src_path)
+        ok, reason = validate_payload_manifest(manifest, src_path=src_path, payload_path=out_path)
         if not ok:
             print(f"error: payload manifest validation failed: {reason}", file=sys.stderr)
             return 2

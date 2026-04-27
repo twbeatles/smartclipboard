@@ -4,6 +4,7 @@ import re
 import tempfile
 import unittest
 from contextlib import contextmanager
+from typing import Any, cast
 from unittest import mock
 
 from PyQt6.QtCore import Qt
@@ -21,7 +22,11 @@ from smartclipboard_app.ui.dialogs.hotkeys import DEFAULT_HOTKEYS, HotkeySetting
 from smartclipboard_app.ui.dialogs.import_dialog import ImportDialog
 from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
-from smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops import process_actions_impl, process_clipboard_impl
+from smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops import (
+    on_clipboard_change_impl,
+    process_actions_impl,
+    process_clipboard_impl,
+)
 from smartclipboard_app.ui.mainwindow_parts.status_lifecycle_ops import quit_app_impl, run_periodic_cleanup_impl
 from smartclipboard_app.ui.dialogs.snippets import SnippetDialog, SnippetManagerDialog, validate_snippet_shortcut
 from smartclipboard_app.ui.mainwindow_parts.table_ops import get_display_items_impl, load_data_impl, populate_table_impl
@@ -165,7 +170,7 @@ class _FakeMiniDB:
     def get_items(self, _q, _filter):
         return []
 
-    def get_content(self, _pid):
+    def get_content(self, _pid) -> tuple[str, object | None, str]:
         return ("mini-copy-text", None, "TEXT")
 
     def increment_use_count(self, pid):
@@ -178,6 +183,8 @@ class _FakeMiniParent(QWidget):
     def __init__(self):
         super().__init__()
         self.is_internal_copy = False
+        self.db: Any = None
+        self.clipboard: Any = None
 
     def show(self):
         return None
@@ -187,6 +194,39 @@ class _FakeMiniParent(QWidget):
 
     def statusBar(self):
         return None
+
+
+class _FakeTimerSignal:
+    def __init__(self):
+        self.connected = []
+
+    def connect(self, callback):
+        self.connected.append(callback)
+
+
+class _FakeDebounceTimer:
+    instances = []
+
+    def __init__(self, parent):
+        self.parent = parent
+        self.stopped = False
+        self.deleted = False
+        self.single_shot = False
+        self.started_ms = None
+        self.timeout = _FakeTimerSignal()
+        self.instances.append(self)
+
+    def stop(self):
+        self.stopped = True
+
+    def deleteLater(self):
+        self.deleted = True
+
+    def setSingleShot(self, value):
+        self.single_shot = value
+
+    def start(self, timeout_ms):
+        self.started_ms = timeout_ms
 
 
 class _FakeVaultDB:
@@ -340,7 +380,7 @@ class _FakeClipboardWriter:
     def __init__(self):
         self.text_value = None
         self.pixmap_value = None
-        self.mime_data = None
+        self.mime_data: Any = None
 
     def setText(self, text):
         self.text_value = text
@@ -388,7 +428,7 @@ class _FakeQuitDB:
 
 
 class _FakeQuitApp:
-    clipboard_instance = None
+    clipboard_instance: object | None = None
     quit_called = False
 
     @classmethod
@@ -493,6 +533,7 @@ class _FakeClipboardRuntimeWindow:
         self.clipboard = _FakeRuntimeClipboard(mime_data)
         self.image_calls = 0
         self.text_calls = 0
+        self.incremented = []
 
     def _process_image_clipboard(self, _mime_data):
         self.image_calls += 1
@@ -1042,7 +1083,15 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             self.assertTrue(dialog.result())
         finally:
             dialog.close()
-            parent.close()
+
+    def test_settings_dialog_warns_that_max_history_cleanup_is_permanent(self):
+        db = _FakeSettingsDB({"max_history": 100, "mini_window_enabled": "true", "log_level": "INFO"})
+        dialog = SettingsDialog(None, db, current_theme="dark", themes=FALLBACK_THEMES, max_history=100)
+        try:
+            self.assertIn("영구 삭제", dialog.max_history_warning.text())
+            self.assertIn("영구 삭제", dialog.max_history_spin.toolTip())
+        finally:
+            dialog.close()
 
     def test_settings_dialog_runs_cleanup_immediately_when_max_history_decreases(self):
         db = _FakeSettingsDB({"max_history": 200, "mini_window_enabled": "true", "log_level": "INFO"})
@@ -1080,7 +1129,7 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes), mock.patch.object(
             QMessageBox, "information"
         ) as info_mock, mock.patch.object(QMessageBox, "warning") as warning_mock:
-            legacy_main_src.MainWindow.reset_settings(window)
+            legacy_main_src.MainWindow.reset_settings(cast(Any, window))
 
         self.assertEqual(db.values["theme"], "dark")
         self.assertEqual(db.values["max_history"], legacy_main_src.MAX_HISTORY)
@@ -1120,7 +1169,7 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes), mock.patch.object(
             QMessageBox, "warning"
         ) as warning_mock, mock.patch.object(QMessageBox, "information") as info_mock:
-            legacy_main_src.MainWindow.reset_settings(window)
+            legacy_main_src.MainWindow.reset_settings(cast(Any, window))
 
         self.assertEqual(db.values["theme"], "dark")
         self.assertEqual(db.values["max_history"], legacy_main_src.MAX_HISTORY)
@@ -1136,7 +1185,7 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         window = _FakeMenuWindow(always_on_top=False)
         try:
             menu_ops.init_menu_impl(window, FALLBACK_THEMES)
-            self.assertFalse(window.action_ontop.isChecked())
+            self.assertFalse(cast(Any, window).action_ontop.isChecked())
         finally:
             window.close()
 
@@ -1192,7 +1241,7 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         window = _FakeShowImportWindow()
 
         with mock.patch.object(legacy_main_src, "ImportDialog", _AcceptedImportDialog):
-            legacy_main_src.MainWindow.show_import_dialog(window)
+            legacy_main_src.MainWindow.show_import_dialog(cast(Any, window))
 
         self.assertEqual(window.calls, ["refresh", "load"])
         self.assertEqual(window.status_bar.messages, [("✅ 가져오기 완료", 3000)])
@@ -1294,7 +1343,7 @@ class UiDialogsWidgetsTests(unittest.TestCase):
                 fh.write("note")
 
             class _FakeMiniFileDB(_FakeMiniDB):
-                def get_content(self, _pid):
+                def get_content(self, _pid) -> tuple[str, object | None, str]:
                     return (file_content_from_paths([file_a]), None, "FILE")
 
             parent = _FakeMiniParent()
@@ -1305,7 +1354,9 @@ class UiDialogsWidgetsTests(unittest.TestCase):
                     item = QListWidgetItem("row")
                     item.setData(Qt.ItemDataRole.UserRole, 7)
                     window.on_item_double_clicked(item)
-                restored_paths = [os.path.normcase(os.path.normpath(url.toLocalFile())) for url in clipboard.mimeData().urls()]
+                mime_data = clipboard.mimeData()
+                self.assertIsNotNone(mime_data)
+                restored_paths = [os.path.normcase(os.path.normpath(url.toLocalFile())) for url in mime_data.urls()]
                 self.assertEqual(restored_paths, [os.path.normcase(os.path.normpath(file_a))])
                 self.assertTrue(parent.is_internal_copy)
             finally:
@@ -1345,7 +1396,10 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             paste_last_item_slot_impl(window, mock.Mock(), mock.Mock(), _ImmediateTimer, keyboard)
 
             self.assertIsNotNone(window.clipboard.mime_data)
-            restored_paths = [os.path.normcase(os.path.normpath(url.toLocalFile())) for url in window.clipboard.mime_data.urls()]
+            restored_paths = [
+                os.path.normcase(os.path.normpath(url.toLocalFile()))
+                for url in cast(Any, window.clipboard.mime_data).urls()
+            ]
             self.assertEqual(
                 restored_paths,
                 [os.path.normcase(os.path.normpath(file_a)), os.path.normcase(os.path.normpath(file_b))],
@@ -1384,7 +1438,10 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             paste_last_item_slot_impl(window, mock.Mock(), mock.Mock(), _ImmediateTimer, keyboard)
 
             self.assertIsNotNone(window.clipboard.mime_data)
-            restored_paths = [os.path.normcase(os.path.normpath(url.toLocalFile())) for url in window.clipboard.mime_data.urls()]
+            restored_paths = [
+                os.path.normcase(os.path.normpath(url.toLocalFile()))
+                for url in cast(Any, window.clipboard.mime_data).urls()
+            ]
             self.assertEqual(restored_paths, [os.path.normcase(os.path.normpath(file_a))])
             self.assertEqual(window.db.incremented, [20])
             self.assertEqual(keyboard.sent, ["ctrl+v"])
@@ -1503,6 +1560,7 @@ class UiDialogsWidgetsTests(unittest.TestCase):
 
             content_item = window.table.item(0, 2)
             self.assertIsNotNone(content_item)
+            content_item = cast(Any, content_item)
             self.assertTrue(content_item.text().startswith("[누락 1]"))
             self.assertIn("사용 가능 1개, 누락 1개", content_item.toolTip())
 
@@ -1521,6 +1579,8 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             try:
                 window.load_items()
                 item = window.list_widget.item(0)
+                self.assertIsNotNone(item)
+                item = cast(Any, item)
                 self.assertIn("[누락 1]", item.text())
                 self.assertIn("사용 가능 1개, 누락 1개", item.toolTip())
             finally:
@@ -1537,6 +1597,23 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             dialog.close()
             parent.close()
 
+    def test_clipboard_change_clears_pending_debounce_before_internal_copy_return(self):
+        old_timer = _FakeDebounceTimer(parent=None)
+        _FakeDebounceTimer.instances = []
+        window = mock.Mock()
+        window.is_privacy_mode = False
+        window.is_internal_copy = True
+        window._clipboard_debounce_timer = old_timer
+        window.process_clipboard = object()
+
+        on_clipboard_change_impl(window, _FakeDebounceTimer)
+
+        self.assertTrue(old_timer.stopped)
+        self.assertTrue(old_timer.deleted)
+        self.assertIsNone(window._clipboard_debounce_timer)
+        self.assertFalse(window.is_internal_copy)
+        self.assertEqual(_FakeDebounceTimer.instances, [])
+
     def test_secure_vault_copy_button_uses_latest_encrypted_payload_after_password_change(self):
         parent = _FakeMiniParent()
         db = _PasswordRotatingVaultDB()
@@ -1547,6 +1624,8 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             clipboard.setText("")
             with mock.patch("smartclipboard_app.ui.dialogs.secure_vault.QApplication.clipboard", return_value=clipboard):
                 button_widget = dialog.table.cellWidget(0, 2)
+                self.assertIsNotNone(button_widget)
+                button_widget = cast(Any, button_widget)
                 copy_buttons = [btn for btn in button_widget.findChildren(QPushButton) if btn.toolTip() == "복호화하여 복사"]
                 old_copy_button = copy_buttons[0]
 
@@ -1775,8 +1854,16 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             "ExportImportManager",
             return_value=new_export_manager,
         ), mock.patch.object(
-            legacy_main_src.shutil,
-            "copy2",
+            legacy_main_src,
+            "validate_restore_database",
+            return_value=(True, None),
+        ), mock.patch.object(
+            legacy_main_src,
+            "create_pre_restore_backup",
+            return_value="D:/runtime/backups/pre_restore.db",
+        ), mock.patch.object(
+            legacy_main_src,
+            "replace_database_from_backup",
             side_effect=RuntimeError("copy failed"),
         ):
             legacy_main_src.MainWindow.restore_data(window)
@@ -1790,6 +1877,39 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertIs(window.action_manager, new_action_manager)
         self.assertIs(window.export_manager, new_export_manager)
         self.assertEqual(new_action_manager.action_completed.connect_calls, 1)
+        self.assertTrue(critical_mock.called)
+
+    def test_restore_data_rejects_invalid_database_before_shutdown(self):
+        current_db = _FakeRestoreDB(db_file="D:/runtime/custom.db", app_dir="D:/runtime")
+        current_action_manager = _FakeRestoreActionManager()
+        window = mock.Mock()
+        window.db = current_db
+        window.action_manager = current_action_manager
+
+        with mock.patch.object(
+            legacy_main_src.QMessageBox,
+            "warning",
+            return_value=QMessageBox.StandardButton.Yes,
+        ), mock.patch.object(
+            legacy_main_src.QFileDialog,
+            "getOpenFileName",
+            return_value=("invalid.db", "SQLite DB Files (*.db)"),
+        ), mock.patch.object(
+            legacy_main_src.QMessageBox,
+            "critical",
+        ) as critical_mock, mock.patch.object(
+            legacy_main_src,
+            "validate_restore_database",
+            return_value=(False, "missing required table: history"),
+        ), mock.patch.object(
+            legacy_main_src,
+            "create_pre_restore_backup",
+        ) as backup_mock:
+            legacy_main_src.MainWindow.restore_data(window)
+
+        self.assertFalse(current_db.closed)
+        self.assertEqual(current_action_manager.shutdown_calls, 0)
+        backup_mock.assert_not_called()
         self.assertTrue(critical_mock.called)
 
 

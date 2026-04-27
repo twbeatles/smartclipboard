@@ -57,7 +57,11 @@ else:
         manifest = load_payload_manifest(manifest_path)
         src_path = Path(__file__).with_name("legacy_main_src.py")
         validate_src_path = src_path if not getattr(sys, "frozen", False) else None
-        manifest_ok, manifest_reason = validate_payload_manifest(manifest, src_path=validate_src_path)
+        manifest_ok, manifest_reason = validate_payload_manifest(
+            manifest,
+            src_path=validate_src_path,
+            payload_path=payload_path,
+        )
         if not manifest_ok:
             raise RuntimeError(manifest_reason or "legacy payload manifest validation failed")
 

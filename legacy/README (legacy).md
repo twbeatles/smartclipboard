@@ -383,7 +383,7 @@ MIT License
 
 - 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
 - import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
-- payload/spec 동기화 기준은 `legacy_main_payload.marshal` + `legacy_main_payload.manifest.json` 세트를 루트 `README.md` 기준으로 관리합니다.
+- payload/spec 동기화 기준은 payload size/SHA-256 검증을 포함하는 `legacy_main_payload.marshal` + `legacy_main_payload.manifest.json` 세트를 루트 `README.md` 기준으로 관리합니다.
 
 ## 2026-04-15 Structure Refactor Notes
 
@@ -397,3 +397,8 @@ MIT License
 - `fetch_title`은 동기 치환이 끝난 최종 텍스트에서 첫 URL만 다시 추출합니다.
 - query가 있을 때 검색 결과는 relevance 순서를 기본 유지하고, 사용자가 헤더 정렬을 직접 바꾼 경우에만 client-side sort가 적용됩니다.
 - JSON import가 새 컬렉션을 만들면 메인 상단 컬렉션 필터가 즉시 새로고침되며, 빈 검색 결과/빈 히스토리에서도 상태바는 `0`건으로 갱신됩니다.
+
+## 2026-04-27 Functional Implementation Review
+
+- 최신 기준은 클립보드 debounce race 수정, DB 복원 검증/atomic replace, FTS backfill, JSON/CSV import 정규화, URL title cache TTL/LRU, payload SHA-256 검증, app data resolver 통합, repo-wide `pyright` 0 errors를 포함합니다.
+- 이 레거시 문서는 보관본이며 자세한 구현 상태와 검증 결과는 루트 `README.md`, `claude.md`, `FUNCTIONAL_IMPLEMENTATION_REVIEW.md`를 따릅니다.

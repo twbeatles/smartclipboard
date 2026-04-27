@@ -5,9 +5,57 @@ import sqlite3
 from smartclipboard_core.file_paths import file_signature_from_content
 
 from ..shared import logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class SearchSchemaMixin:
+class SearchSchemaMixin(DBRuntimeMixin):
+    @staticmethod
+    def _normalize_unique_name(name: str) -> str:
+        return " ".join(str(name or "").split()).strip()
+
+    def _dedupe_collections_for_unique_index(self, cursor) -> None:
+        cursor.execute("SELECT id, name FROM collections ORDER BY id ASC")
+        rows = cursor.fetchall()
+        groups: dict[str, list[int]] = {}
+        for collection_id, name in rows:
+            normalized = self._normalize_unique_name(name) or f"Collection {collection_id}"
+            if normalized != name:
+                cursor.execute("UPDATE collections SET name = ? WHERE id = ?", (normalized, collection_id))
+            groups.setdefault(normalized, []).append(int(collection_id))
+
+        for collection_ids in groups.values():
+            if len(collection_ids) <= 1:
+                continue
+            keep_id = collection_ids[0]
+            duplicate_ids = collection_ids[1:]
+            placeholders = ",".join("?" for _ in duplicate_ids)
+            cursor.execute(
+                f"UPDATE history SET collection_id = ? WHERE collection_id IN ({placeholders})",
+                [keep_id, *duplicate_ids],
+            )
+            cursor.execute(
+                f"UPDATE deleted_history SET collection_id = ? WHERE collection_id IN ({placeholders})",
+                [keep_id, *duplicate_ids],
+            )
+            cursor.execute(f"DELETE FROM collections WHERE id IN ({placeholders})", duplicate_ids)
+
+    @staticmethod
+    def _dedupe_snippet_shortcuts_for_unique_index(cursor) -> None:
+        cursor.execute(
+            """
+            SELECT shortcut, GROUP_CONCAT(id)
+            FROM snippets
+            WHERE shortcut IS NOT NULL AND shortcut != ''
+            GROUP BY shortcut
+            HAVING COUNT(*) > 1
+            """
+        )
+        duplicate_groups = cursor.fetchall()
+        for _shortcut, raw_ids in duplicate_groups:
+            snippet_ids = [int(value) for value in str(raw_ids).split(",") if value]
+            for duplicate_id in snippet_ids[1:]:
+                cursor.execute("UPDATE snippets SET shortcut = '' WHERE id = ?", (duplicate_id,))
+
     def create_tables(self):
         try:
             cursor = self.conn.cursor()
@@ -83,6 +131,9 @@ class SearchSchemaMixin:
             )
 
             for sql in (
+                "ALTER TABLE history ADD COLUMN pinned INTEGER DEFAULT 0",
+                "ALTER TABLE history ADD COLUMN use_count INTEGER DEFAULT 0",
+                "ALTER TABLE history ADD COLUMN category TEXT DEFAULT ''",
                 "ALTER TABLE history ADD COLUMN tags TEXT DEFAULT ''",
                 "ALTER TABLE history ADD COLUMN pin_order INTEGER DEFAULT 0",
                 "ALTER TABLE history ADD COLUMN file_path TEXT DEFAULT ''",
@@ -144,6 +195,17 @@ class SearchSchemaMixin:
                     cursor.execute(col_sql)
                 except sqlite3.OperationalError:
                     pass
+
+            try:
+                self._dedupe_collections_for_unique_index(cursor)
+                self._dedupe_snippet_shortcuts_for_unique_index(cursor)
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name_unique ON collections(name)")
+                cursor.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_snippets_shortcut_unique "
+                    "ON snippets(shortcut) WHERE shortcut IS NOT NULL AND shortcut != ''"
+                )
+            except sqlite3.OperationalError as e:
+                logger.debug(f"Unique index creation skipped: {e}")
 
             try:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_pinned ON history(pinned)")

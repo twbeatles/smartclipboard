@@ -47,6 +47,8 @@ def fetch_title_logic(url, item_id=None):
         current_url = url
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         for _redirect_index in range(TITLE_FETCH_MAX_REDIRECTS + 1):
+            # This preflight blocks obvious SSRF targets before each request and after redirects.
+            # requests still performs its own DNS lookup, so DNS rebinding is documented as residual risk.
             is_safe, reason = validate_title_fetch_url(current_url)
             if not is_safe:
                 logger.info("Title fetch blocked for %s: %s", current_url, reason)

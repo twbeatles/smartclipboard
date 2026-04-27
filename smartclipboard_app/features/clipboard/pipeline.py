@@ -8,13 +8,14 @@ from smartclipboard_core.file_paths import describe_file_paths, file_content_fro
 
 
 def on_clipboard_change_impl(self, qtimer_cls):
-    if self.is_privacy_mode or self.is_internal_copy:
-        self.is_internal_copy = False
-        return
-
     if self._clipboard_debounce_timer is not None:
         self._clipboard_debounce_timer.stop()
         self._clipboard_debounce_timer.deleteLater()
+        self._clipboard_debounce_timer = None
+
+    if self.is_privacy_mode or self.is_internal_copy:
+        self.is_internal_copy = False
+        return
 
     self._clipboard_debounce_timer = qtimer_cls(self)
     self._clipboard_debounce_timer.setSingleShot(True)

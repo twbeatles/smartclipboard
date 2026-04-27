@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from smartclipboard_app.ui.clipboard_guard import mark_internal_copy, restore_file_clipboard
 from smartclipboard_core.file_paths import file_paths_from_content
 
@@ -159,16 +161,17 @@ def paste_last_item_slot_impl(self, logger, qpixmap_cls, qtimer_cls, keyboard):
             restore_result = restore_file_clipboard(self, self.clipboard, file_paths_from_content(content))
             if not restore_result["applied"]:
                 status_bar_getter = getattr(self, "statusBar", None)
-                status_bar = status_bar_getter() if callable(status_bar_getter) else None
+                status_bar = cast(Any, status_bar_getter()) if callable(status_bar_getter) else None
                 if status_bar is not None:
                     status_bar.showMessage("⚠️ 복원 가능한 파일이 없어 붙여넣기를 건너뛰었습니다.", 2500)
                 return
             if restore_result["missing_paths"]:
                 status_bar_getter = getattr(self, "statusBar", None)
-                status_bar = status_bar_getter() if callable(status_bar_getter) else None
+                status_bar = cast(Any, status_bar_getter()) if callable(status_bar_getter) else None
+                available_paths = restore_result.get("available_paths", [])
                 if status_bar is not None:
                     status_bar.showMessage(
-                        f"⚠️ 일부 파일이 없어 {len(restore_result['available_paths'])}개만 복원했습니다.",
+                        f"⚠️ 일부 파일이 없어 {len(available_paths) if isinstance(available_paths, list) else 0}개만 복원했습니다.",
                         2500,
                     )
         else:

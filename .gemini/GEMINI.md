@@ -9,7 +9,7 @@
 - 레거시 런타임:
   - `smartclipboard_app/legacy_main.py`는 로더
   - `smartclipboard_app/legacy_main_payload.marshal`을 실행해 기존 동작을 복원
-  - `smartclipboard_app/legacy_main_payload.manifest.json`으로 Python/source 동기화를 검증
+  - `smartclipboard_app/legacy_main_payload.manifest.json`으로 Python/source와 payload size/SHA-256 동기화를 검증
 
 ## 작업 원칙
 
@@ -22,42 +22,45 @@
 - `legacy_main_payload.marshal`은 바이너리 payload입니다.
 - `legacy_main_payload.manifest.json`은 payload와 세트로 관리하는 런타임 동기화 메타데이터입니다.
 - `legacy_main.py`에 기존 대형 소스가 있다고 가정하고 라인 단위 리팩토링하면 안 됩니다.
-- `pyright`/Pylance 기준선은 현행 유지보수 코드에 맞춰 관리하며, 레거시 보관본과 `legacy_main_src.py`는 기본 분석 범위에서 제외합니다.
+- `pyright`/Pylance 기준선은 현행 유지보수 코드 repo-wide 0 errors에 맞춰 관리하며, 레거시 보관본과 `legacy_main_src.py`는 기본 분석 범위에서 제외합니다.
 - 구조 인벤토리/시그널 스냅샷은 로더 구조 특성상 소스 본문 검증과 의미가 달라질 수 있습니다.
 - payload 반영 누락 방지를 위해 `tests/test_payload_sync.py`를 포함한 로컬 preflight를 우선 실행합니다.
 - `fetch_title` 액션은 텍스트 전체가 아니라 첫 URL만 추출해 제목 요청하도록 유지합니다.
-- `fetch_title`은 로컬/사설/메타데이터 주소를 기본 차단하고, HTML 응답만 제한 크기로 읽는 정책을 유지합니다.
+- `fetch_title`은 로컬/사설/메타데이터 주소를 기본 차단하고, HTML 응답만 제한 크기로 읽으며, URL title cache는 256개/24시간 TTL 제한을 유지합니다.
 - 동일 비이미지 재복사는 기존 history row를 갱신하는 정책이며 메타데이터를 유지해야 합니다.
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅합니다.
 - JSON 마이그레이션(`include_metadata=True`)에는 top-level `collections` 메타데이터가 포함되며 import 시 컬렉션 ID remap이 수행됩니다.
 - JSON 마이그레이션 범위는 히스토리 메타데이터 + 컬렉션까지만 의미하며, 스니펫/규칙/핫키/보안 보관함 상태까지 포함하는 것으로 확장하지 않습니다.
 - JSON export/import는 `IMAGE` 항목의 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 제외합니다.
+- CSV import는 export된 고정 상태와 사용 횟수를 복원하되, CSV에 pin order가 없으므로 pinned 항목은 기존 pinned 목록 뒤에 import 순서대로 붙입니다.
+- JSON import는 top-level `items` list를 필수로 검증하고 metadata 타입/범위를 정규화합니다.
 - timezone-aware ISO timestamp는 원본 wall-clock 기준 앱 표준 시각 문자열로 정규화합니다.
 - `format_phone`은 `02`, 일반 지역번호, `0505`, `15xx/16xx/18xx` 대표번호까지 처리하는 기준을 유지합니다.
 - `copy_rules`의 `custom_replace`는 빈 replacement를 허용하고, 이 경우 삭제 치환으로 취급합니다.
 - `FILE` 항목은 목록/상세/미니 창에서 stale/missing 경로 수를 먼저 보여주는 UX를 유지합니다.
 - 보안 보관함은 `vault_salt`와 `vault_verification`이 모두 있어야 정상 구성으로 간주하며, 손상 상태는 잠금 화면 Reset 경로로 복구합니다.
+- `max_history` 감소와 자동 cleanup은 고정되지 않은 오래된 항목을 휴지통 없이 영구 삭제하는 정책이므로 UI/문서 경고를 유지합니다.
 - `Ctrl+Shift+Z` paste-last는 pinned 정렬과 무관하게 가장 최근 복사된 항목을 사용해야 합니다.
 - 사용자 정렬은 오름/내림차순과 무관하게 pinned-first 정책을 유지해야 합니다.
 - 컬렉션 삭제는 휴지통 row의 `collection_id`도 같이 정리하고, 복원 시 없는 컬렉션 참조는 `NULL`로 복원해야 합니다.
 - 보안 보관함 복사 버튼은 비밀번호 변경 직후에도 최신 DB row를 다시 읽어 복호화해야 합니다.
 - Windows 테스트 임시 경로는 repo-local `.tmp-unittest/`를 사용합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
-- 2026-04-13 기준 spec 추가 자산은 `legacy_main_payload.manifest.json` 1건이며, 현재 spec에 반영되어 있습니다.
+- 2026-04-27 기준 spec 추가 자산은 없으며, `smartclipboard_core.app_paths`, DB typing helper, import/export hardening 모듈은 기존 `collect_submodules` 규칙으로 포함됩니다.
 
 ## 검증 커맨드
 
 ```powershell
 python scripts/preflight_local.py
-pyright <touched-files>
+pyright
 ```
 
-- 현재 repo-wide `pyright`는 `smartclipboard_core/db_parts/*.py` mixin attribute-access 노이즈가 남아 있으므로, 최소 게이트는 `preflight_local.py`이고 `pyright`는 변경 파일 기준으로 병행합니다.
+- `pyright`는 루트 `pyrightconfig.json` 기준 repo-wide 0 errors를 유지합니다.
 
 또는 단계별 실행:
 
 ```powershell
-pyright <touched-files>
+pyright
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.py" "smartclipboard_app/legacy_main.py" "smartclipboard_app/legacy_main_src.py" "smartclipboard_core/database.py" "smartclipboard_core/actions.py" "smartclipboard_core/worker.py"
 python -m unittest discover -s tests -v

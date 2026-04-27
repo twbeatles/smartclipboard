@@ -7,6 +7,18 @@ from smartclipboard_core.file_paths import file_content_from_paths, file_paths_f
 from .reports import append_warning
 
 
+def _parse_csv_bool(value: str) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "예", "y"}
+
+
+def _parse_csv_nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(str(value or "0").strip())
+    except ValueError:
+        return 0
+    return max(parsed, 0)
+
+
 def export_csv_rows(writer, items, report: dict, logger):
     writer.writerow(["내용", "유형", "시간", "고정", "사용횟수"])
     for item in items:
@@ -58,6 +70,20 @@ def import_csv_row_locked(db, cursor, row: list[str], report: dict, valid_item_t
     if not item_id:
         report["skipped"] += 1
         return
+    pinned = _parse_csv_bool(row[3]) if len(row) > 3 else False
+    use_count = _parse_csv_nonnegative_int(row[4]) if len(row) > 4 else 0
+    pin_order = 0
+    if pinned:
+        cursor.execute("SELECT COALESCE(MAX(pin_order), -1) + 1 FROM history WHERE pinned = 1 AND id != ?", (item_id,))
+        pin_order_row = cursor.fetchone()
+        pin_order = int(pin_order_row[0] or 0) if pin_order_row else 0
+    db._set_item_metadata_locked(
+        cursor,
+        int(item_id),
+        pinned=1 if pinned else 0,
+        pin_order=pin_order,
+        use_count=use_count,
+    )
     report["imported"] += 1
 
 

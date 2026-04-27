@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -182,7 +182,11 @@ class SettingsDialog(QDialog):
         self.max_history_spin.setRange(10, 500)
         max_history_raw = self.db.get_setting("max_history", self.max_history)
         self.max_history_spin.setValue(_parse_int_setting(max_history_raw, int(self.max_history), 10, 500))
+        self.max_history_spin.setToolTip("값을 줄이면 제한을 초과한 고정되지 않은 오래된 항목이 영구 삭제됩니다.")
         history_layout.addRow("최대 저장 개수:", self.max_history_spin)
+        self.max_history_warning = QLabel("값을 줄이면 제한을 초과한 고정되지 않은 오래된 항목이 영구 삭제됩니다.")
+        self.max_history_warning.setWordWrap(True)
+        history_layout.addRow("", self.max_history_warning)
         general_layout.addWidget(history_group)
 
         mini_window_group = QGroupBox("🔲 미니 창")
@@ -301,7 +305,7 @@ class SettingsDialog(QDialog):
         if new_max_history < previous_max_history and hasattr(self.db, "cleanup"):
             try:
                 self.db.cleanup()
-                parent = self.parent()
+                parent = cast(Any, self.parent())
                 if parent is not None and hasattr(parent, "load_data"):
                     parent.load_data()
                 if parent is not None and hasattr(parent, "update_status_bar"):

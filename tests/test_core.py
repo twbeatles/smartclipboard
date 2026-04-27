@@ -1,8 +1,10 @@
 import datetime
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
+from typing import Any, cast
 from unittest import mock
 
 from PyQt6.QtWidgets import QApplication
@@ -11,6 +13,7 @@ from smartclipboard_app.managers.export_import import ExportImportManager
 from smartclipboard_app.managers.secure_vault import HAS_CRYPTO, SecureVaultManager
 from smartclipboard_core.actions import HAS_WEB, ClipboardActionManager, extract_first_url
 from smartclipboard_core.database import ClipboardDB
+from smartclipboard_core.app_paths import get_app_directory as get_core_app_directory
 from smartclipboard_core.file_paths import (
     build_file_paths_detail_text,
     build_file_paths_tooltip,
@@ -201,13 +204,14 @@ class CoreActionTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 result = manager.format_phone(raw)
                 self.assertIsNotNone(result)
+                result = cast(dict[str, Any], result)
                 self.assertEqual(result["formatted"], expected)
 
     def test_fetch_url_title_async_deduplicates_inflight_requests_by_url(self):
         db = FakeActionDB([])
         manager = ClipboardActionManager(db)
         started_workers = []
-        manager.threadpool.start = lambda worker: started_workers.append(worker)
+        manager.threadpool.start = cast(Any, lambda worker: started_workers.append(worker))
 
         manager.fetch_url_title_async("https://example.com/post", 1, "fetch")
         manager.fetch_url_title_async("https://example.com/post", 2, "fetch")
@@ -223,7 +227,7 @@ class CoreActionTests(unittest.TestCase):
         manager._title_cache["https://example.com/cache"] = "Cached Title"
 
         start_calls = []
-        manager.threadpool.start = lambda worker: start_calls.append(worker)
+        manager.threadpool.start = cast(Any, lambda worker: start_calls.append(worker))
         emitted = []
         manager.action_completed.connect(lambda action_name, result: emitted.append((action_name, result)))
 
@@ -232,6 +236,23 @@ class CoreActionTests(unittest.TestCase):
         self.assertEqual(start_calls, [])
         self.assertEqual(db.updated_titles, [(3, "Cached Title")])
         self.assertEqual(emitted[0][1]["title"], "Cached Title")
+
+    def test_title_cache_expires_and_evicts_lru_entries(self):
+        manager = ClipboardActionManager(FakeActionDB([]))
+        now = {"value": 1000.0}
+        manager._time_func = lambda: now["value"]
+        manager._title_cache_ttl_seconds = 10
+        manager._title_cache_max_entries = 2
+
+        manager._set_cached_title("https://example.com/a", "A")
+        manager._set_cached_title("https://example.com/b", "B")
+        self.assertEqual(manager._get_cached_title("https://example.com/a"), "A")
+        manager._set_cached_title("https://example.com/c", "C")
+
+        self.assertNotIn("https://example.com/b", manager._title_cache)
+        now["value"] = 1011.0
+        self.assertIsNone(manager._get_cached_title("https://example.com/a"))
+        self.assertNotIn("https://example.com/a", manager._title_cache)
 
     def test_handle_title_result_updates_all_subscribers_for_same_url(self):
         db = FakeActionDB([])
@@ -316,6 +337,56 @@ class CoreDatabaseTests(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertTrue(os.path.exists(target_file))
+
+    def test_missing_row_updates_return_false(self):
+        self.assertFalse(self.db.set_item_metadata(999999, use_count=1))
+        self.assertFalse(self.db.set_item_tags(999999, "tag"))
+        self.assertFalse(self.db.update_url_title(999999, "title"))
+        self.assertFalse(self.db.update_snippet(999999, "name", "content"))
+        self.assertFalse(self.db.delete_snippet(999999))
+
+    def test_unique_indexes_merge_collection_duplicates_and_clear_duplicate_shortcuts(self):
+        self.db.close()
+        if os.path.exists(self.db_path):
+            os.remove(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "CREATE TABLE collections (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, icon TEXT, color TEXT, created_at TEXT)"
+            )
+            cursor.execute(
+                "CREATE TABLE snippets (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, content TEXT NOT NULL, shortcut TEXT, category TEXT, created_at TEXT)"
+            )
+            cursor.execute(
+                "CREATE TABLE history (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, image_data BLOB, type TEXT, timestamp TEXT, collection_id INTEGER)"
+            )
+            cursor.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+            cursor.execute("INSERT INTO collections (id, name, icon, color, created_at) VALUES (1, 'Work', '', '', '')")
+            cursor.execute("INSERT INTO collections (id, name, icon, color, created_at) VALUES (2, ' Work ', '', '', '')")
+            cursor.execute(
+                "INSERT INTO history (id, content, image_data, type, timestamp, collection_id) VALUES (1, 'item', NULL, 'TEXT', '2026-04-01 00:00:00', 2)"
+            )
+            cursor.execute(
+                "INSERT INTO snippets (id, name, content, shortcut, category, created_at) VALUES (1, 'first', 'a', 'sc', '일반', '')"
+            )
+            cursor.execute(
+                "INSERT INTO snippets (id, name, content, shortcut, category, created_at) VALUES (2, 'second', 'b', 'sc', '일반', '')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.db = ClipboardDB(db_file=self.db_path, app_dir=self.tmpdir.name)
+
+        collections = self.db.get_collections()
+        self.assertEqual([(row[0], row[1]) for row in collections], [(1, "Work")])
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT collection_id FROM history WHERE id = 1")
+            self.assertEqual(cursor.fetchone()[0], 1)
+            cursor.execute("SELECT id, shortcut FROM snippets ORDER BY id")
+            self.assertEqual(cursor.fetchall(), [(1, "sc"), (2, "")])
 
     def test_update_pin_orders_success(self):
         ids = []
@@ -757,6 +828,51 @@ class CoreDatabaseTests(unittest.TestCase):
                 dst_db.close()
             dst_tmp.cleanup()
 
+    def test_import_json_rejects_non_list_items(self):
+        import_path = os.path.join(self.tmpdir.name, "bad-items.json")
+        with open(import_path, "w", encoding="utf-8") as fh:
+            json.dump({"items": {"bad": True}}, fh)
+
+        manager = ExportImportManager(self.db)
+        imported = manager.import_json(import_path)
+
+        self.assertEqual(imported, -1)
+        self.assertIn("items list", manager.last_import_report["error"])
+
+    def test_import_json_normalizes_metadata_values(self):
+        import_path = os.path.join(self.tmpdir.name, "metadata.json")
+        payload = {
+            "items": [
+                {
+                    "content": "metadata-item",
+                    "type": "TEXT",
+                    "timestamp": "2026-04-10 10:00:00",
+                    "pinned": "yes",
+                    "bookmark": "no",
+                    "pin_order": "-2",
+                    "use_count": "7",
+                    "tags": ["alpha"],
+                    "note": 123,
+                    "collection_id": "bad",
+                }
+            ]
+        }
+        with open(import_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+
+        manager = ExportImportManager(self.db)
+        self.assertEqual(manager.import_json(import_path), 1)
+
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT pinned, bookmark, pin_order, use_count, tags, note, collection_id FROM history WHERE content = ?",
+                ("metadata-item",),
+            )
+            row = cursor.fetchone()
+        self.assertEqual(row, (1, 0, 0, 7, "['alpha']", "123", None))
+        self.assertTrue(manager.last_import_report["warnings"])
+
     def test_import_json_rolls_back_all_rows_on_unexpected_failure(self):
         payload = {
             "items": [
@@ -940,6 +1056,23 @@ class CoreDatabaseTests(unittest.TestCase):
 
         self.assertEqual(imported, 0)
         self.assertEqual(self.db.get_items("", "전체"), [])
+
+    def test_import_csv_restores_pinned_and_use_count(self):
+        csv_path = os.path.join(self.tmpdir.name, "metadata.csv")
+        with open(csv_path, "w", encoding="utf-8-sig", newline="") as fh:
+            fh.write("내용,유형,시간,고정,사용횟수\n")
+            fh.write("csv-meta,TEXT,2026-04-01 10:00:00,예,7\n")
+
+        imported = ExportImportManager(self.db).import_csv(csv_path)
+
+        self.assertEqual(imported, 1)
+        with self.db.lock:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT pinned, pin_order, use_count FROM history WHERE content = ?", ("csv-meta",))
+            row = cursor.fetchone()
+        self.assertEqual(row[0], 1)
+        self.assertGreaterEqual(row[1], 0)
+        self.assertEqual(row[2], 7)
 
     def test_import_json_normalizes_iso_timestamp_and_filters_correctly(self):
         json_path = os.path.join(self.tmpdir.name, "iso.json")
@@ -1135,7 +1268,37 @@ class CoreDatabaseSearchTests(unittest.TestCase):
 
         self.assertEqual({row[0] for row in rows}, {item_id})
         self.assertFalse(getattr(self.db, "_last_search_fallback", True))
+        self.assertFalse(getattr(self.db, "_last_search_used_fts", True))
+
+    def test_fts_first_creation_backfills_existing_history_rows(self):
+        self.db.close()
+        if os.path.exists(self.db_path):
+            os.remove(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "CREATE TABLE history (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, image_data BLOB, type TEXT, timestamp TEXT)"
+            )
+            cursor.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+            cursor.execute(
+                "INSERT INTO history (content, image_data, type, timestamp) VALUES ('legacybackfill row', NULL, 'TEXT', '2026-04-01 00:00:00')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.db = ClipboardDB(db_file=self.db_path, app_dir=self.tmpdir.name)
+
+        rows = self.db.search_items("legacybackfill")
+        self.assertEqual(len(rows), 1)
         self.assertTrue(getattr(self.db, "_last_search_used_fts", False))
+
+    def test_core_and_legacy_app_directory_match(self):
+        import smartclipboard_app.legacy_main_src as legacy_main_src
+
+        self.assertEqual(get_core_app_directory(), legacy_main_src.get_app_directory())
+        self.assertTrue(get_core_app_directory().endswith("smartclipboard_app"))
 
     def test_search_items_sets_fallback_flag_only_on_real_fts_error(self):
         item_id = self.db.add_item("alpha-note", None, "TEXT")

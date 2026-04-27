@@ -3,9 +3,10 @@ from __future__ import annotations
 import sqlite3
 
 from ..shared import FILTER_TAG_MAP, history_order_by, logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class SearchQueryMixin:
+class SearchQueryMixin(DBRuntimeMixin):
     def search_items(
         self,
         query: str,
@@ -71,8 +72,8 @@ class SearchQueryMixin:
 
                     cursor.execute(sql, params)
                     rows = cursor.fetchall()
-                    self._last_search_used_fts = True
                     if rows:
+                        self._last_search_used_fts = True
                         return rows
                 except sqlite3.Error as e:
                     self._last_search_fallback = True

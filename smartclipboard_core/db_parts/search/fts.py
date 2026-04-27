@@ -3,9 +3,10 @@ from __future__ import annotations
 import sqlite3
 
 from ..shared import logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class SearchFtsMixin:
+class SearchFtsMixin(DBRuntimeMixin):
     def ensure_search_index(self) -> bool:
         with self.lock:
             try:
@@ -49,8 +50,15 @@ class SearchFtsMixin:
                     """
                 )
 
-                if not exists:
-                    cursor.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
+                cursor.execute(
+                    """
+                    INSERT INTO history_fts(rowid, content, tags, note, url_title)
+                    SELECT h.id, COALESCE(h.content, ''), COALESCE(h.tags, ''), COALESCE(h.note, ''), COALESCE(h.url_title, '')
+                    FROM history h
+                    LEFT JOIN history_fts f ON f.rowid = h.id
+                    WHERE f.rowid IS NULL
+                    """
+                )
 
                 self.conn.commit()
                 return True

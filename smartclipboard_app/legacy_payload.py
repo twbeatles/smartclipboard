@@ -18,6 +18,10 @@ def compute_source_sha256(src_path: Path) -> str:
     return hashlib.sha256(src_path.read_bytes()).hexdigest()
 
 
+def compute_file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def build_payload_manifest(src_path: Path, payload_path: Path | None = None) -> dict[str, Any]:
     manifest: dict[str, Any] = {
         "manifest_version": PAYLOAD_MANIFEST_VERSION,
@@ -29,6 +33,7 @@ def build_payload_manifest(src_path: Path, payload_path: Path | None = None) -> 
     if payload_path is not None and payload_path.exists():
         manifest["payload_name"] = payload_path.name
         manifest["payload_size"] = payload_path.stat().st_size
+        manifest["payload_sha256"] = compute_file_sha256(payload_path)
     return manifest
 
 
@@ -53,6 +58,7 @@ def load_payload_manifest(manifest_path: Path) -> dict[str, Any]:
 def validate_payload_manifest(
     manifest: dict[str, Any],
     src_path: Path | None = None,
+    payload_path: Path | None = None,
 ) -> tuple[bool, str | None]:
     if not isinstance(manifest, dict):
         return False, "payload manifest is not an object"
@@ -79,6 +85,21 @@ def validate_payload_manifest(
         if expected_hash != runtime_hash:
             return False, "payload source hash mismatch"
 
+    if payload_path is not None:
+        if not payload_path.exists():
+            return False, f"legacy payload file missing for validation: {payload_path}"
+        expected_payload_size = manifest.get("payload_size")
+        if not isinstance(expected_payload_size, int) or expected_payload_size < 0:
+            return False, "payload size missing from manifest"
+        if expected_payload_size != payload_path.stat().st_size:
+            return False, "payload size mismatch"
+
+        expected_payload_hash = str(manifest.get("payload_sha256") or "").strip()
+        if not expected_payload_hash:
+            return False, "payload hash missing from manifest"
+        if expected_payload_hash != compute_file_sha256(payload_path):
+            return False, "payload hash mismatch"
+
     return True, None
 
 
@@ -87,6 +108,7 @@ __all__ = [
     "DEFAULT_PAYLOAD_FILENAME",
     "PAYLOAD_MANIFEST_VERSION",
     "build_payload_manifest",
+    "compute_file_sha256",
     "compute_source_sha256",
     "load_payload_manifest",
     "validate_payload_manifest",

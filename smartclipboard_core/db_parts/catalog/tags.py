@@ -3,9 +3,10 @@ from __future__ import annotations
 import sqlite3
 
 from ..shared import logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class TagCatalogMixin:
+class TagCatalogMixin(DBRuntimeMixin):
     def get_item_tags(self, item_id):
         with self.lock:
             try:
@@ -17,15 +18,17 @@ class TagCatalogMixin:
                 logger.debug(f"Get item tags error: {e}")
                 return ""
 
-    def set_item_tags(self, item_id, tags):
+    def set_item_tags(self, item_id, tags) -> bool:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
                 cursor.execute("UPDATE history SET tags = ? WHERE id = ?", (tags, item_id))
                 self.conn.commit()
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Tag Update Error: {e}")
                 self.conn.rollback()
+                return False
 
     def get_all_tags(self):
         with self.lock:
@@ -49,7 +52,7 @@ class TagCatalogMixin:
                 cursor = self.conn.cursor()
                 cursor.execute("UPDATE history SET url_title = ? WHERE id = ?", (title, item_id))
                 self.conn.commit()
-                return True
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"URL title update failed: {e}")
                 self.conn.rollback()

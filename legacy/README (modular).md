@@ -111,7 +111,7 @@ pyinstaller --clean smartclipboard.spec
 - 2026-04-11 후속 반영으로 fetch_title 로컬/사설 URL 차단, `02`/`0505`/대표번호 전화 포맷 확장, FILE stale preview, 보안 보관함 Reset 복구, JSON 마이그레이션 문구 정리가 추가되었습니다.
 - 스니펫 `shortcut` 컬럼은 유지되지만 사용자 할당 UI/실행 경로는 아직 노출되지 않습니다.
 
-## 문서 정합성 기준 (2026-04-13)
+## 문서 정합성 기준 (2026-04-27)
 
 - 상세 변경 이력은 루트 `README.md`를 기준으로 관리합니다.
 - 개발 가이드는 `claude.md`, `.gemini/GEMINI.md`와 동일한 테스트/빌드 기준을 따릅니다.
@@ -125,7 +125,8 @@ pyinstaller --clean smartclipboard.spec
 - Packaging guard: `smartclipboard.spec` now explicitly includes `smartclipboard_core.db_parts` collection.
 - 2026-04-12 Note: 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
 - 2026-04-12 Note: import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
-- 2026-04-13 기준 spec 추가 자산은 payload manifest 1건이며, 현재 spec에 반영되어 있습니다.
+- 2026-04-27 기준 spec 추가 자산은 없으며, payload manifest는 source hash뿐 아니라 payload size/SHA-256 검증을 포함합니다.
+- repo-wide `pyright`는 0 errors를 유지하며, 최신 기능 구현 리뷰 반영 내용은 루트 `README.md`와 `FUNCTIONAL_IMPLEMENTATION_REVIEW.md`를 기준으로 확인합니다.
 
 ## 2026-04-15 Structure Refactor
 

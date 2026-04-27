@@ -4,9 +4,10 @@ import datetime
 import sqlite3
 
 from ..shared import history_order_by, logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class CollectionCatalogMixin:
+class CollectionCatalogMixin(DBRuntimeMixin):
     @staticmethod
     def _normalize_collection_name(name: str) -> str:
         return " ".join(str(name or "").split()).strip()

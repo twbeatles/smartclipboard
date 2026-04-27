@@ -57,11 +57,52 @@ def normalize_collection_lookup_key(value) -> int | None:
         return None
 
 
+def _normalize_bool_metadata(key: str, value: Any, report: dict[str, Any]) -> int | None:
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, int) and value in {0, 1}:
+        return int(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on", "예", "y"}:
+        return 1
+    if normalized in {"0", "false", "no", "off", "아니오", "n"}:
+        return 0
+    append_warning(report, f"일부 항목의 {key} 값이 잘못되어 해당 메타데이터를 무시했습니다.")
+    return None
+
+
+def _normalize_nonnegative_int_metadata(key: str, value: Any, report: dict[str, Any]) -> int | None:
+    if isinstance(value, bool):
+        append_warning(report, f"일부 항목의 {key} 값이 잘못되어 해당 메타데이터를 무시했습니다.")
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        append_warning(report, f"일부 항목의 {key} 값이 잘못되어 해당 메타데이터를 무시했습니다.")
+        return None
+    if parsed < 0:
+        append_warning(report, f"일부 항목의 {key} 값이 음수라 0으로 보정했습니다.")
+        return 0
+    return parsed
+
+
 def build_item_metadata(payload: dict[str, Any], collection_id_map: dict[int, int], collections_payload_present: bool, report: dict[str, Any]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
-    for key in ("tags", "note", "bookmark", "collection_id", "pinned", "pin_order", "use_count"):
+    for key in ("tags", "note"):
+        if key in payload and payload.get(key) is not None:
+            metadata[key] = str(payload.get(key))
+
+    for key in ("bookmark", "pinned"):
         if key in payload:
-            metadata[key] = payload.get(key)
+            normalized_bool = _normalize_bool_metadata(key, payload.get(key), report)
+            if normalized_bool is not None:
+                metadata[key] = normalized_bool
+
+    for key in ("pin_order", "use_count"):
+        if key in payload:
+            normalized_int = _normalize_nonnegative_int_metadata(key, payload.get(key), report)
+            if normalized_int is not None:
+                metadata[key] = normalized_int
 
     if "collection_id" in payload:
         remapped_collection_id = None
@@ -73,6 +114,8 @@ def build_item_metadata(payload: dict[str, Any], collection_id_map: dict[int, in
             report["collection_summary"]["cleared"] += 1
             if lookup_key is not None:
                 append_warning(report, "일부 항목의 collection 연결을 찾지 못해 해제했습니다.")
+            elif payload.get("collection_id") is not None:
+                append_warning(report, "일부 항목의 collection_id 값이 잘못되어 해제했습니다.")
         metadata["collection_id"] = remapped_collection_id
 
     return metadata

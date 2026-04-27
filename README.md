@@ -14,6 +14,7 @@
 ### 📋 클립보드 히스토리
 - 텍스트, 이미지, 링크, 코드, 색상, 파일/폴더 자동 분류 및 저장
 - 최대 500개 항목 저장 (설정 가능)
+- `max_history` 감소와 자동 cleanup은 고정되지 않은 오래된 항목을 휴지통 없이 영구 삭제하므로 설정 UI에서 이를 명시
 - 📌 중요 항목 고정 및 드래그 정렬 기능
 - 🏷️ 태그 시스템으로 항목 정리
 - ⭐ 북마크 기능으로 즐겨찾기 관리
@@ -61,8 +62,9 @@
 - JSON은 `IMAGE` 항목을 `image_data_b64`로 보존하며, CSV/Markdown은 이미지 플레이스홀더만 기록
 - `FILE` 항목은 바이너리 대신 경로 목록만 내보내며, JSON은 `file_paths`/`file_path`, CSV/Markdown은 newline 경로 목록을 사용
 - JSON 마이그레이션 모드 (히스토리 항목의 태그/메모/북마크 + 컬렉션 정의/ID 매핑 정보 포함, 스니펫/규칙/핫키/보안 보관함 제외)
-- JSON import는 ISO-8601/tz timestamp를 원본 시각 기준 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체
-- CSV import는 이미지 플레이스홀더 row를 복원하지 않으며, JSON import는 remap 실패/누락된 `collection_id`를 `NULL`로 정리
+- JSON import는 top-level `items` list를 필수로 검증하고, ISO-8601/tz timestamp를 원본 시각 기준 앱 표준 시각 문자열로 정규화하며, 완전 불량 timestamp는 import 시각으로 대체
+- CSV import는 이미지 플레이스홀더 row를 복원하지 않으며, export된 고정 상태와 사용 횟수는 복원
+- JSON import는 remap 실패/누락/불량 `collection_id`를 `NULL`로 정리하고, pinned/bookmark/use_count/pin_order metadata를 안전한 타입과 범위로 정규화
 - JSON import가 새 컬렉션을 만들면 메인 상단 컬렉션 필터 옵션을 즉시 새로고침
 - `FILE` 항목은 복원 전에 목록/상세/미니 창에서 누락 경로(stale) 여부를 미리 표시
 - 백업 및 마이그레이션 용이
@@ -150,8 +152,7 @@ python scripts/preflight_local.py
 
 `preflight_local.py`는 payload 재생성, payload smoke import, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
 현재 핵심 회귀 범위에는 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`가 포함됩니다.
-`pyright`는 별도 단계이며 루트 `pyrightconfig.json` 기준으로 현행 유지보수 대상만 분석합니다.
-현재 repo-wide `pyright`에는 `smartclipboard_core/db_parts/*.py` mixin attribute typing 노이즈가 남아 있으므로, 로컬 게이트는 `preflight_local.py`이고 `pyright`는 변경 파일 기준 보조 검증으로 사용합니다.
+`pyright`는 별도 단계이며 루트 `pyrightconfig.json` 기준 repo-wide 0 errors를 유지합니다.
 Windows 로컬 테스트는 시스템 temp 권한 이슈를 피하기 위해 repo 루트의 `.tmp-unittest/` 하위 임시 디렉터리를 사용합니다.
 
 필요 시 payload 재생성 단계를 건너뛰려면:
@@ -182,6 +183,7 @@ pyright
 ```
 
 - 루트 `pyrightconfig.json`이 공식 분석 범위를 정의합니다.
+- `legacy_main.pyi`와 DB mixin typing helper가 동적 payload export 및 mixin attribute typing을 보강합니다.
 - 기본 범위에는 현행 유지보수 대상(`클립모드 매니저.py`, `smartclipboard_app/`, `smartclipboard_core/`, `tests/`)만 포함됩니다.
 - 레거시 보관본 `legacy/클립모드 매니저 (legacy).py`와 소스 스냅샷 `smartclipboard_app/legacy_main_src.py`는 호환성 참조용이므로 기본 분석에서 제외됩니다.
 
@@ -287,7 +289,7 @@ pyright
 - paste-last/미니 창/선택 붙여넣기/더블클릭 복원 경로가 `QMimeData + file URL` 클립보드를 다시 구성하도록 보강
 - 일부 파일만 남아 있으면 남은 경로만 복원하고, 모두 사라졌으면 경고만 표시하고 clipboard/paste는 건드리지 않음
 - JSON export/import는 `FILE`의 `file_paths`/`file_path`/newline content를 모두 지원하고, CSV/Markdown은 경로 목록만 기록
-- CSV import는 `IMAGE` 플레이스홀더 row를 건너뛰고, JSON import는 ISO timestamp를 원본 시각 기준 앱 표준 시각으로 정규화하며 고아 `collection_id`를 `NULL`로 정리
+- CSV import는 `IMAGE` 플레이스홀더 row를 건너뛰고 고정/use_count를 복원하며, JSON import는 ISO timestamp를 원본 시각 기준 앱 표준 시각으로 정규화하고 고아 `collection_id`를 `NULL`로 정리
 - 보안 보관함 `unlock()` 실패 시 `fernet/is_unlocked` 상태를 원자적으로 초기화해 잘못된 재시도 후 반쯤 열린 상태가 남지 않도록 수정
 
 ### 🛠️ 2026-04-11 기능 리뷰 후속 반영
@@ -431,16 +433,16 @@ smartclipboard/
 
 - `smartclipboard_app/legacy_main.py`는 레거시 런타임을 로드하는 하이브리드 모듈입니다.
 - 기본값(권장): payload 모드 (`smartclipboard_app/legacy_main_payload.marshal`) (env: 미설정 또는 `SMARTCLIPBOARD_LEGACY_IMPL=payload`)
-- payload는 `legacy_main_payload.manifest.json`으로 현재 Python minor/source hash를 검증합니다.
+- payload는 `legacy_main_payload.manifest.json`으로 현재 Python minor/source hash와 payload size/SHA-256을 검증합니다.
 - payload 로딩 실패(파일 누락/파싱 실패/manifest 불일치/실행 실패) 시 `legacy_main_src.py`로 자동 폴백하며, `LEGACY_IMPL_ACTIVE`/`LEGACY_IMPL_FALLBACK_REASON` 상수로 상태를 확인할 수 있습니다.
 - 소스 모드(정적 분석/클래스/시그널 추적용): env `SMARTCLIPBOARD_LEGACY_IMPL=src`
 - 복원된 원본 소스: `smartclipboard_app/legacy_main_src.py` (원본: `legacy/클립모드 매니저 (legacy).py`)
-- Pylance/pyright는 루트 `pyrightconfig.json`을 기준으로 현행 유지보수 코드만 검사합니다.
+- Pylance/pyright는 루트 `pyrightconfig.json`을 기준으로 현행 유지보수 코드 repo-wide 0 errors를 유지합니다.
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 먼저 거쳐 자기 재수집 루프를 피합니다.
 - JSON export/import는 `IMAGE` 항목용 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 의도적으로 제외합니다.
 - `FILE` 항목은 경로 목록 중심으로 동작하며, JSON은 `file_paths`/`file_path`, CSV/Markdown은 newline path content를 사용합니다.
 - `FILE` 항목은 복원 시점뿐 아니라 목록/상세/미니 창에서 누락 경로 수를 먼저 보여주며, 일부만 남아 있으면 부분 복원 정책을 유지합니다.
-- import 무결성 정책상 CSV 이미지 플레이스홀더는 복원하지 않고, JSON에서 매핑 불가 `collection_id`는 `NULL`, 비표준 timestamp는 정규화 또는 import 시각으로 대체합니다.
+- import 무결성 정책상 CSV 이미지 플레이스홀더는 복원하지 않고, CSV 고정/use_count는 복원하며, JSON에서 매핑 불가 `collection_id`는 `NULL`, 비표준 timestamp는 정규화 또는 import 시각으로 대체합니다.
 - `fetch_title`은 첫 URL만 대상으로 하며, 로컬/사설/메타데이터 주소 차단과 HTML 응답 제한을 기본 정책으로 유지합니다.
 - 보안 보관함은 `vault_salt`와 `vault_verification`이 함께 있어야 정상 구성으로 간주하며, 손상 상태는 Reset 복구 흐름을 통해 정리합니다.
 - 기존 모듈러 레이아웃 README는 `legacy/README (modular).md`에 보관되어 있습니다.
@@ -479,6 +481,7 @@ MIT License
 
 - `ExportImportManager` 공개 메서드는 계속 `int`를 반환하고, 상세 결과는 `last_import_report` / `last_export_report`에 기록됩니다.
 - JSON/CSV import는 시작 전에 `backups/pre_import_YYYYMMDD_HHMMSS.db` 백업을 만들고 파일 단위 단일 트랜잭션으로 반영되어, 중간 실패 시 전체 rollback 됩니다.
+- DB 복원은 선택 파일을 read-only SQLite로 열어 integrity/schema를 검증하고, `pre_restore_YYYYMMDD_HHMMSS.db` 백업 후 임시 파일과 atomic replace로 반영합니다.
 - `search_items()`는 FTS-first 정책을 유지하면서 FTS 0건일 때만 LIKE 보완 검색을 수행합니다. `_last_search_fallback`은 실제 FTS 오류일 때만 UI 경고용으로 켜집니다.
 - `ClipboardActionManager`는 전용 `QThreadPool(maxThreadCount=4)`과 URL 기준 in-flight dedupe/cache를 사용하고, 늦게 도착한 title 결과는 현재 row의 첫 URL이 여전히 같은 경우에만 저장합니다.
 - `history.file_signature` 컬럼과 인덱스를 사용해 `FILE` 중복 판별을 전체 row 순회 대신 canonicalized path signature lookup으로 처리합니다.
@@ -507,12 +510,12 @@ MIT License
 - 시그널 스냅샷 검증(`scripts/refactor_signal_snapshot.py`, `tests/test_signal_snapshot.py`)은 `legacy_main_src.py`와 shim+feature 구현 파일을 함께 스캔합니다.
 - 로컬 사전검증(`scripts/preflight_local.py`)의 `py_compile` 단계는 `ui/**/*.py`, `features/**/*.py`, `db_parts/**/*.py`, `automation/**/*.py`를 재귀 포함합니다.
 
-## 문서 정합성 기준 (2026-04-13)
+## 문서 정합성 기준 (2026-04-27)
 
 - 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `legacy/README (modular).md`는 동일 기준을 따릅니다.
 - 권장 회귀 테스트 기준은 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`입니다.
 - PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`)와 payload manifest(`legacy_main_payload.manifest.json`)를 함께 포함하고, `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하며, payload에서 직접 참조하는 대화상자 모듈(`smartclipboard_app.ui.dialogs.collections` 포함)을 명시적으로 유지합니다.
-- 2026-04-13 기준 추가 패키징 자산은 payload manifest 1건이며, 현재 spec에 반영되어 있습니다.
+- 2026-04-27 기준 추가 패키징 자산은 없으며, `smartclipboard_core.app_paths`, DB typing helper, import/export hardening 모듈은 기존 `collect_submodules` 규칙으로 포함됩니다.
 
 ## Refactor Layout (2026-03-12)
 
@@ -533,3 +536,10 @@ MIT License
 - `smartclipboard_app/features/shared/state.py` provides `WindowState`, `WindowServices`, `WindowWidgets` bundles and `bind_window_facets()` for controller synchronization.
 - `smartclipboard_app/ui/controllers/*.py` and `ui/mainwindow_parts/*.py` remain compatibility layers so external imports and payload contracts stay intact.
 - `smartclipboard.spec` now collects `smartclipboard_app.features` and `smartclipboard_core.automation` submodules as hidden imports in addition to the legacy shim modules.
+
+## 2026-04-27 Functional Implementation Review
+
+- Clipboard debounce cleanup, DB restore validation/atomic replace, FTS backfill, JSON/CSV import normalization, DB write return values, URL title TTL/LRU cache, payload SHA-256 validation, and app directory resolver consolidation are implemented.
+- `pyright` is now a repo-wide gate with 0 errors; dynamic payload exports are represented by `smartclipboard_app/legacy_main.pyi`, and DB mixin attributes are covered by typing helpers.
+- `.gitignore` keeps user DB/log/build outputs out of version control and now also ignores rollback-journal SQLite files.
+- Packaging scope remains unchanged because new runtime modules are already covered by the spec's `collect_submodules` rules.

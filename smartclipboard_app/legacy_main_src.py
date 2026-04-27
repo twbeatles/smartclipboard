@@ -24,7 +24,6 @@ import webbrowser
 import winreg
 import logging
 import json
-import shutil
 import base64
 import uuid
 import csv
@@ -94,7 +93,13 @@ from smartclipboard_core import (
 from smartclipboard_core.actions import extract_first_url as core_extract_first_url
 from smartclipboard_app.managers.export_import import ExportImportManager as AppExportImportManager
 from smartclipboard_app.managers.secure_vault import SecureVaultManager as AppSecureVaultManager
+from smartclipboard_app.features.import_export.backup import (
+    create_pre_restore_backup,
+    replace_database_from_backup,
+    validate_restore_database,
+)
 from smartclipboard_app.ui.clipboard_guard import mark_internal_copy, restore_file_clipboard
+from smartclipboard_core.app_paths import get_app_directory as _resolve_app_directory
 from smartclipboard_core.file_paths import describe_file_paths, file_paths_from_content
 from smartclipboard_app.ui.dialogs.collections import (
     CollectionEditDialog as AppCollectionEditDialog,
@@ -162,12 +167,7 @@ from smartclipboard_app.ui.widgets.toast import ToastNotification as AppToastNot
 # --- 경로 설정 (Windows 시작 시 CWD가 System32가 되는 문제 해결) ---
 def get_app_directory():
     """실행 파일 위치 기반 앱 디렉토리 반환"""
-    if getattr(sys, 'frozen', False):
-        # PyInstaller로 패키징된 경우
-        return os.path.dirname(sys.executable)
-    else:
-        # 개발 환경
-        return os.path.dirname(os.path.abspath(__file__))
+    return _resolve_app_directory()
 
 APP_DIR = get_app_directory()
 
@@ -825,7 +825,13 @@ class MainWindow(QMainWindow):
         if file_name:
             target_db_file = getattr(self.db, "db_file", DB_FILE)
             target_app_dir = getattr(self.db, "app_dir", APP_DIR)
+            valid_restore, restore_error = validate_restore_database(file_name)
+            if not valid_restore:
+                QMessageBox.critical(self, "복원 오류", f"복원 파일 검증에 실패했습니다:\n{restore_error}")
+                return
+            db_was_closed = False
             try:
+                create_pre_restore_backup(self.db)
                 # DB 연결 종료 시도 (안전한 복사를 위해)
                 try:
                     self.action_manager.action_completed.disconnect(self.on_action_completed)
@@ -833,11 +839,15 @@ class MainWindow(QMainWindow):
                     pass
                 self.action_manager.shutdown()
                 self.db.close()
-                shutil.copy2(file_name, target_db_file)
+                db_was_closed = True
+                replace_database_from_backup(file_name, target_db_file)
                 QMessageBox.information(self, "복원 완료", "데이터가 복원되었습니다.\n앱을 종료합니다. 다시 실행해주세요.")
                 self.quit_app()
             except Exception as e:
                 QMessageBox.critical(self, "복원 오류", f"복원 중 오류가 발생했습니다:\n{e}")
+                if not db_was_closed:
+                    logger.warning("복원 실패 후 기존 DB 연결 유지됨")
+                    return
                 # v10.2: 연결 재수립 및 모든 매니저 갱신
                 self.db = ClipboardDB(db_file=target_db_file, app_dir=target_app_dir)
                 self.vault_manager = SecureVaultManager(self.db)

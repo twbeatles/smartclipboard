@@ -1,6 +1,6 @@
 # SmartClipboard Pro — 프로젝트 구조 분석
 
-> **기준일:** 2026-03-21
+> **기준일:** 2026-04-27
 > **버전:** v10.6
 > **목적:** 신규 기능 추가를 위한 코드베이스 심층 분석
 
@@ -57,6 +57,7 @@ smartclipboard/
 ├── smartclipboard_app/
 │   ├── bootstrap.py               ← QApplication 초기화, 예외 훅
 │   ├── legacy_main.py             ← 하이브리드 payload 로더
+│   ├── legacy_main.pyi            ← payload 로더 공개 export 타입 보강
 │   ├── legacy_payload.py          ← payload manifest/hash 유틸
 │   ├── legacy_main_src.py         ← 복원된 소스 스냅샷 (1,741줄)
 │   ├── legacy_main_payload.marshal ← 바이너리 런타임 payload
@@ -108,12 +109,14 @@ smartclipboard/
 │
 ├── smartclipboard_core/
 │   ├── database.py                ← ClipboardDB 컴포지터 (mixin 조합)
+│   ├── app_paths.py               ← source/frozen app data directory resolver
 │   ├── actions.py                 ← ClipboardActionManager
 │   ├── file_paths.py              ← FILE 경로 정규화/설명/중복 시그니처 헬퍼
 │   ├── worker.py                  ← 비동기 Worker + WorkerSignals
 │   │
-│   └── db_parts/                 ← DB mixin 모듈 (6개)
-│       ├── shared.py              ← 공통 상수
+│   └── db_parts/                 ← DB mixin 모듈
+│       ├── shared.py              ← 공통 상수/app path resolver 연결
+│       ├── typing_helpers.py      ← DB mixin 정적 분석 보강
 │       ├── schema_search.py       ← 스키마 생성 + FTS5 검색 (406줄)
 │       ├── history_ops.py         ← 히스토리 CRUD (467줄)
 │       ├── rules_snippets_actions.py ← 규칙·스니펫·액션 (198줄)
@@ -361,12 +364,12 @@ class Worker(QRunnable):
 | 형식 | 기능 |
 |------|------|
 | JSON (내보내기) | 메타데이터 포함 (`include_metadata=True`): tags/note/bookmark/collections/use_count |
-| JSON (가져오기) | 컬렉션 ID remap, IMAGE는 `image_data_b64` round-trip, FILE은 `file_paths/file_path/content`를 모두 수용 |
-| CSV | 날짜·타입 필터 공통 적용, IMAGE는 플레이스홀더 행으로 기록하고 import 시 skip, FILE은 newline path 목록 |
+| JSON (가져오기) | `items` list 검증, 컬렉션 ID remap, metadata 타입/범위 정규화, IMAGE는 `image_data_b64` round-trip, FILE은 `file_paths/file_path/content`를 모두 수용 |
+| CSV | 날짜·타입 필터 공통 적용, IMAGE는 플레이스홀더 행으로 기록하고 import 시 skip, FILE은 newline path 목록, pinned/use_count round-trip |
 | Markdown | 날짜·타입 필터 공통 적용, IMAGE는 설명용 플레이스홀더만 기록, FILE은 fenced text 경로 목록 |
 
 **JSON 마이그레이션 포맷** — `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color) 포함.
-**무결성 정책** — ISO-8601/tz timestamp는 **원본 wall-clock 기준** 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체한다. remap 실패 또는 누락된 `collection_id`는 `NULL`로 정리한다.
+**무결성 정책** — ISO-8601/tz timestamp는 **원본 wall-clock 기준** 앱 표준 시각 문자열로 정규화하고, 완전 불량 timestamp는 import 시각으로 대체한다. remap 실패, 누락, 불량 `collection_id`는 `NULL`로 정리하고, CSV pinned 항목은 기존 pinned 목록 뒤에 import 순서대로 붙인다.
 
 #### `smartclipboard_app/managers/secure_vault.py` — `SecureVaultManager`
 
@@ -418,7 +421,7 @@ class Worker(QRunnable):
 ### 검색 전략
 
 1. **FTS5** — 토큰화 검색, BM25 관련성 순위 (가능 시)
-2. **LIKE 폴백** — FTS5 미지원 환경
+2. **LIKE 폴백** — FTS5 미지원 환경 또는 FTS 0건 보완
 3. **복합 필터** — query + type + tag + collection_id + bookmark + uncategorized 동시 적용
 4. **UI 정렬 규칙** — query가 있을 때는 relevance 순서를 기본 유지하고, 사용자가 헤더 정렬을 명시적으로 바꾼 경우에만 client-side sort override 적용
 
@@ -563,7 +566,7 @@ clipboard.setText(text)
 - `history.file_path`는 FILE 첫 경로를 저장하고, `content`는 newline-joined absolute paths를 유지한다.
 - paste-last, 선택 붙여넣기, 미니 창 더블클릭은 `restore_file_clipboard()`를 통해 `QMimeData + file URL` 클립보드를 재구성한다.
 - 일부 파일만 남아 있으면 남은 경로만 복원하고, 모두 사라졌으면 경고만 표시하고 clipboard/paste는 변경하지 않는다.
-- CSV import는 IMAGE 플레이스홀더 row를 건너뛰고, JSON import는 remap 불가 `collection_id`를 `NULL`로 정리하며, 비표준 timestamp는 정규화 또는 import 시각으로 대체한다.
+- CSV import는 IMAGE 플레이스홀더 row를 건너뛰고 pinned/use_count를 복원하며, JSON import는 `items` list와 metadata 타입/범위를 검증하고 remap 불가 `collection_id`를 `NULL`로 정리한다.
 - `SecureVaultManager.unlock()` 실패 시 `fernet/is_unlocked` 상태를 함께 초기화해 잘못된 재시도 후 반쯤 열린 상태가 남지 않도록 한다.
 
 ## 8.4 2026-04-11 기능 리뷰 후속 반영 메모
@@ -620,8 +623,8 @@ value = db.get_setting("my_feature_enabled", default="0")
 ### 8.6 변경 후 필수 검증
 
 ```powershell
-# 정적 분석 (변경 파일 기준)
-pyright smartclipboard_core/actions.py smartclipboard_app/ui/dialogs/new_dialog.py
+# 정적 분석
+pyright
 
 # payload 재빌드 + manifest 갱신 (legacy_main_src.py 변경 시 반드시)
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
@@ -668,7 +671,7 @@ QApplication (bootstrap.py)
 | macOS/Linux 지원 | 미지원 | Windows 전용 (`keyboard` 라이브러리) |
 | 스니펫 `shortcut` 단축키 | 지원됨 | 앱 활성 상태에서만 동작하는 app-local 단축키 |
 | 일부 앱에서 글로벌 핫키 충돌 | 알려진 제한 | `keyboard` 라이브러리 한계 |
-| repo-wide pyright 노이즈 | `db_parts/*.py` mixin | 변경 파일 기준으로만 실행 |
+| repo-wide pyright | 해결됨 | `pyright` 0 errors 유지 |
 | `legacy_main.py` 소스 복원 | 장기 목표 | 현재는 payload+src 하이브리드 |
 
 ---
@@ -690,8 +693,8 @@ python scripts/preflight_local.py
 ### 단계별 실행
 
 ```powershell
-# 1. 정적 분석 (변경 파일 기준)
-pyright <touched-files>
+# 1. 정적 분석
+pyright
 
 # 2. payload 재빌드
 python scripts/build_legacy_payload.py \
@@ -767,7 +770,7 @@ pyinstaller --clean smartclipboard.spec
 - `smartclipboard_core/db_parts/*.py`는 facade이고, 분리된 구현은 `db_parts/search/`, `automation/`, `catalog/`, `retention/` 하위 패키지로 이동했다.
 - `scripts/preflight_local.py`와 `scripts/refactor_signal_snapshot.py`는 새 feature/core 하위 패키지를 재귀적으로 포함하도록 갱신되어야 하며, `smartclipboard.spec`도 `smartclipboard_app.features`/`smartclipboard_core.automation` hidden import 수집을 포함한다.
 
-*이 문서는 2026-03-21 기준 v10.6 코드베이스를 기반으로 작성되었고, 2026-04-15 구조 분할 델타를 추가 반영했습니다.*
+*이 문서는 2026-03-21 기준 v10.6 코드베이스를 기반으로 작성되었고, 2026-04-27 기능 구현 리뷰 반영 상태까지 갱신했습니다.*
 
 ## 14. 2026-04-16 기능 후속 정합성 메모
 
@@ -776,3 +779,16 @@ pyinstaller --clean smartclipboard.spec
 - `get_display_items_impl()`는 query가 있을 때 DB/FTS relevance 순서를 유지하고, `_search_sort_override`가 켜진 경우에만 client-side sort를 적용한다.
 - `load_data_impl()`는 검색 0건/빈 히스토리 경로에서도 `update_status_bar(0)`을 호출해 stale 상태 표시를 방지한다.
 - 이번 후속 수정은 packaging scope를 바꾸지 않으므로 `smartclipboard.spec`의 hidden imports/datas 목록은 그대로 유지한다.
+
+## 15. 2026-04-27 기능 구현 리뷰 반영
+
+- 클립보드 내부 복사 race 방지를 위해 기존 debounce timer를 먼저 정리한다.
+- DB 복원은 read-only SQLite integrity/schema 검증, `pre_restore_*` 백업, 임시 파일 + atomic replace를 사용한다.
+- FTS 최초 생성과 빈 FTS table 상태에서 기존 `history` row를 backfill하고, FTS 결과가 실제로 있을 때만 `_last_search_used_fts`를 켠다.
+- DB update/delete 계열은 실제 row 변경 여부를 bool로 반환하고, collection name과 non-empty snippet shortcut에는 unique index를 유지한다.
+- JSON import는 top-level `items` list와 metadata 타입/범위를 검증하고, CSV import는 pinned/use_count를 복원한다.
+- URL title cache는 256개/24시간 TTL/LRU 정책이며, private-network guard와 redirect 후 final URL 검증을 유지한다.
+- payload manifest는 source hash뿐 아니라 payload size/SHA-256을 marshal load 전에 검증한다.
+- source/frozen app data directory resolver는 `smartclipboard_core.app_paths`로 통합됐다.
+- `max_history` 감소와 자동 cleanup은 고정되지 않은 오래된 항목을 휴지통 없이 영구 삭제하므로 UI/문서 경고를 유지한다.
+- `pyright`는 repo-wide 0 errors 기준이며, `smartclipboard.spec` 추가 datas/hidden import 증설은 필요 없다.

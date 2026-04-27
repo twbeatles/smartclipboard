@@ -10,8 +10,10 @@ from smartclipboard_core.file_paths import (
 )
 
 from .shared import CLEANUP_INTERVAL, DEFAULT_MAX_HISTORY, FILTER_TAG_MAP, history_order_by, logger
+from .typing_helpers import DBRuntimeMixin
 
-class HistoryOpsMixin:
+
+class HistoryOpsMixin(DBRuntimeMixin):
     def _add_item_locked(
         self,
         cursor,
@@ -158,7 +160,7 @@ class HistoryOpsMixin:
                 cursor = self.conn.cursor()
                 cursor.execute("UPDATE history SET pin_order = ? WHERE id = ?", (order, item_id))
                 self.conn.commit()
-                return True
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Pin order update failed: {e}")
                 self.conn.rollback()
@@ -578,7 +580,7 @@ class HistoryOpsMixin:
         params = list(updates.values())
         params.append(item_id)
         cursor.execute(f"UPDATE history SET {cols} WHERE id = ?", params)
-        return True
+        return cursor.rowcount == 1
 
     def add_temp_item(self, content, image_data, type_tag, minutes=30):
         """임시 항목 추가 (N분 후 자동 만료)"""
@@ -617,6 +619,6 @@ class HistoryOpsMixin:
     def close(self):
         if self.conn:
             self.conn.close()
-            self.conn = None
+            self.conn = None  # type: ignore[assignment]
             logger.info("DB 연결 종료")
 

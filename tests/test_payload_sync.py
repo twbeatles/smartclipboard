@@ -9,7 +9,7 @@ import unittest
 
 from PyQt6.QtWidgets import QApplication
 
-from smartclipboard_app.legacy_payload import compute_source_sha256
+from smartclipboard_app.legacy_payload import compute_file_sha256, compute_source_sha256
 from scripts.refactor_symbol_inventory import build_inventory
 
 
@@ -66,6 +66,8 @@ class PayloadSyncTests(unittest.TestCase):
         marshal.loads(payload.read_bytes())  # parse guard
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest.get("source_sha256"), compute_source_sha256(src))
+        self.assertEqual(manifest.get("payload_size"), payload.stat().st_size)
+        self.assertEqual(manifest.get("payload_sha256"), compute_file_sha256(payload))
 
         source_inventory = build_inventory(src)
         source_classes = {

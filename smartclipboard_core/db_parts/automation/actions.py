@@ -3,9 +3,10 @@ from __future__ import annotations
 import sqlite3
 
 from ..shared import logger
+from ..typing_helpers import DBRuntimeMixin
 
 
-class ClipboardActionsMixin:
+class ClipboardActionsMixin(DBRuntimeMixin):
     def get_clipboard_actions(self):
         with self.lock:
             try:
@@ -114,9 +115,11 @@ class ClipboardActionsMixin:
                 cursor = self.conn.cursor()
                 cursor.execute("UPDATE clipboard_actions SET enabled = ? WHERE id = ?", (enabled, action_id))
                 self.conn.commit()
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Action Toggle Error: {e}")
                 self.conn.rollback()
+                return False
 
     def delete_clipboard_action(self, action_id):
         with self.lock:
@@ -124,6 +127,8 @@ class ClipboardActionsMixin:
                 cursor = self.conn.cursor()
                 cursor.execute("DELETE FROM clipboard_actions WHERE id = ?", (action_id,))
                 self.conn.commit()
+                return cursor.rowcount == 1
             except sqlite3.Error as e:
                 logger.error(f"Action Delete Error: {e}")
                 self.conn.rollback()
+                return False

@@ -3,6 +3,7 @@ import importlib
 import json
 import pathlib
 import unittest
+from typing import cast
 
 from scripts.refactor_symbol_inventory import build_inventory
 import smartclipboard_app.legacy_main_src as legacy_main_src
@@ -32,6 +33,7 @@ class PublicSurfaceTests(unittest.TestCase):
             classes = {c["name"]: c for c in inv["classes"]}
             main_window = classes.get("MainWindow")
             self.assertIsNotNone(main_window, "MainWindow missing in inventory")
+            main_window = cast(dict, main_window)
             return {m["name"]: m["signature"] for m in main_window["methods"]}
 
         self.assertEqual(_methods(current_inventory), _methods(baseline_inventory))

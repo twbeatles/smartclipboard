@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+from collections import OrderedDict
 
 from PyQt6.QtCore import QObject, QThreadPool, pyqtSignal
 
-from .cache import TITLE_FETCH_MAX_THREADS
+from .cache import TITLE_CACHE_MAX_ENTRIES, TITLE_CACHE_TTL_SECONDS, TITLE_FETCH_MAX_THREADS
 from .fetch_title import (
     HAS_WEB,
     extract_first_url,
@@ -32,7 +34,11 @@ class ClipboardActionManager(QObject):
         self.db = db
         self.actions_cache = []
         self._is_shutting_down = False
-        self._title_cache: dict[str, str] = {}
+        self._title_cache: OrderedDict[str, str] = OrderedDict()
+        self._title_cache_times: dict[str, float] = {}
+        self._title_cache_ttl_seconds = TITLE_CACHE_TTL_SECONDS
+        self._title_cache_max_entries = TITLE_CACHE_MAX_ENTRIES
+        self._time_func = time.monotonic
         self._pending_by_url: dict[str, set[object]] = {}
         self._pending_action_name_by_url: dict[str, str] = {}
         self.reload_actions()
@@ -138,7 +144,7 @@ class ClipboardActionManager(QObject):
             )
             return
 
-        cached_title = self._title_cache.get(url)
+        cached_title = self._get_cached_title(url)
         if cached_title:
             if item_id:
                 if self._update_title_for_current_item(item_id, url, cached_title):
@@ -182,7 +188,7 @@ class ClipboardActionManager(QObject):
 
         title = result.get("title")
         if title:
-            self._title_cache[url] = title
+            self._set_cached_title(url, title)
             updated_any = False
             if pending_item_ids:
                 for pending_item_id in pending_item_ids:
@@ -204,6 +210,30 @@ class ClipboardActionManager(QObject):
         if hasattr(self.db, "conn"):
             return getattr(self.db, "conn", None) is not None
         return True
+
+    def _get_cached_title(self, url: str) -> str | None:
+        title = self._title_cache.get(url)
+        if not title:
+            self._title_cache_times.pop(url, None)
+            return None
+        cached_at = self._title_cache_times.get(url)
+        now = self._time_func()
+        if cached_at is not None and now - cached_at > self._title_cache_ttl_seconds:
+            self._title_cache.pop(url, None)
+            self._title_cache_times.pop(url, None)
+            return None
+        self._title_cache.move_to_end(url)
+        if cached_at is None:
+            self._title_cache_times[url] = now
+        return title
+
+    def _set_cached_title(self, url: str, title: str) -> None:
+        self._title_cache[url] = title
+        self._title_cache.move_to_end(url)
+        self._title_cache_times[url] = self._time_func()
+        while len(self._title_cache) > self._title_cache_max_entries:
+            old_url, _old_title = self._title_cache.popitem(last=False)
+            self._title_cache_times.pop(old_url, None)
 
     def shutdown(self, wait_timeout_ms: int = 2000) -> None:
         self._is_shutting_down = True

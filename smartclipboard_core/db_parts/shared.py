@@ -1,17 +1,9 @@
 from __future__ import annotations
 
 import logging
-import os
 
+from smartclipboard_core.app_paths import get_app_directory
 
-def get_app_directory() -> str:
-    """Return base directory for app data and database files."""
-    import sys
-
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    # In source mode this file lives in smartclipboard_core/db_parts/, so use two parents.
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 APP_DIR = get_app_directory()

@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from typing import Union
 
 from .cache import BLOCKED_TITLE_HOSTS
 
+IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
-def resolve_title_fetch_host_ips(hostname: str, scheme: str) -> list[ipaddress._BaseAddress]:
+
+def resolve_title_fetch_host_ips(hostname: str, scheme: str) -> list[IPAddress]:
     try:
         return [ipaddress.ip_address(hostname)]
     except ValueError:
         pass
 
     default_port = 443 if scheme == "https" else 80
-    resolved_ips: list[ipaddress._BaseAddress] = []
+    resolved_ips: list[IPAddress] = []
     seen: set[str] = set()
     addrinfo = socket.getaddrinfo(hostname, default_port, type=socket.SOCK_STREAM)
     for _family, _socktype, _proto, _canonname, sockaddr in addrinfo:

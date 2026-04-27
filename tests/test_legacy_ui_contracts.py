@@ -1,6 +1,7 @@
 import pathlib
 import re
 import unittest
+from typing import Any, cast
 from unittest import mock
 
 import smartclipboard_app.legacy_main_src as legacy_main_src
@@ -75,11 +76,11 @@ class _FakeSearchInput:
 
 class LegacyUiRuntimeSafetyTests(unittest.TestCase):
     def test_on_action_completed_shows_notify_toast(self):
-        fake_window = type("FakeWindow", (), {})()
+        fake_window = cast(Any, type("FakeWindow", (), {})())
 
         with mock.patch.object(legacy_main_src.ToastNotification, "show_toast") as toast_mock:
             legacy_main_src.MainWindow.on_action_completed(
-                fake_window,
+                cast(Any, fake_window),
                 "fetch",
                 {"type": "notify", "message": "blocked"},
             )
@@ -89,7 +90,7 @@ class LegacyUiRuntimeSafetyTests(unittest.TestCase):
         self.assertEqual(toast_mock.call_args.kwargs["detail"], "blocked")
 
     def test_on_action_completed_reconnects_clipboard_when_toast_raises(self):
-        fake_window = type("FakeWindow", (), {})()
+        fake_window = cast(Any, type("FakeWindow", (), {})())
         fake_window.clipboard = _FakeClipboard()
         fake_window.search_input = _FakeSearchInput()
         fake_window.on_clipboard_change = object()
@@ -97,7 +98,7 @@ class LegacyUiRuntimeSafetyTests(unittest.TestCase):
 
         with mock.patch.object(legacy_main_src.ToastNotification, "show_toast", side_effect=RuntimeError("toast boom")):
             legacy_main_src.MainWindow.on_action_completed(
-                fake_window,
+                cast(Any, fake_window),
                 "fetch",
                 {"type": "title", "title": "Example Title"},
             )
