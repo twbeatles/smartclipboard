@@ -14,7 +14,7 @@ def process_file_clipboard_impl(self, mime_data, logger):
 
 
 def process_clipboard_impl(self, logger):
-    if self.is_monitoring_paused:
+    if self.is_monitoring_paused or getattr(self, "is_privacy_mode", False):
         return
 
     try:

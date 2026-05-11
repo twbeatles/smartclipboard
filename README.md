@@ -130,7 +130,7 @@ Pillow>=9.0.0           # 이미지 처리
 ## 🔨 빌드
 
 ```powershell
-python scripts/preflight_local.py
+python scripts/preflight_local.py --with-pyright
 pyinstaller --clean smartclipboard.spec
 ```
 
@@ -152,7 +152,7 @@ python scripts/preflight_local.py
 
 `preflight_local.py`는 payload 재생성, payload smoke import, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
 현재 핵심 회귀 범위에는 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`가 포함됩니다.
-`pyright`는 별도 단계이며 루트 `pyrightconfig.json` 기준 repo-wide 0 errors를 유지합니다.
+`--with-pyright`를 붙이면 같은 preflight 흐름의 마지막 단계로 루트 `pyrightconfig.json` 기준 repo-wide 타입 검사를 실행합니다.
 Windows 로컬 테스트는 시스템 temp 권한 이슈를 피하기 위해 repo 루트의 `.tmp-unittest/` 하위 임시 디렉터리를 사용합니다.
 
 필요 시 payload 재생성 단계를 건너뛰려면:
@@ -164,7 +164,7 @@ python scripts/preflight_local.py --skip-payload-build
 optional dependency까지 CI와 같은 강도로 확인하려면 위 strict 커맨드를 사용합니다. 기본 `preflight_local.py`는 `cryptography`, `requests`, `bs4`, `qrcode`, `PIL` 누락을 경고만 출력하고 계속 진행하지만, strict 모드와 CI는 실패로 처리합니다.
 
 ```powershell
-python scripts/preflight_local.py --skip-payload-build --strict-optional-deps
+python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright
 ```
 
 ## 🤖 CI (GitHub Actions)
@@ -174,7 +174,8 @@ python scripts/preflight_local.py --skip-payload-build --strict-optional-deps
 - Python 매트릭스: `3.10`, `3.11`, `3.12`, `3.13`
 - 각 매트릭스에서 다음을 수행합니다.
   - payload 빌드 + smoke import
-  - `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps`
+  - `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright`
+- 패키징 검증은 일반 CI가 아니라 수동 워크플로우 `.github/workflows/package-smoke.yml`에서 `pyinstaller --clean smartclipboard.spec`와 짧은 EXE startup smoke로 확인합니다.
 
 ## 🔎 정적 분석 (Pylance/Pyright)
 
@@ -232,7 +233,7 @@ pyright
 - `add_snippet`, `update_snippet`, `delete_snippet`: rollback/return 추가
 - `set_setting`: rollback 추가
 - `update_url_title`: URL 제목 캐시 저장 메서드 추가
-- 삭제/복원 시 휴지통 메타데이터(tags/note/bookmark/collection/pin/use_count) 보존
+- 삭제/복원 시 휴지통 메타데이터(tags/note/bookmark/collection/pin/use_count/url_title) 보존
 - 고정 항목 순서 갱신을 트랜잭션 일괄 처리로 변경(`update_pin_orders`)
 
 ### 📁 Collections API 구현
@@ -482,6 +483,8 @@ MIT License
 - `ExportImportManager` 공개 메서드는 계속 `int`를 반환하고, 상세 결과는 `last_import_report` / `last_export_report`에 기록됩니다.
 - JSON/CSV import는 시작 전에 `backups/pre_import_YYYYMMDD_HHMMSS.db` 백업을 만들고 파일 단위 단일 트랜잭션으로 반영되어, 중간 실패 시 전체 rollback 됩니다.
 - DB 복원은 선택 파일을 read-only SQLite로 열어 integrity/schema를 검증하고, `pre_restore_YYYYMMDD_HHMMSS.db` 백업 후 임시 파일과 atomic replace로 반영합니다.
+- 복원 검증은 full/minimal 모드로 분리됩니다. UI 복원은 기본 full 검증을 사용하고, history/settings만 있는 legacy/minimal DB는 기능 데이터 일부 누락 가능성을 경고한 뒤 사용자 동의가 있을 때만 진행합니다.
+- DB 복원 replace 전후에는 target DB의 SQLite `-wal`, `-shm` sidecar를 정리해 stale WAL이 복원본을 오염시키지 않도록 합니다.
 - `search_items()`는 FTS-first 정책을 유지하면서 FTS 0건일 때만 LIKE 보완 검색을 수행합니다. `_last_search_fallback`은 실제 FTS 오류일 때만 UI 경고용으로 켜집니다.
 - `ClipboardActionManager`는 전용 `QThreadPool(maxThreadCount=4)`과 URL 기준 in-flight dedupe/cache를 사용하고, 늦게 도착한 title 결과는 현재 row의 첫 URL이 여전히 같은 경우에만 저장합니다.
 - `history.file_signature` 컬럼과 인덱스를 사용해 `FILE` 중복 판별을 전체 row 순회 대신 canonicalized path signature lookup으로 처리합니다.
@@ -493,6 +496,7 @@ MIT License
 
 - `ClipboardActionManager`의 동기 텍스트 액션(`format_phone`, `format_email`, `transform`)은 순차적으로 working text를 갱신하며, `fetch_title`은 동기 치환이 끝난 최종 텍스트에서 URL을 다시 추출합니다.
 - 액션 결과가 텍스트 치환이면 history row(`content/type/url_title/file_path/file_signature`)와 clipboard를 함께 갱신해 UI/저장소/실제 clipboard가 같은 값을 유지합니다.
+- 텍스트 치환 결과가 기존 history row와 같아지면 새 duplicate를 남기지 않고 기존 row로 merge하며, tags/note/bookmark/collection/pin/use_count/url_title 메타데이터는 복원 merge와 같은 정책으로 보존합니다.
 - JSON import로 컬렉션이 추가되면 `refresh_collection_filter_options()`를 먼저 호출해 메인 상단 필터가 즉시 최신 목록을 반영합니다.
 - 검색 결과는 query가 있을 때 DB/FTS relevance 순서를 기본으로 유지하고, 사용자가 헤더 정렬을 직접 바꾼 경우에만 client-side sort override를 적용합니다.
 - 검색 0건/빈 히스토리 경로에서도 `update_status_bar(0)`을 호출해 이전 카운트가 남지 않도록 유지합니다.
@@ -510,12 +514,21 @@ MIT License
 - 시그널 스냅샷 검증(`scripts/refactor_signal_snapshot.py`, `tests/test_signal_snapshot.py`)은 `legacy_main_src.py`와 shim+feature 구현 파일을 함께 스캔합니다.
 - 로컬 사전검증(`scripts/preflight_local.py`)의 `py_compile` 단계는 `ui/**/*.py`, `features/**/*.py`, `db_parts/**/*.py`, `automation/**/*.py`를 재귀 포함합니다.
 
-## 문서 정합성 기준 (2026-04-27)
+## 문서 정합성 기준 (2026-05-11)
 
-- 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `legacy/README (modular).md`는 동일 기준을 따릅니다.
+- 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `PROJECT_ANALYSIS.md`, `legacy/README (modular).md`, `legacy/README (legacy).md`는 동일 기준을 따릅니다.
+- 상세 감사 결과는 `FUNCTIONAL_IMPLEMENTATION_AUDIT_2026-05-11.md`에 보관하며, 이전 루트 `FUNCTIONAL_IMPLEMENTATION_REVIEW.md` 문서는 2026-05-11 기준 문서 세트에서 제거되었습니다.
 - 권장 회귀 테스트 기준은 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`입니다.
-- PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`)와 payload manifest(`legacy_main_payload.manifest.json`)를 함께 포함하고, `smartclipboard_core`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하며, payload에서 직접 참조하는 대화상자 모듈(`smartclipboard_app.ui.dialogs.collections` 포함)을 명시적으로 유지합니다.
-- 2026-04-27 기준 추가 패키징 자산은 없으며, `smartclipboard_core.app_paths`, DB typing helper, import/export hardening 모듈은 기존 `collect_submodules` 규칙으로 포함됩니다.
+
+## 2026-05-11 Functional Hardening
+
+- 프라이버시 모드가 켜질 때 예약된 clipboard debounce timer를 즉시 취소하고, `process_clipboard()` 시작 지점에서도 privacy 상태를 재확인합니다.
+- 텍스트 clipboard는 기본 1MB 초과 시 저장하지 않고 status/toast로 안내합니다. 이미지 5MB 제한은 유지됩니다.
+- 앱 시작 시 글로벌 핫키 등록 실패는 status bar, tray message, toast 중 가능한 경로로 사용자에게 노출됩니다.
+- 설정 저장은 `set_setting()` 결과와 read-back을 확인하며, 실패 시 다이얼로그를 닫지 않고 경고합니다.
+- JSON migration export/import는 `url_title`을 포함합니다. CSV/Markdown export 정책은 기존처럼 URL 제목 메타데이터를 별도 컬럼으로 확장하지 않습니다.
+- PyInstaller 기준(`smartclipboard.spec`)은 payload 데이터(`legacy_main_payload.marshal`)와 payload manifest(`legacy_main_payload.manifest.json`)를 함께 포함하고, `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하며, payload에서 직접 참조하는 대화상자 모듈(`smartclipboard_app.ui.dialogs.collections` 포함)을 명시적으로 유지합니다.
+- 2026-05-11 기능 안정화는 기존 `collect_submodules`/payload datas 범위 안에서 처리되므로 추가 PyInstaller hidden import 또는 data 증설은 필요하지 않습니다.
 
 ## Refactor Layout (2026-03-12)
 
@@ -541,5 +554,5 @@ MIT License
 
 - Clipboard debounce cleanup, DB restore validation/atomic replace, FTS backfill, JSON/CSV import normalization, DB write return values, URL title TTL/LRU cache, payload SHA-256 validation, and app directory resolver consolidation are implemented.
 - `pyright` is now a repo-wide gate with 0 errors; dynamic payload exports are represented by `smartclipboard_app/legacy_main.pyi`, and DB mixin attributes are covered by typing helpers.
-- `.gitignore` keeps user DB/log/build outputs out of version control and now also ignores rollback-journal SQLite files.
+- `.gitignore` keeps user DB/log/build outputs out of version control and now also ignores SQLite journal/WAL/SHM sidecar files for `.db`, `.sqlite`, and `.sqlite3` databases.
 - Packaging scope remains unchanged because new runtime modules are already covered by the spec's `collect_submodules` rules.

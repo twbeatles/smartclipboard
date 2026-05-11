@@ -4,6 +4,7 @@ This script standardizes the minimum verification sequence before packaging:
 1) rebuild payload + smoke import
 2) py_compile guard
 3) unit tests
+4) optional pyright type check
 """
 
 from __future__ import annotations
@@ -114,6 +115,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Fail when optional runtime dependencies are missing",
     )
+    parser.add_argument(
+        "--with-pyright",
+        action="store_true",
+        help="Run pyright after unit tests",
+    )
     args = parser.parse_args(argv)
 
     python = sys.executable
@@ -158,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     steps.append(("py_compile", [python, "-m", "py_compile", *compile_targets()]))
     steps.append(("unittest", [python, "-m", "unittest", "discover", "-s", "tests", "-v"]))
+    if args.with_pyright:
+        steps.append(("pyright", ["pyright"]))
 
     for label, step in steps:
         code = run_step(label, step)

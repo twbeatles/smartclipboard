@@ -3,11 +3,11 @@
 SmartClipboard Pro v10.6 - PyInstaller spec
 
 Build:
-    python scripts/preflight_local.py
+    python scripts/preflight_local.py --with-pyright
     pyinstaller --clean smartclipboard.spec
 
 Optional:
-    pyright
+    python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright
 
 Notes:
     - Static analysis scope lives in pyrightconfig.json and intentionally
@@ -28,8 +28,15 @@ Notes:
       unchanged: DB restore hardening, FTS backfill, import normalization,
       app path resolver, and DB typing helpers are covered by existing
       collect_submodules rules and the existing payload/manifest datas.
-    - CI now enforces optional runtime dependency presence via
-      `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps`.
+    - 2026-05-11 functional hardening keeps packaging scope unchanged:
+      privacy debounce cancellation, deleted_history.url_title migration,
+      action writeback merge, restore full/minimal validation, visible hotkey
+      failure notices, settings write/read-back checks, and the 1MB text
+      clipboard limit use existing modules and datas.
+    - CI now enforces optional runtime dependency presence and pyright via
+      `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright`.
+    - Frozen packaging is covered by the manual `package-smoke` workflow rather
+      than every normal CI matrix run.
     - If legacy source changes, rebuild payload first and keep tests green
       (`test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`,
        `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`,

@@ -252,6 +252,28 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
 
+    @staticmethod
+    def _setting_value_matches(expected: object, actual: object) -> bool:
+        return str(actual) == str(expected)
+
+    def _save_and_verify_setting(self, key: str, value: object) -> bool:
+        ok = self.db.set_setting(key, value)
+        if ok is False:
+            self.logger.warning("Setting write failed: %s", key)
+            return False
+        read_back = self.db.get_setting(key, None)
+        if not self._setting_value_matches(value, read_back):
+            self.logger.warning("Setting read-back mismatch for %s: expected=%r actual=%r", key, value, read_back)
+            return False
+        return True
+
+    def _show_setting_save_error(self, key: str) -> None:
+        QMessageBox.critical(
+            self,
+            "설정 저장 실패",
+            f"'{key}' 설정을 저장하지 못했습니다.\n설정을 닫지 않고 유지합니다.",
+        )
+
     def save_settings(self):
         selected_theme = cast(str, self.theme_combo.currentData() or self.current_theme)
         current_theme = self.current_theme
@@ -264,11 +286,17 @@ class SettingsDialog(QDialog):
         previous_mini_enabled = str(self.db.get_setting("mini_window_enabled", "true") or "true")
         new_max_history = self.max_history_spin.value()
 
-        self.db.set_setting("theme", selected_theme)
-        self.db.set_setting("max_history", new_max_history)
+        if not self._save_and_verify_setting("theme", selected_theme):
+            self._show_setting_save_error("theme")
+            return
+        if not self._save_and_verify_setting("max_history", new_max_history):
+            self._show_setting_save_error("max_history")
+            return
 
         selected_log_level = cast(str, self.log_level_combo.currentData() or "INFO")
-        self.db.set_setting("log_level", selected_log_level)
+        if not self._save_and_verify_setting("log_level", selected_log_level):
+            self._show_setting_save_error("log_level")
+            return
         log_level_map = {
             "DEBUG": logging.DEBUG,
             "INFO": logging.INFO,
@@ -289,9 +317,13 @@ class SettingsDialog(QDialog):
         hotkey_parent = _hotkey_parent(self.parent())
         hotkey_warning = ""
         if mini_enabled != previous_mini_enabled:
-            self.db.set_setting("mini_window_enabled", mini_enabled)
+            if not self._save_and_verify_setting("mini_window_enabled", mini_enabled):
+                self._show_setting_save_error("mini_window_enabled")
+                return
             if hotkey_parent is not None and hotkey_parent.register_hotkeys() is False:
-                self.db.set_setting("mini_window_enabled", previous_mini_enabled)
+                if not self._save_and_verify_setting("mini_window_enabled", previous_mini_enabled):
+                    self._show_setting_save_error("mini_window_enabled")
+                    return
                 hotkey_parent.register_hotkeys()
                 self.mini_window_enabled.setChecked(_parse_bool_setting(previous_mini_enabled, default=True))
                 hotkey_error = getattr(hotkey_parent, "_last_hotkey_error", "") or "unknown hotkey registration error"
@@ -300,7 +332,9 @@ class SettingsDialog(QDialog):
                     f"오류: {hotkey_error}"
                 )
         else:
-            self.db.set_setting("mini_window_enabled", mini_enabled)
+            if not self._save_and_verify_setting("mini_window_enabled", mini_enabled):
+                self._show_setting_save_error("mini_window_enabled")
+                return
 
         if new_max_history < previous_max_history and hasattr(self.db, "cleanup"):
             try:

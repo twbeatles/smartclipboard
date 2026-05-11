@@ -279,6 +279,7 @@ class HistoryOpsMixin(DBRuntimeMixin):
                         pinned,
                         pin_order,
                         use_count,
+                        url_title,
                         deleted_at,
                         expires_at
                     )
@@ -295,6 +296,7 @@ class HistoryOpsMixin(DBRuntimeMixin):
                         COALESCE(pinned, 0),
                         COALESCE(pin_order, 0),
                         COALESCE(use_count, 0),
+                        COALESCE(url_title, ''),
                         ?,
                         ?
                     FROM history
@@ -571,6 +573,7 @@ class HistoryOpsMixin(DBRuntimeMixin):
             "pin_order",
             "use_count",
             "timestamp",
+            "url_title",
         }
         updates = {k: v for k, v in metadata.items() if k in allowed}
         if not updates:
@@ -581,6 +584,80 @@ class HistoryOpsMixin(DBRuntimeMixin):
         params.append(item_id)
         cursor.execute(f"UPDATE history SET {cols} WHERE id = ?", params)
         return cursor.rowcount == 1
+
+    def replace_text_item_or_merge(self, item_id: int, content: str, type_tag: str) -> int | bool:
+        """Replace a text history row, merging into an existing duplicate when needed."""
+        if not content:
+            return False
+
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT tags, note, bookmark, collection_id, pinned, pin_order, use_count, timestamp, url_title
+                    FROM history
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    (item_id,),
+                )
+                current_row = cursor.fetchone()
+                if current_row is None:
+                    return False
+
+                cursor.execute(
+                    """
+                    SELECT id, tags, note, bookmark, collection_id, pinned, pin_order, use_count, timestamp, url_title
+                    FROM history
+                    WHERE id != ? AND content = ? AND type NOT IN ('IMAGE', 'FILE')
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (item_id, content),
+                )
+                existing_row = cursor.fetchone()
+                if existing_row:
+                    target_id = int(existing_row[0])
+                    synthetic_deleted_row = (
+                        content,
+                        None,
+                        type_tag,
+                        current_row[7],
+                        current_row[0],
+                        current_row[1],
+                        current_row[2],
+                        current_row[3],
+                        current_row[4],
+                        current_row[5],
+                        current_row[6],
+                        current_row[8],
+                    )
+                    metadata = self._build_merged_restore_metadata_locked(
+                        cursor,
+                        target_id,
+                        existing_row[1:],
+                        synthetic_deleted_row,
+                    )
+                    self._set_item_metadata_locked(cursor, target_id, **metadata)
+                    cursor.execute("DELETE FROM history WHERE id = ?", (item_id,))
+                    self.conn.commit()
+                    return target_id
+
+                cursor.execute(
+                    """
+                    UPDATE history
+                    SET content = ?, image_data = NULL, type = ?, file_path = '', file_signature = '', url_title = ''
+                    WHERE id = ?
+                    """,
+                    (content, type_tag, item_id),
+                )
+                self.conn.commit()
+                return item_id if cursor.rowcount == 1 else False
+            except sqlite3.Error as e:
+                logger.error(f"Text Replace Merge Error: {e}")
+                self.conn.rollback()
+                return False
 
     def add_temp_item(self, content, image_data, type_tag, minutes=30):
         """임시 항목 추가 (N분 후 자동 만료)"""

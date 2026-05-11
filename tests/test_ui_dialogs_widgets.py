@@ -26,6 +26,7 @@ from smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops import (
     on_clipboard_change_impl,
     process_actions_impl,
     process_clipboard_impl,
+    process_text_clipboard_impl,
 )
 from smartclipboard_app.ui.mainwindow_parts.status_lifecycle_ops import quit_app_impl, run_periodic_cleanup_impl
 from smartclipboard_app.ui.dialogs.snippets import SnippetDialog, SnippetManagerDialog, validate_snippet_shortcut
@@ -45,15 +46,32 @@ class _FakeSettingsDB:
     def get_setting(self, key, default=None):
         return self.values.get(key, default)
 
-    def set_setting(self, key, value):
+    def set_setting(self, key, value) -> bool:
         self.saved[key] = value
         self.values[key] = value
+        return True
 
     def cleanup(self):
         self.cleanup_calls += 1
 
     def _get_max_history(self):
         return int(self.values.get("max_history", 100))
+
+
+class _FailingSettingsDB(_FakeSettingsDB):
+    def __init__(self, values=None, fail_key: str | None = "theme", mismatch_key: str | None = None):
+        super().__init__(values)
+        self.fail_key = fail_key
+        self.mismatch_key = mismatch_key
+
+    def set_setting(self, key, value):
+        if key == self.fail_key:
+            return False
+        if key == self.mismatch_key:
+            self.saved[key] = value
+            return True
+        super().set_setting(key, value)
+        return True
 
 
 class _FakeImportExportManager:
@@ -353,6 +371,32 @@ class _FakeHotkeyWindow:
         self._last_hotkey_error = ""
 
 
+class _FakeStartupTray:
+    def __init__(self):
+        self.messages = []
+
+    def showMessage(self, title, message, icon, duration):
+        self.messages.append((title, message, icon, duration))
+
+
+class _FakeStartupHotkeyWindow:
+    def __init__(self):
+        self._last_hotkey_error = "hotkey collision"
+        self.register_calls = 0
+        self.status_bar = _FakeStatusBar()
+        self.tray_icon = _FakeStartupTray()
+
+    def register_hotkeys(self):
+        self.register_calls += 1
+        return False
+
+    def notify_hotkey_registration_failure(self):
+        return legacy_main_src.MainWindow.notify_hotkey_registration_failure(cast(Any, self))
+
+    def statusBar(self):
+        return self.status_bar
+
+
 class _FakeSettingsParent(QWidget):
     def __init__(self):
         super().__init__()
@@ -527,9 +571,67 @@ class _FakeRuntimeClipboard:
         return self._mime_data
 
 
+class _FakeTextMimeData:
+    def __init__(self, text):
+        self._text = text
+
+    def text(self):
+        return self._text
+
+
+class _FakeStatusBar:
+    def __init__(self):
+        self.messages = []
+
+    def showMessage(self, message, duration):
+        self.messages.append((message, duration))
+
+
+class _FakeTextCaptureDB:
+    def __init__(self):
+        self.added = []
+
+    def add_item(self, content, image_data, type_tag):
+        self.added.append((content, image_data, type_tag))
+        return 101
+
+
+class _FakeTextCaptureWindow:
+    def __init__(self, max_bytes=1024 * 1024):
+        self.max_text_clipboard_bytes = max_bytes
+        self.db = _FakeTextCaptureDB()
+        self.status_bar = _FakeStatusBar()
+        self.action_calls = []
+        self.load_calls = 0
+        self.status_updates = 0
+        self.is_data_dirty = False
+
+    def apply_copy_rules(self, text):
+        return text
+
+    def analyze_text(self, _text):
+        return "TEXT"
+
+    def _process_actions(self, text, item_id):
+        self.action_calls.append((text, item_id))
+
+    def isVisible(self):
+        return True
+
+    def load_data(self):
+        self.load_calls += 1
+
+    def update_status_bar(self):
+        self.status_updates += 1
+
+    def statusBar(self):
+        return self.status_bar
+
+
 class _FakeClipboardRuntimeWindow:
     def __init__(self, mime_data):
         self.is_monitoring_paused = False
+        self.is_privacy_mode = False
         self.clipboard = _FakeRuntimeClipboard(mime_data)
         self.image_calls = 0
         self.text_calls = 0
@@ -1064,6 +1166,33 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_settings_dialog_stays_open_when_setting_write_fails(self):
+        db = _FailingSettingsDB({"mini_window_enabled": "true", "log_level": "INFO"}, fail_key="theme")
+        dialog = SettingsDialog(None, db, current_theme="dark", themes=FALLBACK_THEMES, max_history=100)
+        try:
+            with mock.patch.object(QMessageBox, "critical") as critical_mock:
+                dialog.save_settings()
+            self.assertTrue(critical_mock.called)
+            self.assertFalse(dialog.result())
+        finally:
+            dialog.close()
+
+    def test_settings_dialog_stays_open_when_setting_readback_mismatches(self):
+        db = _FailingSettingsDB(
+            {"mini_window_enabled": "true", "log_level": "INFO"},
+            fail_key=None,
+            mismatch_key="max_history",
+        )
+        dialog = SettingsDialog(None, db, current_theme="dark", themes=FALLBACK_THEMES, max_history=100)
+        try:
+            dialog.max_history_spin.setValue(222)
+            with mock.patch.object(QMessageBox, "critical") as critical_mock:
+                dialog.save_settings()
+            self.assertTrue(critical_mock.called)
+            self.assertFalse(dialog.result())
+        finally:
+            dialog.close()
+
     def test_settings_dialog_rolls_back_only_mini_window_on_hotkey_failure(self):
         db = _FakeSettingsDB({"mini_window_enabled": "false", "log_level": "INFO"})
         parent = _FakeSettingsParent()
@@ -1472,6 +1601,32 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertEqual(window.image_calls, 1)
         self.assertEqual(window.text_calls, 0)
 
+    def test_process_clipboard_skips_scheduled_work_when_privacy_enabled(self):
+        window = _FakeClipboardRuntimeWindow(_FakeMimeData(has_urls=True, has_image=True, has_text=True))
+        window.is_privacy_mode = True
+
+        with mock.patch(
+            "smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops.process_file_clipboard_impl",
+            return_value=True,
+        ) as file_mock:
+            process_clipboard_impl(window, mock.Mock())
+
+        file_mock.assert_not_called()
+        self.assertEqual(window.image_calls, 0)
+        self.assertEqual(window.text_calls, 0)
+
+    def test_process_text_clipboard_skips_oversized_text_and_reports(self):
+        window = _FakeTextCaptureWindow(max_bytes=8)
+        mime_data = _FakeTextMimeData("0123456789")
+
+        with mock.patch("smartclipboard_app.features.clipboard.pipeline.ToastNotification.show_toast") as toast_mock:
+            process_text_clipboard_impl(window, mime_data, mock.Mock())
+
+        self.assertEqual(window.db.added, [])
+        self.assertEqual(window.action_calls, [])
+        self.assertIn("텍스트가 너무 큽니다", window.status_bar.messages[0][0])
+        self.assertTrue(toast_mock.called)
+
     def test_process_actions_impl_updates_history_and_clipboard_for_replace_text(self):
         with _workspace_tempdir() as tmpdir:
             db = ClipboardDB(
@@ -1491,6 +1646,59 @@ class UiDialogsWidgetsTests(unittest.TestCase):
 
                 self.assertEqual(db.get_content(item_id), ("010-1234-5678", None, "TEXT"))
                 self.assertEqual(window.clipboard.text_value, "010-1234-5678")
+                self.assertTrue(window.is_internal_copy)
+            finally:
+                db.close()
+
+    def test_process_actions_impl_merges_replace_text_into_existing_duplicate(self):
+        with _workspace_tempdir() as tmpdir:
+            db = ClipboardDB(
+                db_file=os.path.join(tmpdir, "clipboard_history_v6.db"),
+                app_dir=tmpdir,
+            )
+            try:
+                active_id = db.add_item("already-normalized", None, "TEXT")
+                self.assertTrue(active_id)
+                db.set_item_tags(active_id, "active")
+                source_id = db.add_item("needs normalization", None, "TEXT")
+                self.assertTrue(source_id)
+                db.set_item_tags(source_id, "source")
+                db.set_note(source_id, "source note")
+                db.increment_use_count(source_id)
+
+                window = _FakeActionProcessWindow(
+                    db,
+                    [
+                        (
+                            "normalize",
+                            {
+                                "type": "replace_text",
+                                "text": "already-normalized",
+                                "formatted": "already-normalized",
+                            },
+                        ),
+                    ],
+                )
+
+                process_actions_impl(window, "needs normalization", source_id, mock.Mock(), mock.Mock())
+
+                with db.lock:
+                    cursor = db.conn.cursor()
+                    cursor.execute(
+                        "SELECT id, tags, note, use_count FROM history WHERE content = ?",
+                        ("already-normalized",),
+                    )
+                    rows = cursor.fetchall()
+                    cursor.execute("SELECT 1 FROM history WHERE id = ?", (source_id,))
+                    source_row = cursor.fetchone()
+
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0][0], active_id)
+                self.assertEqual(rows[0][1], "active, source")
+                self.assertEqual(rows[0][2], "source note")
+                self.assertEqual(rows[0][3], 1)
+                self.assertIsNone(source_row)
+                self.assertEqual(window.clipboard.text_value, "already-normalized")
                 self.assertTrue(window.is_internal_copy)
             finally:
                 db.close()
@@ -1613,6 +1821,37 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertIsNone(window._clipboard_debounce_timer)
         self.assertFalse(window.is_internal_copy)
         self.assertEqual(_FakeDebounceTimer.instances, [])
+
+    def test_enabling_privacy_mode_cancels_pending_debounce_timer(self):
+        old_timer = _FakeDebounceTimer(parent=None)
+        window = mock.Mock()
+        window.is_privacy_mode = False
+        window._clipboard_debounce_timer = old_timer
+        window.action_privacy = mock.Mock()
+        window.tray_privacy_action = mock.Mock()
+        window.update_status_bar = mock.Mock()
+
+        with mock.patch.object(legacy_main_src.ToastNotification, "show_toast"):
+            legacy_main_src.MainWindow.toggle_privacy_mode(cast(Any, window))
+
+        self.assertTrue(window.is_privacy_mode)
+        self.assertTrue(old_timer.stopped)
+        self.assertTrue(old_timer.deleted)
+        self.assertIsNone(window._clipboard_debounce_timer)
+        window.action_privacy.setChecked.assert_called_once_with(True)
+        window.tray_privacy_action.setChecked.assert_called_once_with(True)
+
+    def test_startup_hotkey_failure_emits_visible_notifications(self):
+        window = _FakeStartupHotkeyWindow()
+
+        with mock.patch.object(legacy_main_src.ToastNotification, "show_toast") as toast_mock:
+            ok = legacy_main_src.MainWindow.register_hotkeys_at_startup(cast(Any, window))
+
+        self.assertFalse(ok)
+        self.assertEqual(window.register_calls, 1)
+        self.assertIn("hotkey collision", window.status_bar.messages[0][0])
+        self.assertEqual(len(window.tray_icon.messages), 1)
+        self.assertTrue(toast_mock.called)
 
     def test_secure_vault_copy_button_uses_latest_encrypted_payload_after_password_change(self):
         parent = _FakeMiniParent()
@@ -1911,6 +2150,47 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertEqual(current_action_manager.shutdown_calls, 0)
         backup_mock.assert_not_called()
         self.assertTrue(critical_mock.called)
+
+    def test_restore_data_allows_minimal_database_only_after_warning(self):
+        current_db = _FakeRestoreDB(db_file="D:/runtime/custom.db", app_dir="D:/runtime")
+        current_action_manager = _FakeRestoreActionManager()
+        window = mock.Mock()
+        window.db = current_db
+        window.action_manager = current_action_manager
+        window.on_action_completed = object()
+
+        with mock.patch.object(
+            legacy_main_src.QMessageBox,
+            "warning",
+            side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Yes],
+        ) as warning_mock, mock.patch.object(
+            legacy_main_src.QFileDialog,
+            "getOpenFileName",
+            return_value=("minimal.db", "SQLite DB Files (*.db)"),
+        ), mock.patch.object(
+            legacy_main_src,
+            "validate_restore_database",
+            side_effect=[(False, "missing required table: snippets"), (True, None)],
+        ) as validate_mock, mock.patch.object(
+            legacy_main_src,
+            "create_pre_restore_backup",
+            return_value="D:/runtime/backups/pre_restore.db",
+        ), mock.patch.object(
+            legacy_main_src,
+            "replace_database_from_backup",
+        ) as replace_mock, mock.patch.object(
+            legacy_main_src.QMessageBox,
+            "information",
+        ):
+            legacy_main_src.MainWindow.restore_data(window)
+
+        self.assertEqual(validate_mock.call_args_list[0].kwargs["mode"], "full")
+        self.assertEqual(validate_mock.call_args_list[1].kwargs["mode"], "minimal")
+        self.assertEqual(warning_mock.call_count, 2)
+        self.assertTrue(current_db.closed)
+        self.assertEqual(current_action_manager.shutdown_calls, 1)
+        replace_mock.assert_called_once_with("minimal.db", "D:/runtime/custom.db")
+        window.quit_app.assert_called_once()
 
 
 if __name__ == "__main__":

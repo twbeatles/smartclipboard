@@ -46,13 +46,15 @@
 - 보안 보관함 복사 버튼은 비밀번호 변경 직후에도 최신 DB row를 다시 읽어 복호화해야 합니다.
 - Windows 테스트 임시 경로는 repo-local `.tmp-unittest/`를 사용합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
-- 2026-04-27 기준 spec 추가 자산은 없으며, `smartclipboard_core.app_paths`, DB typing helper, import/export hardening 모듈은 기존 `collect_submodules` 규칙으로 포함됩니다.
+- 2026-05-11 기준 privacy debounce, `deleted_history.url_title`, action writeback merge, restore full/minimal 검증, 핫키 실패 알림, 설정 write/read-back, 텍스트 1MB 제한은 기존 `collect_submodules` 규칙 안에 있으며 spec 추가 자산은 없습니다.
+- 텍스트 clipboard는 기본 1MB 초과 시 저장하지 않고 status/toast로 사용자에게 알립니다. 이미지 5MB 제한은 유지합니다.
+- DB 복원은 full 검증을 우선하고, legacy/minimal 백업은 기능 데이터 누락 가능성을 경고한 뒤에만 진행합니다. replace 전후 target DB의 `-wal`, `-shm` sidecar를 정리합니다.
+- JSON migration export/import는 `url_title`을 포함하며, CSV/Markdown export 정책은 기존 범위를 유지합니다.
 
 ## 검증 커맨드
 
 ```powershell
-python scripts/preflight_local.py
-pyright
+python scripts/preflight_local.py --with-pyright
 ```
 
 - `pyright`는 루트 `pyrightconfig.json` 기준 repo-wide 0 errors를 유지합니다.
@@ -119,7 +121,7 @@ pyinstaller --clean smartclipboard.spec
 - `FILE` duplicate detection now depends on `history.file_signature`; keep path canonicalization rules aligned across insert/update/restore code paths.
 - Vault clipboard plaintext is tracked only in-process via an armed state and must be conditionally cleared after 30 seconds and again on shutdown if still present.
 - `mini_window_enabled` save failures should roll back only that setting and surface `_last_hotkey_error` to the user.
-- For CI-equivalent dependency verification, run `python scripts/preflight_local.py --strict-optional-deps`.
+- For CI-equivalent dependency verification, run `python scripts/preflight_local.py --strict-optional-deps --with-pyright`.
 - Search queries should preserve DB/FTS relevance order by default, and only apply a client-side sort when the user has explicitly overridden the header sort.
 - If JSON import creates collections, refresh `refresh_collection_filter_options()` before reloading the table so the top filter stays in sync.
 - Empty search/empty-history paths should still call `update_status_bar(0)` so stale item counts are cleared.

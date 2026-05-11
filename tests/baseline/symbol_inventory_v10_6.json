@@ -837,6 +837,20 @@
           }
         },
         {
+          "name": "notify_hotkey_registration_failure",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
           "name": "on_action_completed",
           "signature": {
             "posonly": [],
@@ -1067,6 +1081,20 @@
             "kwonly": [],
             "kwarg": null,
             "defaults_count": 2,
+            "kw_defaults_count": 0
+          }
+        },
+        {
+          "name": "register_hotkeys_at_startup",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
             "kw_defaults_count": 0
           }
         },

@@ -130,13 +130,13 @@ pyinstaller --clean smartclipboard.spec
 ## ✅ 로컬 프리플라이트
 
 ```powershell
-python scripts/preflight_local.py
+python scripts/preflight_local.py --with-pyright
 ```
 
-정적 분석은 루트 기준으로 별도 실행합니다:
+CI와 같은 optional dependency 강도로 확인하려면:
 
 ```powershell
-pyright
+python scripts/preflight_local.py --strict-optional-deps --with-pyright
 ```
 
 ---
@@ -381,7 +381,7 @@ MIT License
 
 ## 2026-04-12 Note
 
-- 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
+- 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright` 입니다.
 - import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
 - payload/spec 동기화 기준은 payload size/SHA-256 검증을 포함하는 `legacy_main_payload.marshal` + `legacy_main_payload.manifest.json` 세트를 루트 `README.md` 기준으로 관리합니다.
 
@@ -401,4 +401,11 @@ MIT License
 ## 2026-04-27 Functional Implementation Review
 
 - 최신 기준은 클립보드 debounce race 수정, DB 복원 검증/atomic replace, FTS backfill, JSON/CSV import 정규화, URL title cache TTL/LRU, payload SHA-256 검증, app data resolver 통합, repo-wide `pyright` 0 errors를 포함합니다.
-- 이 레거시 문서는 보관본이며 자세한 구현 상태와 검증 결과는 루트 `README.md`, `claude.md`, `FUNCTIONAL_IMPLEMENTATION_REVIEW.md`를 따릅니다.
+- 이 레거시 문서는 보관본이며 자세한 구현 상태와 검증 결과는 루트 `README.md`, `claude.md`, `FUNCTIONAL_IMPLEMENTATION_AUDIT_2026-05-11.md`를 따릅니다.
+
+## 2026-05-11 Functional Hardening
+
+- privacy debounce 예약분 취소, process 시작 시 privacy 재확인, 텍스트 clipboard 1MB 제한, startup hotkey 실패 알림, 설정 저장 write/read-back 검증을 최신 기준으로 둡니다.
+- `deleted_history.url_title` schema/migration과 JSON migration round-trip을 추가했고, action writeback duplicate merge는 restore metadata merge와 같은 보존 규칙을 사용합니다.
+- restore 검증은 full/minimal 모드로 분리되며, legacy/minimal DB는 기능 데이터 누락 경고 후에만 복원합니다.
+- PyInstaller hidden import/datas 증설은 필요 없고, frozen package smoke는 수동 `package-smoke` workflow에서 확인합니다.

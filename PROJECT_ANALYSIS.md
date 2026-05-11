@@ -1,6 +1,6 @@
 # SmartClipboard Pro — 프로젝트 구조 분석
 
-> **기준일:** 2026-04-27
+> **기준일:** 2026-05-11
 > **버전:** v10.6
 > **목적:** 신규 기능 추가를 위한 코드베이스 심층 분석
 
@@ -630,7 +630,7 @@ pyright
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 
 # 전체 사전검증
-python scripts/preflight_local.py
+python scripts/preflight_local.py --with-pyright
 ```
 
 ---
@@ -681,7 +681,7 @@ QApplication (bootstrap.py)
 ### 로컬 사전검증 (권장)
 
 ```powershell
-python scripts/preflight_local.py
+python scripts/preflight_local.py --with-pyright
 ```
 
 내부 동작:
@@ -738,7 +738,8 @@ pyinstaller --clean smartclipboard.spec
 - 파일: `.github/workflows/ci.yml`
 - 환경: `windows-latest`
 - 매트릭스: Python 3.10 / 3.11 / 3.12 / 3.13
-- preflight 단계: `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps`
+- preflight 단계: `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright`
+- PyInstaller/EXE startup smoke는 일반 CI가 아니라 수동 workflow `.github/workflows/package-smoke.yml`에서 실행한다.
 
 ## 12. 2026-04-12 Stabilization Delta
 
@@ -770,7 +771,7 @@ pyinstaller --clean smartclipboard.spec
 - `smartclipboard_core/db_parts/*.py`는 facade이고, 분리된 구현은 `db_parts/search/`, `automation/`, `catalog/`, `retention/` 하위 패키지로 이동했다.
 - `scripts/preflight_local.py`와 `scripts/refactor_signal_snapshot.py`는 새 feature/core 하위 패키지를 재귀적으로 포함하도록 갱신되어야 하며, `smartclipboard.spec`도 `smartclipboard_app.features`/`smartclipboard_core.automation` hidden import 수집을 포함한다.
 
-*이 문서는 2026-03-21 기준 v10.6 코드베이스를 기반으로 작성되었고, 2026-04-27 기능 구현 리뷰 반영 상태까지 갱신했습니다.*
+*이 문서는 2026-03-21 기준 v10.6 코드베이스를 기반으로 작성되었고, 2026-05-11 기능 안정화 및 문서/spec/ignore 정합성 반영 상태까지 갱신했습니다.*
 
 ## 14. 2026-04-16 기능 후속 정합성 메모
 
@@ -792,3 +793,14 @@ pyinstaller --clean smartclipboard.spec
 - source/frozen app data directory resolver는 `smartclipboard_core.app_paths`로 통합됐다.
 - `max_history` 감소와 자동 cleanup은 고정되지 않은 오래된 항목을 휴지통 없이 영구 삭제하므로 UI/문서 경고를 유지한다.
 - `pyright`는 repo-wide 0 errors 기준이며, `smartclipboard.spec` 추가 datas/hidden import 증설은 필요 없다.
+
+## 16. 2026-05-11 기능 안정화 반영
+
+- 프라이버시 모드 활성화 시 예약된 `_clipboard_debounce_timer`를 즉시 취소하고, `process_clipboard_impl()` 진입부에서도 privacy 상태를 재확인한다.
+- 텍스트 clipboard는 기본 1MB 초과 시 저장하지 않고 status/toast로 안내하며, 이미지 5MB 제한은 유지한다.
+- `deleted_history.url_title` migration을 추가하고 soft delete, 전체 삭제, restore, duplicate restore merge, JSON migration export/import에서 `url_title`을 보존한다.
+- 텍스트 치환 action writeback 결과가 기존 history row와 같아지는 경우 duplicate를 남기지 않고 기존 row로 merge한다.
+- restore 검증은 full/minimal 모드로 분리하고, UI restore는 full 우선 검증과 legacy/minimal 경고 동의 경로를 사용한다. DB replace 전후에는 target DB의 `-wal`, `-shm` sidecar를 정리한다.
+- 시작 시 글로벌 핫키 등록 실패는 status bar/tray/toast 중 가능한 경로로 노출하고, 설정 저장은 `set_setting()` 반환값과 read-back을 확인한다.
+- 일반 CI는 `scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright`를 실행하고, PyInstaller/EXE smoke는 수동 `package-smoke` workflow로 분리한다.
+- `.gitignore`는 `.db`, `.sqlite`, `.sqlite3` 계열 user DB와 journal/WAL/SHM sidecar, 로그, build/dist, repo-local `.tmp-unittest/`를 제외한다.

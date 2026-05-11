@@ -31,6 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          python -m pip install pyright
 
       - name: Build legacy payload and smoke import
         run: |
@@ -38,4 +39,4 @@ jobs:
 
       - name: Run preflight checks
         run: |
-          python scripts/preflight_local.py --skip-payload-build --strict-optional-deps
+          python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright

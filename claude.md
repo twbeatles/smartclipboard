@@ -53,7 +53,7 @@
 - Windows 테스트 임시 경로는 시스템 temp 대신 repo-local `.tmp-unittest/`를 사용합니다.
 - 핫키 저장 경로는 등록 실패 시 이전 글로벌 핫키 상태로 롤백되어야 합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지하고, payload에서 직접 참조하는 `smartclipboard_app.ui.dialogs.collections`도 명시적으로 포함합니다.
-- 2026-04-27 기준 `smartclipboard.spec` 추가 자산은 없으며, `smartclipboard_core.app_paths`, DB typing helper, import/export hardening 모듈은 기존 `collect_submodules` 규칙으로 포함됩니다.
+- 2026-05-11 기준 privacy debounce, `deleted_history.url_title`, action writeback merge, restore full/minimal 검증, 핫키 실패 알림, 설정 write/read-back, 텍스트 1MB 제한은 기존 `collect_submodules` 규칙 안에 있으며 `smartclipboard.spec` 추가 자산은 없습니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
   - `scripts/refactor_signal_snapshot.py`
@@ -68,10 +68,18 @@
 - `ClipboardActionManager.fetch_title`은 URL dedupe/cache와 전용 `QThreadPool(maxThreadCount=4)` 위에서 동작하며, stale URL 결과는 현재 row URL을 다시 확인한 뒤에만 저장합니다.
 - `ClipboardActionManager`의 동기 텍스트 액션(`format_phone`/`format_email`/`transform`)은 순차적으로 working text를 갱신해야 하며, `fetch_title`은 그 최종 텍스트를 기준으로 URL을 다시 추출해야 합니다.
 - 텍스트 치환 액션 결과는 UI 토스트만 띄우고 끝내지 말고, 같은 history row와 실제 clipboard에도 다시 기록해 저장 상태와 실제 clipboard를 맞춰야 합니다.
+- 텍스트 치환 결과가 기존 history row와 같아지는 경우에는 새 duplicate를 남기지 않고 기존 row로 merge하며, tags/note/bookmark/collection/pin/use_count/url_title 보존 규칙은 `restore_item()` merge와 맞춰야 합니다.
 - `FILE` duplicate detection은 `history.file_signature` lookup을 사용하므로 path canonicalization 규칙을 깨면 안 됩니다.
 - 보안 보관함 복호화 텍스트는 armed clipboard state로 추적되며 30초 조건부 clear와 종료 시 즉시 clear를 모두 유지합니다.
 - `mini_window_enabled` 변경 후 hotkey 재등록이 실패하면 그 설정만 rollback 하고 실제 `_last_hotkey_error`를 사용자 경고로 노출합니다.
 - `smartclipboard.spec`은 이번 안정화에서도 추가 hidden import/datas 증설 없이 유지 가능합니다.
+- 프라이버시 모드가 켜지면 예약된 `_clipboard_debounce_timer`를 즉시 중지/해제하고, `process_clipboard()` 시작 지점에서도 privacy 상태를 재확인해야 합니다.
+- 텍스트 clipboard는 기본 1MB 초과 시 저장하지 않고 status/toast로 알리며, 이미지 5MB 제한은 유지합니다.
+- 앱 시작 시 글로벌 핫키 등록 실패는 status bar, tray message, toast 중 가능한 사용자-visible 경로로 노출해야 합니다.
+- 설정 다이얼로그 저장은 `set_setting()` 반환값과 read-back을 확인하고 실패 시 닫지 않아야 합니다.
+- DB 복원은 UI 경로에서 full 검증을 우선 사용하고, legacy/minimal DB는 기능 데이터 일부 누락 경고와 사용자 동의가 있어야 진행합니다.
+- DB replace 전후에는 target DB의 `-wal`, `-shm` sidecar를 정리해야 합니다.
+- JSON migration export/import는 `url_title`을 포함하고, CSV/Markdown export 정책은 기존 범위를 유지합니다.
 - 검색 query가 있을 때는 DB/FTS relevance 순서를 기본으로 유지하고, 사용자가 명시적으로 헤더 정렬을 바꿨을 때만 client-side sort override를 적용합니다.
 - JSON import가 컬렉션을 추가했다면 `load_data()` 전에 `refresh_collection_filter_options()`를 먼저 호출해야 상단 필터가 즉시 최신 상태를 반영합니다.
 - 빈 검색 결과/빈 히스토리 경로에서도 `update_status_bar(0)`이 호출되어 이전 카운트가 남지 않아야 합니다.
@@ -79,11 +87,10 @@
 ## 4. 필수 검증
 
 ```powershell
-python scripts/preflight_local.py
-pyright
+python scripts/preflight_local.py --with-pyright
 ```
 
-optional runtime dependency까지 CI와 같은 강도로 확인하려면 `python scripts/preflight_local.py --strict-optional-deps`를 추가 실행합니다.
+optional runtime dependency까지 CI와 같은 강도로 확인하려면 `python scripts/preflight_local.py --strict-optional-deps --with-pyright`를 추가 실행합니다.
 
 - `pyright`는 루트 `pyrightconfig.json` 기준 repo-wide 0 errors를 유지합니다.
 
@@ -105,6 +112,7 @@ python -m unittest discover -s tests -v
 - `tests/test_signal_snapshot.py` (MainWindow 분할 구조 시그널 스냅샷)
 - `tests/test_legacy_loader.py` (payload 실패 시 src 폴백/활성 구현 상수)
 - `tests/test_public_surfaces.py` (공개 API/시그니처 회귀)
+- `tests/test_core.py`와 `tests/test_ui_dialogs_widgets.py`에는 2026-05-11 기준 privacy debounce, `url_title` 보존, action duplicate merge, restore full/minimal 검증, 설정 저장 실패, startup hotkey 실패, 대용량 텍스트 clipboard 회귀가 포함됩니다.
 
 ## 5. 빌드
 
@@ -130,7 +138,8 @@ pyinstaller --clean smartclipboard.spec
 - Python 매트릭스: `3.10`, `3.11`, `3.12`, `3.13`
 - 단계:
   - `scripts/build_legacy_payload.py --smoke-import`
-  - `scripts/preflight_local.py --skip-payload-build --strict-optional-deps`
+  - `scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright`
+- PyInstaller/frozen smoke는 일반 CI가 아니라 수동 workflow `.github/workflows/package-smoke.yml`에서 실행합니다.
 
 ## 8. MainWindow 분할 리팩토링 작업 규칙 (2026-03-07)
 

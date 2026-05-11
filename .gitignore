@@ -33,8 +33,12 @@ Desktop.ini
 *.db-shm
 *.sqlite
 *.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 *.sqlite3
 *.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
 *.log
 *.log.*
 debug_startup_error.log

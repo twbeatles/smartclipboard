@@ -58,7 +58,7 @@ class TrashRetentionMixin(DBRuntimeMixin):
                 return None
             cursor.execute(
                 """
-                SELECT id, tags, note, bookmark, collection_id, pinned, pin_order, use_count, timestamp
+                SELECT id, tags, note, bookmark, collection_id, pinned, pin_order, use_count, timestamp, url_title
                 FROM history
                 WHERE type = 'FILE' AND file_signature = ?
                 ORDER BY timestamp DESC, id DESC
@@ -71,7 +71,7 @@ class TrashRetentionMixin(DBRuntimeMixin):
         if item_type != "IMAGE":
             cursor.execute(
                 """
-                SELECT id, tags, note, bookmark, collection_id, pinned, pin_order, use_count, timestamp
+                SELECT id, tags, note, bookmark, collection_id, pinned, pin_order, use_count, timestamp, url_title
                 FROM history
                 WHERE content = ? AND type NOT IN ('IMAGE', 'FILE')
                 ORDER BY timestamp DESC, id DESC
@@ -84,13 +84,24 @@ class TrashRetentionMixin(DBRuntimeMixin):
         return None
 
     def _build_merged_restore_metadata_locked(self, cursor, item_id: int, active_row, deleted_row) -> dict[str, int | str | None]:
-        active_tags, active_note, active_bookmark, active_collection_id, active_pinned, active_pin_order, active_use_count, _active_timestamp = active_row
+        (
+            active_tags,
+            active_note,
+            active_bookmark,
+            active_collection_id,
+            active_pinned,
+            active_pin_order,
+            active_use_count,
+            _active_timestamp,
+            active_url_title,
+        ) = active_row
         deleted_tags = deleted_row[4] or ""
         deleted_note = deleted_row[5] or ""
         deleted_bookmark = int(deleted_row[6] or 0)
         deleted_collection_id = deleted_row[7]
         deleted_pinned = int(deleted_row[8] or 0)
         deleted_use_count = int(deleted_row[10] or 0)
+        deleted_url_title = str(deleted_row[11] or "")
 
         merged_pinned = 1 if active_pinned or deleted_pinned else 0
         if active_pinned:
@@ -109,6 +120,7 @@ class TrashRetentionMixin(DBRuntimeMixin):
             "pinned": merged_pinned,
             "pin_order": merged_pin_order,
             "use_count": int(active_use_count or 0) + deleted_use_count,
+            "url_title": str(active_url_title or "") if str(active_url_title or "").strip() else deleted_url_title,
         }
 
     def _build_insert_restore_metadata_locked(self, cursor, item_id: int, deleted_row) -> dict[str, int | str | None]:
@@ -121,6 +133,7 @@ class TrashRetentionMixin(DBRuntimeMixin):
             "pinned": deleted_pinned,
             "pin_order": self._next_pin_order_locked(cursor, exclude_item_id=item_id) if deleted_pinned else 0,
             "use_count": int(deleted_row[10] or 0),
+            "url_title": str(deleted_row[11] or ""),
         }
 
     def soft_delete(self, item_id):
@@ -128,7 +141,7 @@ class TrashRetentionMixin(DBRuntimeMixin):
             try:
                 cursor = self.conn.cursor()
                 cursor.execute(
-                    "SELECT content, image_data, type, timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count "
+                    "SELECT content, image_data, type, timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count, url_title "
                     "FROM history WHERE id = ?",
                     (item_id,),
                 )
@@ -138,8 +151,8 @@ class TrashRetentionMixin(DBRuntimeMixin):
                     expires_at = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
                     cursor.execute(
                         "INSERT INTO deleted_history "
-                        "(original_id, content, image_data, type, original_timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count, deleted_at, expires_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "(original_id, content, image_data, type, original_timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count, url_title, deleted_at, expires_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             item_id,
                             item[0],
@@ -153,6 +166,7 @@ class TrashRetentionMixin(DBRuntimeMixin):
                             item[8] or 0,
                             item[9] or 0,
                             item[10] or 0,
+                            item[11] or "",
                             deleted_at,
                             expires_at,
                         ),
@@ -170,7 +184,7 @@ class TrashRetentionMixin(DBRuntimeMixin):
             try:
                 cursor = self.conn.cursor()
                 cursor.execute(
-                    "SELECT content, image_data, type, original_timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count "
+                    "SELECT content, image_data, type, original_timestamp, tags, note, bookmark, collection_id, pinned, pin_order, use_count, url_title "
                     "FROM deleted_history WHERE id = ?",
                     (deleted_id,),
                 )

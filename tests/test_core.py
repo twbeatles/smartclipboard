@@ -9,6 +9,11 @@ from unittest import mock
 
 from PyQt6.QtWidgets import QApplication
 
+from smartclipboard_app.features.import_export.backup import (
+    inspect_restore_database,
+    replace_database_from_backup,
+    validate_restore_database,
+)
 from smartclipboard_app.managers.export_import import ExportImportManager
 from smartclipboard_app.managers.secure_vault import HAS_CRYPTO, SecureVaultManager
 from smartclipboard_core.actions import HAS_WEB, ClipboardActionManager, extract_first_url
@@ -338,6 +343,57 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertTrue(os.path.exists(target_file))
 
+    def test_restore_database_validation_separates_full_and_minimal_profiles(self):
+        minimal_path = os.path.join(self.tmpdir.name, "minimal-restore.db")
+        conn = sqlite3.connect(minimal_path)
+        try:
+            conn.execute(
+                "CREATE TABLE history (id INTEGER PRIMARY KEY, content TEXT, image_data BLOB, type TEXT, timestamp TEXT)"
+            )
+            conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertEqual(inspect_restore_database(minimal_path)[2], "minimal")
+        self.assertEqual(validate_restore_database(minimal_path, mode="minimal"), (True, None))
+        full_valid, full_error = validate_restore_database(minimal_path, mode="full")
+        self.assertFalse(full_valid)
+        self.assertIn("missing required table", str(full_error))
+
+        full_path = os.path.join(self.tmpdir.name, "full-restore.db")
+        full_db = ClipboardDB(db_file=full_path, app_dir=self.tmpdir.name)
+        full_db.close()
+        self.assertEqual(inspect_restore_database(full_path)[2], "full")
+        self.assertEqual(validate_restore_database(full_path, mode="full"), (True, None))
+
+    def test_replace_database_from_backup_removes_target_wal_sidecars(self):
+        source_path = os.path.join(self.tmpdir.name, "source.db")
+        target_path = os.path.join(self.tmpdir.name, "target.db")
+        for path, value in ((source_path, "source"), (target_path, "target")):
+            conn = sqlite3.connect(path)
+            try:
+                conn.execute("CREATE TABLE marker (value TEXT)")
+                conn.execute("INSERT INTO marker (value) VALUES (?)", (value,))
+                conn.commit()
+            finally:
+                conn.close()
+
+        for suffix in ("-wal", "-shm"):
+            with open(f"{target_path}{suffix}", "wb") as fh:
+                fh.write(b"stale")
+
+        replace_database_from_backup(source_path, target_path)
+
+        self.assertFalse(os.path.exists(f"{target_path}-wal"))
+        self.assertFalse(os.path.exists(f"{target_path}-shm"))
+        conn = sqlite3.connect(target_path)
+        try:
+            value = conn.execute("SELECT value FROM marker").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(value, "source")
+
     def test_missing_row_updates_return_false(self):
         self.assertFalse(self.db.set_item_metadata(999999, use_count=1))
         self.assertFalse(self.db.set_item_tags(999999, "tag"))
@@ -472,6 +528,7 @@ class CoreDatabaseTests(unittest.TestCase):
         item_id = self.db.add_item("meta-item", None, "TEXT")
         self.db.set_item_tags(item_id, "alpha, beta")
         self.db.set_note(item_id, "important note")
+        self.db.update_url_title(item_id, "Important URL title")
         self.db.toggle_bookmark(item_id)
         collection_id = self.db.add_collection("work")
         self.assertTrue(collection_id)
@@ -490,7 +547,7 @@ class CoreDatabaseTests(unittest.TestCase):
         with self.db.lock:
             cursor = self.db.conn.cursor()
             cursor.execute(
-                "SELECT tags, note, bookmark, collection_id, pinned, pin_order, use_count "
+                "SELECT tags, note, bookmark, collection_id, pinned, pin_order, use_count, url_title "
                 "FROM history WHERE content = ?",
                 ("meta-item",),
             )
@@ -504,6 +561,7 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertEqual(restored[4], 1)
         self.assertGreaterEqual(restored[5], 0)
         self.assertEqual(restored[6], 2)
+        self.assertEqual(restored[7], "Important URL title")
 
     def test_restore_item_clears_deleted_collection_reference(self):
         collection_id = self.db.add_collection("restore-target")
@@ -534,6 +592,7 @@ class CoreDatabaseTests(unittest.TestCase):
         deleted_item_id = self.db.add_item("same-text", None, "TEXT")
         self.db.set_item_tags(deleted_item_id, "alpha")
         self.db.set_note(deleted_item_id, "from trash")
+        self.db.update_url_title(deleted_item_id, "deleted title")
         self.db.toggle_bookmark(deleted_item_id)
         self.db.increment_use_count(deleted_item_id)
         self.db.increment_use_count(deleted_item_id)
@@ -550,7 +609,7 @@ class CoreDatabaseTests(unittest.TestCase):
         with self.db.lock:
             cursor = self.db.conn.cursor()
             cursor.execute(
-                "SELECT id, tags, note, bookmark, pinned, use_count FROM history WHERE content = ?",
+                "SELECT id, tags, note, bookmark, pinned, use_count, url_title FROM history WHERE content = ?",
                 ("same-text",),
             )
             rows = cursor.fetchall()
@@ -562,6 +621,7 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertEqual(rows[0][3], 1)
         self.assertEqual(rows[0][4], 1)
         self.assertEqual(rows[0][5], 3)
+        self.assertEqual(rows[0][6], "deleted title")
 
     def test_restore_item_merges_duplicate_file_without_creating_new_row(self):
         file_content = file_content_from_paths([os.path.join(self.tmpdir.name, "a.txt")])
@@ -742,6 +802,38 @@ class CoreDatabaseTests(unittest.TestCase):
             self.assertEqual(content, "[이미지 캡처]")
             self.assertEqual(blob, image_bytes)
             self.assertEqual(ptype, "IMAGE")
+        finally:
+            if dst_db is not None:
+                dst_db.close()
+            dst_tmp.cleanup()
+
+    def test_json_migration_round_trip_preserves_url_title(self):
+        item_id = self.db.add_item("https://example.com/title", None, "LINK")
+        self.assertTrue(item_id)
+        self.db.update_url_title(item_id, "Example Page Title")
+
+        export_path = os.path.join(self.tmpdir.name, "url-title-export.json")
+        exported = ExportImportManager(self.db).export_json(export_path, include_metadata=True)
+        self.assertEqual(exported, 1)
+
+        with open(export_path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        self.assertTrue(payload["migration_mode"])
+        self.assertEqual(payload["items"][0]["url_title"], "Example Page Title")
+
+        dst_tmp = _workspace_tempdir()
+        dst_db = None
+        try:
+            dst_db = ClipboardDB(
+                db_file=os.path.join(dst_tmp.name, "clipboard_history_v6.db"),
+                app_dir=dst_tmp.name,
+            )
+            self.assertEqual(ExportImportManager(dst_db).import_json(export_path), 1)
+            with dst_db.lock:
+                cursor = dst_db.conn.cursor()
+                cursor.execute("SELECT url_title FROM history WHERE content = ?", ("https://example.com/title",))
+                row = cursor.fetchone()
+            self.assertEqual(row[0], "Example Page Title")
         finally:
             if dst_db is not None:
                 dst_db.close()
@@ -945,6 +1037,7 @@ class CoreDatabaseTests(unittest.TestCase):
         self.db.toggle_pin(pinned_id)
         self.db.set_item_tags(trash_id, "alpha")
         self.db.set_note(trash_id, "keep meta")
+        self.db.update_url_title(trash_id, "bulk title")
         self.db.toggle_bookmark(trash_id)
         self.db.increment_use_count(trash_id)
 
@@ -960,12 +1053,12 @@ class CoreDatabaseTests(unittest.TestCase):
         with self.db.lock:
             cursor = self.db.conn.cursor()
             cursor.execute(
-                "SELECT original_id, tags, note, bookmark, pinned, use_count "
+                "SELECT original_id, tags, note, bookmark, pinned, use_count, url_title "
                 "FROM deleted_history WHERE id = ?",
                 (deleted_id,),
             )
             row = cursor.fetchone()
-        self.assertEqual(row, (trash_id, "alpha", "keep meta", 1, 0, 1))
+        self.assertEqual(row, (trash_id, "alpha", "keep meta", 1, 0, 1, "bulk title"))
 
     def test_import_json_reuses_existing_collection_names_across_reimports(self):
         source_collection_id = self.db.add_collection("work", "📁", "#123456")

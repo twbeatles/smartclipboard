@@ -176,6 +176,7 @@ class SearchSchemaMixin(DBRuntimeMixin):
                     pinned INTEGER DEFAULT 0,
                     pin_order INTEGER DEFAULT 0,
                     use_count INTEGER DEFAULT 0,
+                    url_title TEXT DEFAULT '',
                     deleted_at TEXT,
                     expires_at TEXT
                 )
@@ -190,6 +191,7 @@ class SearchSchemaMixin(DBRuntimeMixin):
                 "ALTER TABLE deleted_history ADD COLUMN pinned INTEGER DEFAULT 0",
                 "ALTER TABLE deleted_history ADD COLUMN pin_order INTEGER DEFAULT 0",
                 "ALTER TABLE deleted_history ADD COLUMN use_count INTEGER DEFAULT 0",
+                "ALTER TABLE deleted_history ADD COLUMN url_title TEXT DEFAULT ''",
             ):
                 try:
                     cursor.execute(col_sql)

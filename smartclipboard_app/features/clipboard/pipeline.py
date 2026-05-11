@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from smartclipboard_app.ui.clipboard_guard import extract_local_file_paths, mark_internal_copy
+from smartclipboard_app.ui.widgets.toast import ToastNotification
 from smartclipboard_core.automation.formatters import replacement_text_from_result
 from smartclipboard_core.file_paths import describe_file_paths, file_content_from_paths
+
+TEXT_CLIPBOARD_MAX_BYTES = 1 * 1024 * 1024
 
 
 def on_clipboard_change_impl(self, qtimer_cls):
@@ -24,7 +27,7 @@ def on_clipboard_change_impl(self, qtimer_cls):
 
 
 def process_clipboard_impl(self, logger):
-    if self.is_monitoring_paused:
+    if self.is_monitoring_paused or getattr(self, "is_privacy_mode", False):
         return
 
     try:
@@ -78,6 +81,21 @@ def process_text_clipboard_impl(self, mime_data, logger):
     try:
         raw_text = mime_data.text()
         if not raw_text:
+            return
+
+        max_text_size = int(getattr(self, "max_text_clipboard_bytes", TEXT_CLIPBOARD_MAX_BYTES))
+        raw_size = len(raw_text.encode("utf-8", errors="surrogatepass"))
+        if raw_size > max_text_size:
+            logger.warning("Text clipboard too large (%s bytes), skipping", raw_size)
+            message = "텍스트가 너무 큽니다(최대 1MB). 저장하지 않았습니다."
+            try:
+                self.statusBar().showMessage(message, 3000)
+            except Exception:
+                pass
+            try:
+                ToastNotification.show_toast(self, message, duration=2500, toast_type="warning")
+            except Exception:
+                pass
             return
 
         text = self.apply_copy_rules(raw_text)
@@ -136,6 +154,8 @@ def _update_text_item_after_actions(self, item_id, new_text, logger):
             cursor.execute("SELECT 1 FROM history WHERE id = ? LIMIT 1", (item_id,))
             if cursor.fetchone() is None:
                 return False
+            if hasattr(self.db, "replace_text_item_or_merge"):
+                return bool(self.db.replace_text_item_or_merge(item_id, normalized_text, item_type))
             cursor.execute(
                 "UPDATE history SET content = ?, image_data = NULL, type = ?, file_path = '', file_signature = '', url_title = '' "
                 "WHERE id = ?",

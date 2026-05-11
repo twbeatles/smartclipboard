@@ -24,6 +24,13 @@ class DBRuntimeMixin:
         @staticmethod
         def _collection_exists(cursor: Any, collection_id: int) -> bool: ...
         def _set_item_metadata_locked(self, cursor: Any, item_id: int, **metadata: Any) -> bool: ...
+        def _build_merged_restore_metadata_locked(
+            self,
+            cursor: Any,
+            item_id: int,
+            active_row: Any,
+            deleted_row: Any,
+        ) -> dict[str, int | str | None]: ...
         def _add_item_locked(
             self,
             cursor: Any,

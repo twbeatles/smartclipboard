@@ -60,13 +60,13 @@ python "클립모드 매니저.py"
 ## 테스트
 
 ```powershell
-python scripts/preflight_local.py
+python scripts/preflight_local.py --with-pyright
 ```
 
-정적 분석은 별도 실행:
+CI와 같은 optional dependency 강도로 확인하려면:
 
 ```powershell
-pyright
+python scripts/preflight_local.py --strict-optional-deps --with-pyright
 ```
 
 또는 단계별 실행:
@@ -111,10 +111,11 @@ pyinstaller --clean smartclipboard.spec
 - 2026-04-11 후속 반영으로 fetch_title 로컬/사설 URL 차단, `02`/`0505`/대표번호 전화 포맷 확장, FILE stale preview, 보안 보관함 Reset 복구, JSON 마이그레이션 문구 정리가 추가되었습니다.
 - 스니펫 `shortcut` 컬럼은 유지되지만 사용자 할당 UI/실행 경로는 아직 노출되지 않습니다.
 
-## 문서 정합성 기준 (2026-04-27)
+## 문서 정합성 기준 (2026-05-11)
 
 - 상세 변경 이력은 루트 `README.md`를 기준으로 관리합니다.
 - 개발 가이드는 `claude.md`, `.gemini/GEMINI.md`와 동일한 테스트/빌드 기준을 따릅니다.
+- 최신 감사 결과는 루트 `FUNCTIONAL_IMPLEMENTATION_AUDIT_2026-05-11.md`를 기준으로 확인합니다.
 
 ## Refactor Sync (2026-03-12)
 
@@ -123,10 +124,10 @@ pyinstaller --clean smartclipboard.spec
 - Local guard now compiles both helper folders via `scripts/preflight_local.py`.
 - Added API surface tests: `tests/test_public_surfaces.py` and `tests/baseline/clipboarddb_public_methods.txt`.
 - Packaging guard: `smartclipboard.spec` now explicitly includes `smartclipboard_core.db_parts` collection.
-- 2026-04-12 Note: 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps` 입니다.
+- 2026-05-11 Note: 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright` 입니다.
 - 2026-04-12 Note: import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
-- 2026-04-27 기준 spec 추가 자산은 없으며, payload manifest는 source hash뿐 아니라 payload size/SHA-256 검증을 포함합니다.
-- repo-wide `pyright`는 0 errors를 유지하며, 최신 기능 구현 리뷰 반영 내용은 루트 `README.md`와 `FUNCTIONAL_IMPLEMENTATION_REVIEW.md`를 기준으로 확인합니다.
+- 2026-05-11 기준 spec 추가 자산은 없으며, payload manifest는 source hash뿐 아니라 payload size/SHA-256 검증을 포함합니다.
+- repo-wide `pyright`는 0 errors를 유지하며, 최신 기능 구현 리뷰 반영 내용은 루트 `README.md`와 `FUNCTIONAL_IMPLEMENTATION_AUDIT_2026-05-11.md`를 기준으로 확인합니다.
 
 ## 2026-04-15 Structure Refactor
 
@@ -139,3 +140,10 @@ pyinstaller --clean smartclipboard.spec
 - 동기 텍스트 액션(`format_phone`, `format_email`, `transform`)은 변환 결과를 같은 history row와 clipboard에 다시 기록하고, `fetch_title`은 치환 후 최종 텍스트 기준으로 첫 URL을 추출합니다.
 - query가 있을 때 검색 결과는 relevance 순서를 기본 유지하고, 사용자가 헤더 정렬을 직접 바꾼 경우에만 client-side sort가 적용됩니다.
 - JSON import가 새 컬렉션을 만들면 상단 컬렉션 필터를 즉시 새로고침하며, 빈 검색 결과/빈 히스토리에서도 상태바는 `0`건으로 갱신됩니다.
+
+## 2026-05-11 Functional Hardening
+
+- privacy debounce 예약분 취소와 `process_clipboard()` 재확인으로 프라이버시 모드 전환 직후 민감 데이터 저장을 막습니다.
+- `deleted_history.url_title` schema/migration과 JSON migration round-trip을 추가했고, action writeback duplicate merge는 `restore_item()` 메타데이터 보존 규칙과 맞춥니다.
+- restore 검증은 full/minimal 모드로 분리되며, legacy/minimal DB는 기능 데이터 누락 경고 후에만 복원합니다.
+- 일반 CI는 `--with-pyright` preflight를 실행하고, PyInstaller/EXE smoke는 수동 `package-smoke` workflow에서 확인합니다.

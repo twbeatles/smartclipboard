@@ -121,7 +121,7 @@ class ExportImportManager:
         with self.db.lock:
             cursor = self.db.conn.cursor()
             cursor.execute(
-                "SELECT tags, note, bookmark, collection_id, pinned, pin_order, use_count, timestamp "
+                "SELECT tags, note, bookmark, collection_id, pinned, pin_order, use_count, timestamp, url_title "
                 "FROM history WHERE id = ?",
                 (item_id,),
             )

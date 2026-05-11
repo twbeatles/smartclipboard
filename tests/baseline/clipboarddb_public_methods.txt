@@ -48,6 +48,7 @@ is_duplicate_collection_name
 is_duplicate_copy_rule
 move_items_to_collection
 move_to_collection
+replace_text_item_or_merge
 restore_item
 search_items
 set_item_metadata

@@ -88,7 +88,7 @@ def _normalize_nonnegative_int_metadata(key: str, value: Any, report: dict[str, 
 
 def build_item_metadata(payload: dict[str, Any], collection_id_map: dict[int, int], collections_payload_present: bool, report: dict[str, Any]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
-    for key in ("tags", "note"):
+    for key in ("tags", "note", "url_title"):
         if key in payload and payload.get(key) is not None:
             metadata[key] = str(payload.get(key))
 
@@ -244,6 +244,7 @@ def build_json_export_payload(
                         "pin_order": int(meta[5] or 0),
                         "use_count": int(meta[6] or 0),
                         "timestamp": meta[7] or timestamp,
+                        "url_title": meta[8] or "",
                     }
                 )
         export_data["items"].append(payload)

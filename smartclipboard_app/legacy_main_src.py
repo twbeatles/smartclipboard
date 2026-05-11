@@ -623,7 +623,7 @@ class MainWindow(QMainWindow):
             self.mini_window = FloatingMiniWindow(self.db, self)
             
             # 핫키 설정 로드 및 등록 (안정성을 위해 지연 초기화)
-            QTimer.singleShot(1000, self.register_hotkeys)
+            QTimer.singleShot(1000, self.register_hotkeys_at_startup)
             
             self.update_always_on_top()
             
@@ -690,6 +690,38 @@ class MainWindow(QMainWindow):
             hotkeys_override=hotkeys_override,
             persist=persist,
         )
+
+    def notify_hotkey_registration_failure(self):
+        """Expose startup global hotkey registration failures through visible UI channels."""
+        detail = getattr(self, "_last_hotkey_error", "") or "unknown hotkey registration error"
+        message = "글로벌 핫키 등록에 실패했습니다. 설정에서 단축키를 변경하거나 충돌 중인 앱을 확인하세요."
+        full_message = f"{message}\n오류: {detail}"
+        try:
+            self.statusBar().showMessage(f"핫키 등록 실패: {detail}", 5000)
+        except Exception:
+            pass
+        try:
+            tray_icon = getattr(self, "tray_icon", None)
+            if tray_icon is not None:
+                tray_icon.showMessage(
+                    "SmartClipboard 핫키 오류",
+                    full_message,
+                    QSystemTrayIcon.MessageIcon.Warning,
+                    5000,
+                )
+        except Exception:
+            pass
+        try:
+            ToastNotification.show_toast(self, full_message, duration=5000, toast_type="warning")
+        except Exception:
+            pass
+
+    def register_hotkeys_at_startup(self):
+        """Register global hotkeys after startup and notify the user on failure."""
+        if self.register_hotkeys() is False:
+            self.notify_hotkey_registration_failure()
+            return False
+        return True
     
     def toggle_mini_window(self):
         """미니 창 토글 (외부에서 호출 시 시그널 사용)"""
@@ -780,6 +812,11 @@ class MainWindow(QMainWindow):
     def toggle_privacy_mode(self):
         """프라이버시 모드 토글"""
         self.is_privacy_mode = not self.is_privacy_mode
+
+        if self.is_privacy_mode and self._clipboard_debounce_timer is not None:
+            self._clipboard_debounce_timer.stop()
+            self._clipboard_debounce_timer.deleteLater()
+            self._clipboard_debounce_timer = None
         
         # UI 상태 동기화
         self.action_privacy.setChecked(self.is_privacy_mode)
@@ -825,10 +862,22 @@ class MainWindow(QMainWindow):
         if file_name:
             target_db_file = getattr(self.db, "db_file", DB_FILE)
             target_app_dir = getattr(self.db, "app_dir", APP_DIR)
-            valid_restore, restore_error = validate_restore_database(file_name)
+            valid_restore, restore_error = validate_restore_database(file_name, mode="full")
             if not valid_restore:
-                QMessageBox.critical(self, "복원 오류", f"복원 파일 검증에 실패했습니다:\n{restore_error}")
-                return
+                minimal_valid, minimal_error = validate_restore_database(file_name, mode="minimal")
+                if not minimal_valid:
+                    QMessageBox.critical(self, "복원 오류", f"복원 파일 검증에 실패했습니다:\n{minimal_error or restore_error}")
+                    return
+                legacy_reply = QMessageBox.warning(
+                    self,
+                    "복원 제한 경고",
+                    "이 백업은 legacy/minimal 형식입니다.\n"
+                    "히스토리와 기본 설정은 복원할 수 있지만 스니펫, 보안 보관함, 컬렉션, 휴지통, 자동화 액션 같은 기능 데이터가 일부 누락될 수 있습니다.\n"
+                    "계속 복원하시겠습니까?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if legacy_reply == QMessageBox.StandardButton.No:
+                    return
             db_was_closed = False
             try:
                 create_pre_restore_backup(self.db)
