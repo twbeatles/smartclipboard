@@ -6,9 +6,10 @@ import csv
 import datetime
 import json
 import logging
+import os
 from typing import Any
 
-from smartclipboard_core.file_paths import file_paths_from_content, normalize_local_file_paths
+from smartclipboard_core.file_paths import normalize_import_file_path
 
 from .backup import create_pre_import_backup
 from .csv_codec import export_csv_rows, import_csv_row_locked
@@ -87,16 +88,34 @@ class ExportImportManager:
         return parsed.date() >= date_from if parsed is not None else False
 
     @staticmethod
-    def _resolve_file_paths(payload: dict) -> list[str]:
+    def _resolve_file_paths(payload: dict, report: dict[str, Any] | None = None) -> list[str]:
         raw_paths = payload.get("file_paths")
         if isinstance(raw_paths, list):
-            return normalize_local_file_paths(raw_paths)
+            candidates = raw_paths
+        else:
+            single_path = payload.get("file_path")
+            if single_path:
+                candidates = [single_path]
+            else:
+                candidates = str(payload.get("content", "") or "").splitlines()
 
-        single_path = payload.get("file_path")
-        if single_path:
-            return normalize_local_file_paths([single_path])
+        normalized_paths: list[str] = []
+        seen: set[str] = set()
+        rejected_count = 0
+        for raw_path in candidates:
+            normalized = normalize_import_file_path(raw_path)
+            if not normalized:
+                rejected_count += 1
+                continue
+            dedupe_key = os.path.normcase(normalized)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            normalized_paths.append(normalized)
 
-        return file_paths_from_content(payload.get("content", ""))
+        if rejected_count and report is not None:
+            append_warning(report, "상대 경로 또는 로컬 file:// URL이 아닌 FILE 경로를 건너뛰었습니다.")
+        return normalized_paths
 
     def _get_filtered_items(self, filter_type="all", date_from=None):
         items = self.db.get_items("", "전체")

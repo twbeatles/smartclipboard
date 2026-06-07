@@ -380,8 +380,8 @@ class Worker(CoreWorker):
 class ClipboardDB(CoreClipboardDB):
     """Compatibility export backed by smartclipboard_core.database."""
 
-    def __init__(self):
-        super().__init__(db_file=DB_FILE, app_dir=APP_DIR)
+    def __init__(self, db_file=None, app_dir=None):
+        super().__init__(db_file=db_file or DB_FILE, app_dir=app_dir or APP_DIR)
 
     def cleanup(self):
         return super().cleanup()
@@ -1905,7 +1905,11 @@ class MainWindow(QMainWindow):
 
     def open_link(self):
         text = self.detail_text.toPlainText()
-        if text: webbrowser.open(text)
+        url = core_extract_first_url(text)
+        if url:
+            webbrowser.open(url)
+        else:
+            self.statusBar().showMessage("⚠️ 열 수 있는 URL이 없습니다.", 2000)
 
     def update_ui_state(self, enabled):
         self.btn_copy.setEnabled(enabled)

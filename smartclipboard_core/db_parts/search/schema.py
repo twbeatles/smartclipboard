@@ -8,6 +8,16 @@ from ..shared import logger
 from ..typing_helpers import DBRuntimeMixin
 
 
+def _execute_add_column(cursor, sql: str) -> None:
+    try:
+        cursor.execute(sql)
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" in str(exc).lower():
+            return
+        logger.error("Schema migration failed: %s", exc)
+        raise
+
+
 class SearchSchemaMixin(DBRuntimeMixin):
     @staticmethod
     def _normalize_unique_name(name: str) -> str:
@@ -144,10 +154,7 @@ class SearchSchemaMixin(DBRuntimeMixin):
                 "ALTER TABLE history ADD COLUMN bookmark INTEGER DEFAULT 0",
                 "ALTER TABLE history ADD COLUMN expires_at TEXT DEFAULT NULL",
             ):
-                try:
-                    cursor.execute(sql)
-                except sqlite3.OperationalError:
-                    pass
+                _execute_add_column(cursor, sql)
 
             cursor.execute(
                 """
@@ -193,10 +200,7 @@ class SearchSchemaMixin(DBRuntimeMixin):
                 "ALTER TABLE deleted_history ADD COLUMN use_count INTEGER DEFAULT 0",
                 "ALTER TABLE deleted_history ADD COLUMN url_title TEXT DEFAULT ''",
             ):
-                try:
-                    cursor.execute(col_sql)
-                except sqlite3.OperationalError:
-                    pass
+                _execute_add_column(cursor, col_sql)
 
             try:
                 self._dedupe_collections_for_unique_index(cursor)

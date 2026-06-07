@@ -90,12 +90,14 @@
           "signature": {
             "posonly": [],
             "args": [
-              "self"
+              "self",
+              "db_file",
+              "app_dir"
             ],
             "vararg": null,
             "kwonly": [],
             "kwarg": null,
-            "defaults_count": 0,
+            "defaults_count": 2,
             "kw_defaults_count": 0
           }
         },

@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from smartclipboard_core.file_paths import file_content_from_paths, file_paths_from_content
+import os
+
+from smartclipboard_core.file_paths import (
+    file_content_from_paths,
+    file_paths_from_content,
+    normalize_import_file_path,
+)
 
 from .reports import append_warning
 
@@ -53,7 +59,21 @@ def import_csv_row_locked(db, cursor, row: list[str], report: dict, valid_item_t
         return
 
     if item_type == "FILE":
-        file_paths = file_paths_from_content(content)
+        file_paths = []
+        seen = set()
+        rejected_count = 0
+        for raw_path in str(content or "").splitlines():
+            normalized = normalize_import_file_path(raw_path)
+            if not normalized:
+                rejected_count += 1
+                continue
+            dedupe_key = os.path.normcase(normalized)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            file_paths.append(normalized)
+        if rejected_count:
+            append_warning(report, "CSV의 FILE 행에서 상대 경로 또는 로컬 file:// URL이 아닌 경로를 건너뛰었습니다.")
         if not file_paths:
             report["skipped"] += 1
             append_warning(report, "CSV의 FILE 행 중 유효한 경로가 없는 항목을 건너뛰었습니다.")

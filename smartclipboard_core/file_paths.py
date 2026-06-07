@@ -29,6 +29,51 @@ def normalize_local_file_path(raw_path: str | None) -> str:
     return normalized if normalized else ""
 
 
+def normalize_import_file_path(raw_path: str | None) -> str:
+    value = str(raw_path or "").strip()
+    if not value:
+        return ""
+
+    drive, _tail = os.path.splitdrive(value)
+    has_windows_drive = bool(drive) and drive.endswith(":")
+
+    parsed = urlparse(value)
+    if parsed.scheme and not has_windows_drive:
+        if parsed.scheme.lower() != "file":
+            return ""
+        if parsed.netloc:
+            value = f"//{parsed.netloc}{unquote(parsed.path or '')}"
+        else:
+            value = unquote(parsed.path or "")
+        if os.name == "nt" and value.startswith("/") and len(value) > 2 and value[2] == ":":
+            value = value[1:]
+
+    if not os.path.isabs(value):
+        return ""
+    return normalize_local_file_path(value)
+
+
+def normalize_import_file_paths(paths: Iterable[str | None]) -> list[str]:
+    normalized_paths: list[str] = []
+    seen: set[str] = set()
+    for raw_path in paths:
+        normalized = normalize_import_file_path(raw_path)
+        if not normalized:
+            continue
+        dedupe_key = os.path.normcase(normalized)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        normalized_paths.append(normalized)
+    return normalized_paths
+
+
+def file_paths_from_import_content(content: str | None) -> list[str]:
+    if not content:
+        return []
+    return normalize_import_file_paths(str(content).splitlines())
+
+
 def normalize_local_file_paths(paths: Iterable[str | None]) -> list[str]:
     normalized_paths: list[str] = []
     seen: set[str] = set()
@@ -153,8 +198,11 @@ __all__ = [
     "file_content_from_paths",
     "file_duplicate_signature",
     "file_paths_from_content",
+    "file_paths_from_import_content",
     "file_signature_from_content",
     "file_signature_from_paths",
+    "normalize_import_file_path",
+    "normalize_import_file_paths",
     "normalize_local_file_path",
     "normalize_local_file_paths",
     "partition_existing_file_paths",

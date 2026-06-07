@@ -1,9 +1,12 @@
+import base64
+import csv
 import datetime
 import json
 import os
 import sqlite3
 import tempfile
 import unittest
+from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
@@ -26,6 +29,8 @@ from smartclipboard_core.file_paths import (
     file_content_from_paths,
     file_signature_from_paths,
 )
+from smartclipboard_core.limits import IMAGE_CLIPBOARD_MAX_BYTES
+from smartclipboard_core.db_parts.search.schema import _execute_add_column
 
 
 TEST_TMP_ROOT = os.path.join(os.getcwd(), ".tmp-unittest")
@@ -807,6 +812,31 @@ class CoreDatabaseTests(unittest.TestCase):
                 dst_db.close()
             dst_tmp.cleanup()
 
+    def test_import_json_skips_oversized_image_item(self):
+        import_path = os.path.join(self.tmpdir.name, "oversized-image.json")
+        image_bytes = b"x" * (IMAGE_CLIPBOARD_MAX_BYTES + 1)
+        payload = {
+            "items": [
+                {
+                    "content": "[이미지 캡처]",
+                    "type": "IMAGE",
+                    "timestamp": "2026-04-10 10:00:00",
+                    "image_data_b64": base64.b64encode(image_bytes).decode("ascii"),
+                }
+            ]
+        }
+        with open(import_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+
+        manager = ExportImportManager(self.db)
+        imported = manager.import_json(import_path)
+
+        self.assertEqual(imported, 0)
+        self.assertTrue(manager.last_import_report["success"])
+        self.assertEqual(manager.last_import_report["skipped"], 1)
+        self.assertIn("이미지 항목이 너무 커서", "\n".join(manager.last_import_report["warnings"]))
+        self.assertEqual(self.db.get_items("", "전체"), [])
+
     def test_json_migration_round_trip_preserves_url_title(self):
         item_id = self.db.add_item("https://example.com/title", None, "LINK")
         self.assertTrue(item_id)
@@ -888,6 +918,58 @@ class CoreDatabaseTests(unittest.TestCase):
             if csv_db is not None:
                 csv_db.close()
             dst_tmp.cleanup()
+
+    def test_import_json_file_paths_rejects_relative_paths_but_keeps_absolute_and_file_urls(self):
+        file_a = os.path.join(self.tmpdir.name, "import-a.txt")
+        file_b = os.path.join(self.tmpdir.name, "import-b.txt")
+        with open(file_a, "w", encoding="utf-8") as fh:
+            fh.write("a")
+        with open(file_b, "w", encoding="utf-8") as fh:
+            fh.write("b")
+
+        import_path = os.path.join(self.tmpdir.name, "strict-files.json")
+        payload = {
+            "items": [
+                {
+                    "content": "[파일 항목]",
+                    "type": "FILE",
+                    "file_paths": ["relative.txt", file_a, Path(file_b).as_uri()],
+                    "timestamp": "2026-04-10 10:00:00",
+                }
+            ]
+        }
+        with open(import_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+
+        manager = ExportImportManager(self.db)
+        imported = manager.import_json(import_path)
+
+        self.assertEqual(imported, 1)
+        self.assertIn("상대 경로", "\n".join(manager.last_import_report["warnings"]))
+        restored = self.db.get_content(self.db.get_items("", "전체")[0][0])
+        self.assertEqual(restored, (file_content_from_paths([file_a, file_b]), None, "FILE"))
+
+    def test_import_csv_file_paths_rejects_relative_paths_but_keeps_absolute_and_file_urls(self):
+        file_a = os.path.join(self.tmpdir.name, "csv-import-a.txt")
+        file_b = os.path.join(self.tmpdir.name, "csv-import-b.txt")
+        with open(file_a, "w", encoding="utf-8") as fh:
+            fh.write("a")
+        with open(file_b, "w", encoding="utf-8") as fh:
+            fh.write("b")
+
+        import_path = os.path.join(self.tmpdir.name, "strict-files.csv")
+        with open(import_path, "w", encoding="utf-8-sig", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["내용", "유형", "시간", "고정", "사용횟수"])
+            writer.writerow([f"relative.txt\n{file_a}\n{Path(file_b).as_uri()}", "FILE", "2026-04-10 10:00:00", "아니오", "0"])
+
+        manager = ExportImportManager(self.db)
+        imported = manager.import_csv(import_path)
+
+        self.assertEqual(imported, 1)
+        self.assertIn("상대 경로", "\n".join(manager.last_import_report["warnings"]))
+        restored = self.db.get_content(self.db.get_items("", "전체")[0][0])
+        self.assertEqual(restored, (file_content_from_paths([file_a, file_b]), None, "FILE"))
 
     def test_export_and_import_reports_capture_summary_details(self):
         item_id = self.db.add_item("report-item", None, "TEXT")
@@ -1238,6 +1320,19 @@ class CoreDatabaseTests(unittest.TestCase):
         self.assertTrue(describe_file_paths_with_status(paths).startswith("[누락 1]"))
         self.assertIn("사용 가능 1개, 누락 1개", build_file_paths_tooltip(paths))
         self.assertIn("사용 가능 1개, 누락 1개", build_file_paths_detail_text(paths))
+
+    def test_execute_add_column_allows_duplicate_column_but_raises_other_operational_errors(self):
+        conn = sqlite3.connect(":memory:")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("CREATE TABLE history (id INTEGER PRIMARY KEY, pinned INTEGER DEFAULT 0)")
+
+            _execute_add_column(cursor, "ALTER TABLE history ADD COLUMN pinned INTEGER DEFAULT 0")
+
+            with self.assertRaises(sqlite3.OperationalError):
+                _execute_add_column(cursor, "ALTER TABLE missing_table ADD COLUMN value TEXT")
+        finally:
+            conn.close()
 
     def test_rule_and_action_updates_respect_priority_order(self):
         self.assertTrue(self.db.add_copy_rule("trim", r"\s+", "trim"))

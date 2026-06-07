@@ -6,6 +6,7 @@ from smartclipboard_app.ui.clipboard_guard import extract_local_file_paths, mark
 from smartclipboard_app.ui.widgets.toast import ToastNotification
 from smartclipboard_core.automation.formatters import replacement_text_from_result
 from smartclipboard_core.file_paths import describe_file_paths, file_content_from_paths
+from smartclipboard_core.limits import IMAGE_CLIPBOARD_MAX_BYTES
 
 TEXT_CLIPBOARD_MAX_BYTES = 1 * 1024 * 1024
 
@@ -55,7 +56,7 @@ def process_image_clipboard_impl(self, mime_data, logger, qbytearray_cls, qbuffe
         image.save(buffer, "PNG")
         blob_data = ba.data()
 
-        max_image_size = 5 * 1024 * 1024
+        max_image_size = int(getattr(self, "max_image_clipboard_bytes", IMAGE_CLIPBOARD_MAX_BYTES))
         if len(blob_data) > max_image_size:
             logger.warning(f"Image too large ({len(blob_data)} bytes), skipping")
             toast_cls.show_toast(self, "이미지가 너무 큽니다(최대 5MB)", duration=2500, toast_type="warning")

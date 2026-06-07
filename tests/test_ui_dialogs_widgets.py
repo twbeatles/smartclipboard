@@ -23,6 +23,7 @@ from smartclipboard_app.ui.dialogs.import_dialog import ImportDialog
 from smartclipboard_app.ui.dialogs.secure_vault import SecureVaultDialog
 from smartclipboard_app.ui.dialogs.settings import FALLBACK_THEMES, SettingsDialog
 from smartclipboard_app.ui.mainwindow_parts.clipboard_runtime_ops import (
+    apply_copy_rules_impl,
     on_clipboard_change_impl,
     process_actions_impl,
     process_clipboard_impl,
@@ -576,6 +577,14 @@ class _FakeTextMimeData:
         self._text = text
 
     def text(self):
+        return self._text
+
+
+class _FakePlainTextWidget:
+    def __init__(self, text):
+        self._text = text
+
+    def toPlainText(self):
         return self._text
 
 
@@ -1347,6 +1356,27 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertIn("%2F%2Fexample.com%2Fa%20b%3Fx%3D1%26y%3D", url)
         self.assertIn("%ED%95%9C%EA%B8%80", url)
 
+    def test_open_link_uses_first_extracted_url_only(self):
+        window = mock.Mock()
+        window.detail_text = _FakePlainTextWidget("https://example.com/path?q=1\n메모")
+
+        with mock.patch.object(legacy_main_src.webbrowser, "open") as open_mock:
+            legacy_main_src.MainWindow.open_link(window)
+
+        open_mock.assert_called_once_with("https://example.com/path?q=1")
+
+    def test_open_link_without_url_does_not_call_browser(self):
+        window = mock.Mock()
+        window.detail_text = _FakePlainTextWidget("URL 없는 메모")
+        status_bar = _FakeStatusBar()
+        window.statusBar.return_value = status_bar
+
+        with mock.patch.object(legacy_main_src.webbrowser, "open") as open_mock:
+            legacy_main_src.MainWindow.open_link(window)
+
+        open_mock.assert_not_called()
+        self.assertIn("URL", status_bar.messages[0][0])
+
     def test_import_dialog_csv_warns_and_shows_summary(self):
         dialog = ImportDialog(None, _FakeImportExportManager())
         try:
@@ -1438,6 +1468,37 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             accept_mock.assert_called_once()
         finally:
             dialog.close()
+
+    def test_apply_copy_rules_skips_empty_and_invalid_patterns_then_applies_custom_replace(self):
+        window = mock.Mock()
+        window._rules_cache_dirty = True
+        window._rules_cache = None
+        window.db.get_copy_rules.return_value = [
+            (1, "trim", r".*", "trim", None, 1, 3),
+            (2, "empty", "", "uppercase", None, 1, 2),
+            (3, "bad", "[", "lowercase", None, 1, 1),
+            (4, "replace", r"foo", "custom_replace", "bar", 1, 0),
+        ]
+        logger = mock.Mock()
+
+        result = apply_copy_rules_impl(window, " foo foo ", logger, re)
+
+        self.assertEqual(result, "bar bar")
+        self.assertFalse(window._rules_cache_dirty)
+        window.db.get_copy_rules.assert_called_once()
+        self.assertEqual(logger.warning.call_count, 2)
+
+    def test_generate_qr_without_optional_dependency_warns_and_returns(self):
+        window = mock.Mock()
+
+        with mock.patch.object(legacy_main_src, "HAS_QRCODE", False), mock.patch.object(
+            legacy_main_src.QMessageBox,
+            "warning",
+        ) as warning_mock:
+            legacy_main_src.MainWindow.generate_qr(window)
+
+        warning_mock.assert_called_once()
+        window.detail_text.toPlainText.assert_not_called()
 
     def test_default_actions_skip_duplicates(self):
         db = _FakeActionDB(duplicate=True)
@@ -2117,6 +2178,19 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         self.assertIs(window.export_manager, new_export_manager)
         self.assertEqual(new_action_manager.action_completed.connect_calls, 1)
         self.assertTrue(critical_mock.called)
+
+    def test_legacy_clipboarddb_accepts_runtime_path_kwargs(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        db = None
+        try:
+            db_path = os.path.join(tmpdir.name, "runtime.db")
+            db = legacy_main_src.ClipboardDB(db_file=db_path, app_dir=tmpdir.name)
+            self.assertEqual(db.db_file, db_path)
+            self.assertEqual(db.app_dir, tmpdir.name)
+        finally:
+            if db is not None:
+                db.close()
+            tmpdir.cleanup()
 
     def test_restore_data_rejects_invalid_database_before_shutdown(self):
         current_db = _FakeRestoreDB(db_file="D:/runtime/custom.db", app_dir="D:/runtime")

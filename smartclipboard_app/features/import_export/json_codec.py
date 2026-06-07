@@ -8,6 +8,7 @@ import datetime
 from typing import Any
 
 from smartclipboard_core.file_paths import file_content_from_paths
+from smartclipboard_core.limits import IMAGE_CLIPBOARD_MAX_BYTES
 
 from .reports import append_warning
 
@@ -150,9 +151,13 @@ def import_json_item_locked(
             report["skipped"] += 1
             append_warning(report, "손상된 image_data_b64 항목을 건너뛰었습니다.")
             return
+        if len(image_data) > IMAGE_CLIPBOARD_MAX_BYTES:
+            report["skipped"] += 1
+            append_warning(report, "이미지 항목이 너무 커서 건너뛰었습니다(최대 5MB).")
+            return
         content = content or "[이미지 캡처]"
     elif item_type == "FILE":
-        file_paths = resolve_file_paths(payload)
+        file_paths = resolve_file_paths(payload, report=report)
         if not file_paths:
             report["skipped"] += 1
             append_warning(report, "유효한 로컬 경로가 없는 FILE 항목을 건너뛰었습니다.")
