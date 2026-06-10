@@ -33,6 +33,10 @@ Notes:
       action writeback merge, restore full/minimal validation, visible hotkey
       failure notices, settings write/read-back checks, and the 1MB text
       clipboard limit use existing modules and datas.
+    - 2026-06-10 SOLID split keeps packaging scope unchanged: MainWindow
+      bootstrap/dialog/history helpers, settings style submodules,
+      import_export services, and db_parts/history subpackages are covered by
+      the existing collect_submodules rules and payload/manifest datas.
     - CI now enforces optional runtime dependency presence and pyright via
       `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright`.
     - Frozen packaging is covered by the manual `package-smoke` workflow rather

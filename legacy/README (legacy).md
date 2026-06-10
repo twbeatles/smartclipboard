@@ -316,13 +316,16 @@ smartclipboard-main/
 │   ├── legacy_main_payload.marshal
 │   ├── legacy_main_payload.manifest.json
 │   ├── features/                     # 현행 MainWindow 기능 구현
+│   │   ├── dialogs/                  # dialog launcher
+│   │   ├── settings/styles/          # QSS section builders
+│   │   └── shell/window_bootstrap.py # startup orchestration
 │   ├── managers/                     # public facade managers
 │   └── ui/                           # shim / dialogs / widgets
 ├── smartclipboard_core/
 │   ├── database.py
 │   ├── actions.py                    # public facade
 │   ├── automation/                   # ClipboardActionManager 구현
-│   └── db_parts/                     # facade + subpackages
+│   └── db_parts/                     # facade + subpackages (`history/` 포함)
 └── tests/
 ```
 
@@ -391,6 +394,13 @@ MIT License
 - `smartclipboard_app/ui/mainwindow_parts/`는 legacy import 호환 shim으로 남아 있고, 실제 구현은 `smartclipboard_app/features/`로 이동했습니다.
 - `smartclipboard.spec`는 현재 `smartclipboard_core.automation`과 `smartclipboard_app.features` 하위 모듈도 hidden import로 자동 수집합니다.
 
+## 2026-06-10 SOLID Structure Split
+
+- `MainWindow.__init__` orchestration은 `smartclipboard_app/features/shell/window_bootstrap.py`로 이동했고, dialog launcher는 `features/dialogs/`, history interaction은 `features/history/interactions.py`에 있습니다.
+- QSS section builders는 `features/settings/styles/`, import/export helpers는 `features/import_export/services.py`, DB history 구현은 `smartclipboard_core/db_parts/history/`에 있습니다.
+- 새 모듈은 기존 spec `collect_submodules` 범위 안에 있으므로 PyInstaller hidden import/datas 증설은 필요 없습니다.
+- `.codegraph/`는 로컬 분석 인덱스이므로 `.gitignore` 제외 대상입니다.
+
 ## 2026-04-16 Functional Follow-up
 
 - 동기 텍스트 액션(`format_phone`, `format_email`, `transform`)은 변환 결과를 같은 history row와 clipboard에 다시 기록하고, 같은 배치의 후속 액션은 변환된 텍스트 기준으로 평가됩니다.
@@ -401,7 +411,7 @@ MIT License
 ## 2026-04-27 Functional Implementation Review
 
 - 최신 기준은 클립보드 debounce race 수정, DB 복원 검증/atomic replace, FTS backfill, JSON/CSV import 정규화, URL title cache TTL/LRU, payload SHA-256 검증, app data resolver 통합, repo-wide `pyright` 0 errors를 포함합니다.
-- 이 레거시 문서는 보관본이며 자세한 구현 상태와 검증 결과는 루트 `README.md`, `claude.md`, `FUNCTIONAL_IMPLEMENTATION_AUDIT_2026-05-11.md`를 따릅니다.
+- 이 레거시 문서는 보관본이며 자세한 구현 상태와 검증 결과는 루트 `README.md`, `PROJECT_ANALYSIS.md`, `claude.md`를 따릅니다.
 
 ## 2026-05-11 Functional Hardening
 

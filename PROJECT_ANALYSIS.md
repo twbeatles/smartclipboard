@@ -1,6 +1,6 @@
 # SmartClipboard Pro — 프로젝트 구조 분석
 
-> **기준일:** 2026-05-11
+> **기준일:** 2026-06-10
 > **버전:** v10.6
 > **목적:** 신규 기능 추가를 위한 코드베이스 심층 분석
 
@@ -59,13 +59,24 @@ smartclipboard/
 │   ├── legacy_main.py             ← 하이브리드 payload 로더
 │   ├── legacy_main.pyi            ← payload 로더 공개 export 타입 보강
 │   ├── legacy_payload.py          ← payload manifest/hash 유틸
-│   ├── legacy_main_src.py         ← 복원된 소스 스냅샷 (1,741줄)
+│   ├── legacy_main_src.py         ← 복원된 호환 소스 스냅샷 (1,570줄)
 │   ├── legacy_main_payload.marshal ← 바이너리 런타임 payload
 │   ├── legacy_main_payload.manifest.json ← Python/source sync manifest
 │   │
 │   ├── managers/
 │   │   ├── export_import.py       ← JSON/CSV/MD 내보내기·가져오기
 │   │   └── secure_vault.py        ← PBKDF2+Fernet 암호화 관리자
+│   │
+│   ├── features/                  ← 도메인별 실제 구현
+│   │   ├── clipboard/             ← clipboard runtime pipeline/controller
+│   │   ├── dialogs/               ← MainWindow dialog launcher
+│   │   ├── history/               ← table/menu/view/interaction
+│   │   ├── import_export/         ← manager 구현 + helper services
+│   │   ├── settings/styles/       ← QSS section builders
+│   │   ├── shell/window_bootstrap.py ← MainWindow 초기화 orchestration
+│   │   ├── shell_ui/              ← layout/drag-drop/view
+│   │   ├── tray_hotkey/           ← tray/global hotkey
+│   │   └── vault/                 ← secure vault service
 │   │
 │   └── ui/
 │       ├── main_window.py         ← MainWindow 컴포지터
@@ -95,17 +106,17 @@ smartclipboard/
 │       │   ├── floating_mini_window.py  ← 플로팅 미니 창
 │       │   └── toast.py                ← 토스트 알림
 │       │
-│       └── mainwindow_parts/     ← MainWindow 대형 메서드 분할 (11개)
+│       └── mainwindow_parts/     ← MainWindow legacy shim (11개)
 │           ├── theme_ops.py
-│           ├── theme_style_sections.py  ← QSS 스타일시트 생성 (464줄)
-│           ├── ui_init_sections.py      ← 위젯 생성·레이아웃 (301줄)
+│           ├── theme_style_sections.py  ← QSS facade
+│           ├── ui_init_sections.py      ← UI init facade
 │           ├── ui_ops.py
 │           ├── ui_dragdrop_ops.py       ← 고정 항목 드래그앤드롭 (124줄)
-│           ├── menu_ops.py              ← 컨텍스트·트레이 메뉴 (278줄)
-│           ├── table_ops.py             ← 히스토리 테이블 표시·필터 (255줄)
-│           ├── tray_hotkey_ops.py       ← 핫키 등록·트레이 (147줄)
-│           ├── status_lifecycle_ops.py  ← 상태바, 볼트 타임아웃 (130줄)
-│           └── clipboard_runtime_ops.py ← 클립보드 모니터링·처리 (155줄)
+│           ├── menu_ops.py              ← 메뉴 shim
+│           ├── table_ops.py             ← 테이블 shim
+│           ├── tray_hotkey_ops.py       ← 핫키/트레이 shim
+│           ├── status_lifecycle_ops.py  ← lifecycle shim
+│           └── clipboard_runtime_ops.py ← clipboard runtime shim
 │
 ├── smartclipboard_core/
 │   ├── database.py                ← ClipboardDB 컴포지터 (mixin 조합)
@@ -114,14 +125,15 @@ smartclipboard/
 │   ├── file_paths.py              ← FILE 경로 정규화/설명/중복 시그니처 헬퍼
 │   ├── worker.py                  ← 비동기 Worker + WorkerSignals
 │   │
-│   └── db_parts/                 ← DB mixin 모듈
+│   └── db_parts/                 ← DB mixin facade + subpackages
 │       ├── shared.py              ← 공통 상수/app path resolver 연결
 │       ├── typing_helpers.py      ← DB mixin 정적 분석 보강
-│       ├── schema_search.py       ← 스키마 생성 + FTS5 검색 (406줄)
-│       ├── history_ops.py         ← 히스토리 CRUD (467줄)
-│       ├── rules_snippets_actions.py ← 규칙·스니펫·액션 (198줄)
-│       ├── tags_collections.py    ← 태그·컬렉션 (227줄)
-│       └── vault_trash.py         ← 보안 보관함·휴지통 (151줄)
+│       ├── schema_search.py       ← schema/search facade
+│       ├── history_ops.py         ← history facade
+│       ├── history/               ← write/query/metadata/delete/maintenance
+│       ├── rules_snippets_actions.py ← 규칙·스니펫·액션 facade
+│       ├── tags_collections.py    ← 태그·컬렉션 facade
+│       └── vault_trash.py         ← 보안 보관함·휴지통 facade
 │
 ├── tests/
 │   ├── test_payload_sync.py       ← payload/src 시그니처 동기화
@@ -191,7 +203,9 @@ MainWindow
 ├── ClipboardController    ← 클립보드 모니터링·텍스트/이미지 처리
 ├── TableController        ← 히스토리 테이블 표시·선택
 ├── TrayHotkeyController   ← 시스템 트레이·글로벌 핫키
-└── LifecycleController    ← 볼트 타임아웃·정리·앱 종료
+├── LifecycleController    ← 볼트 타임아웃·정리·앱 종료
+├── SettingsController     ← 설정 helper facade
+└── ShellUiController      ← layout/drag-drop/view orchestration
 ```
 
 ---
@@ -240,7 +254,12 @@ class ClipboardDB(
 | 파일 | 핵심 책임 | 주요 메서드 |
 |------|-----------|-------------|
 | `schema_search.py` | 테이블 생성, FTS5, 통합 검색 | `create_tables()`, `search_items()` |
-| `history_ops.py` | 히스토리 CRUD, 핀 관리 | `add_item()`, `get_items()`, `toggle_pin()`, `update_pin_orders()` |
+| `history_ops.py` | history facade | `HistoryOpsMixin` |
+| `history/write.py` | insert/update/duplicate merge | `add_item()`, `replace_text_item_or_merge()` |
+| `history/queries.py` | history read models | `get_items()`, `get_content()`, `get_top_items()` |
+| `history/metadata.py` | pin/bookmark/note metadata | `toggle_pin()`, `update_pin_orders()`, `set_item_metadata()` |
+| `history/deletion.py` | hard/soft delete entry points | `delete_item()`, `clear_all()`, `soft_delete_unpinned()` |
+| `history/maintenance.py` | cleanup/backup/temp/close | `cleanup()`, `backup_db()`, `cleanup_expired_items()` |
 | `rules_snippets_actions.py` | 스니펫, 규칙, 액션 | `add_snippet()`, `add_clipboard_action()`, `get_copy_rules()` |
 | `tags_collections.py` | 태그, 컬렉션 | `set_item_tags()`, `add_collection()`, `assign_to_collection()` |
 | `vault_trash.py` | 암호화 보관함, 휴지통 | `add_vault_item()`, `soft_delete()`, `restore_item()`, `empty_trash()` |
@@ -284,12 +303,12 @@ class Worker(QRunnable):
 
 #### `smartclipboard_app/ui/main_window.py` — `MainWindow`
 
-`LegacyMainWindow`를 상속하고 4개 컨트롤러를 붙이는 컴포지터 클래스.
+`LegacyMainWindow`를 상속하고 feature controller를 붙이는 컴포지터 클래스.
 **메서드 시그니처는 외부 계약 — 변경 금지.**
 
-#### `smartclipboard_app/legacy_main_src.py` — `LegacyMainWindow` (1,741줄)
+#### `smartclipboard_app/legacy_main_src.py` — `LegacyMainWindow` (1,570줄)
 
-핵심 PyQt6 창. 대형 메서드는 `mainwindow_parts/` 헬퍼로 위임.
+핵심 PyQt6 창 호환 소스. public method signature는 유지하고, 초기화/dialog/history/clipboard/table/lifecycle 로직은 feature/helper 모듈로 위임.
 
 **주요 시그널:**
 - `clipboard_changed`
@@ -322,15 +341,15 @@ class Worker(QRunnable):
 | 모듈 | 위임받은 책임 |
 |------|--------------|
 | `theme_ops.py` | `apply_theme()` — 5개 테마 전환 |
-| `theme_style_sections.py` | QSS 스타일시트 생성 (464줄) |
-| `ui_init_sections.py` | 위젯 생성·레이아웃 초기화 (301줄) |
+| `theme_style_sections.py` | QSS facade (`features/settings/styles/` 재수출) |
+| `ui_init_sections.py` | UI init facade (`features/shell_ui/sections.py` 재수출) |
 | `ui_ops.py` | `eventFilter`, 키보드 단축키 |
 | `ui_dragdrop_ops.py` | 고정 항목 드래그앤드롭 재정렬 |
-| `menu_ops.py` | 우클릭 컨텍스트 메뉴, 트레이 메뉴 |
-| `table_ops.py` | 히스토리 테이블 렌더링·필터링 |
-| `tray_hotkey_ops.py` | `keyboard` 라이브러리 핫키 등록 |
-| `status_lifecycle_ops.py` | 상태바, 볼트 자동잠금 타이머 |
-| `clipboard_runtime_ops.py` | `QClipboard` 변경 감지·처리 |
+| `menu_ops.py` | history menu facade |
+| `table_ops.py` | history table/view facade |
+| `tray_hotkey_ops.py` | tray/hotkey facade |
+| `status_lifecycle_ops.py` | shell lifecycle facade |
+| `clipboard_runtime_ops.py` | clipboard runtime facade |
 
 #### 다이얼로그 목록 (`smartclipboard_app/ui/dialogs/`)
 
@@ -602,15 +621,15 @@ elif action_type == "my_new_action":
 ### 8.3 새 다이얼로그 추가
 
 1. `smartclipboard_app/ui/dialogs/` 에 새 파일 생성
-2. `legacy_main_src.py`의 메뉴/버튼 핸들러에서 호출
-3. `smartclipboard.spec`의 hidden imports 목록에 모듈 추가
+2. MainWindow launcher는 `smartclipboard_app/features/dialogs/`에 추가하고 `legacy_main_src.py`는 thin wrapper로 유지
+3. 새 파일이 `smartclipboard_app.features` 하위라면 `smartclipboard.spec`의 기존 `collect_submodules` 범위로 충분한지 확인
 4. payload 재빌드: `python scripts/build_legacy_payload.py ...`
 
 ### 8.4 UI 위젯/섹션 추가
 
 - 신규 위젯: `smartclipboard_app/ui/widgets/` 에 작성
-- MainWindow 레이아웃 변경: `mainwindow_parts/ui_init_sections.py` 수정
-- 스타일: `mainwindow_parts/theme_style_sections.py` 에 QSS 추가
+- MainWindow 레이아웃 변경: `smartclipboard_app/features/shell_ui/sections.py` 수정 후 shim 계약 확인
+- 스타일: `smartclipboard_app/features/settings/styles/` 에 QSS section 추가 후 `style_sections.py` facade 계약 확인
 
 ### 8.5 새 설정값 추가
 
@@ -757,21 +776,22 @@ pyinstaller --clean smartclipboard.spec
 ## 13. 2026-04-15 구조 분할 델타
 
 - `smartclipboard_app/features/`가 새 도메인 루트다.
-  - `settings/`: 테마/QSS/controller
+  - `settings/`: 테마/QSS/controller, `styles/` section builders
   - `shell_ui/`: 레이아웃 초기화, drag-drop, UI controller
-  - `history/`: 메뉴/테이블 표시/controller
+  - `history/`: 메뉴/테이블 표시/interaction/controller
   - `clipboard/`: runtime pipeline/controller
   - `tray_hotkey/`: 시스템 트레이/글로벌 핫키/controller
-  - `shell/`: 상태바/정리/종료/controller
-  - `import_export/`, `vault/`, `shared/`: manager 분리 구현과 공통 bundle
+  - `shell/`: MainWindow bootstrap, 상태바/정리/종료/controller
+  - `dialogs/`: MainWindow dialog launcher
+  - `import_export/`, `vault/`, `shared/`: manager 분리 구현, helper services, 공통 bundle
 - `smartclipboard_app/ui/mainwindow_parts/*.py`는 더 이상 실구현이 아니라 feature 모듈 재수출 shim이다.
 - `smartclipboard_app/ui/controllers/*.py`도 feature controller facade로 축소되었다.
 - `legacy_main_src.MainWindow`는 feature controller를 조합해 helper 기반 메서드를 위임하면서 공개 시그니처를 유지한다.
 - `smartclipboard_core/actions.py`는 facade이고 실제 구현은 `smartclipboard_core/automation/`로 이동했다.
-- `smartclipboard_core/db_parts/*.py`는 facade이고, 분리된 구현은 `db_parts/search/`, `automation/`, `catalog/`, `retention/` 하위 패키지로 이동했다.
+- `smartclipboard_core/db_parts/*.py`는 facade이고, 분리된 구현은 `db_parts/search/`, `automation/`, `catalog/`, `retention/`, `history/` 하위 패키지로 이동했다.
 - `scripts/preflight_local.py`와 `scripts/refactor_signal_snapshot.py`는 새 feature/core 하위 패키지를 재귀적으로 포함하도록 갱신되어야 하며, `smartclipboard.spec`도 `smartclipboard_app.features`/`smartclipboard_core.automation` hidden import 수집을 포함한다.
 
-*이 문서는 2026-03-21 기준 v10.6 코드베이스를 기반으로 작성되었고, 2026-05-11 기능 안정화 및 문서/spec/ignore 정합성 반영 상태까지 갱신했습니다.*
+*이 문서는 2026-03-21 기준 v10.6 코드베이스를 기반으로 작성되었고, 2026-06-10 SOLID 구조 분할, 문서/spec/ignore 정합성, payload sync 반영 상태까지 갱신했습니다.*
 
 ## 14. 2026-04-16 기능 후속 정합성 메모
 
@@ -804,3 +824,14 @@ pyinstaller --clean smartclipboard.spec
 - 시작 시 글로벌 핫키 등록 실패는 status bar/tray/toast 중 가능한 경로로 노출하고, 설정 저장은 `set_setting()` 반환값과 read-back을 확인한다.
 - 일반 CI는 `scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright`를 실행하고, PyInstaller/EXE smoke는 수동 `package-smoke` workflow로 분리한다.
 - `.gitignore`는 `.db`, `.sqlite`, `.sqlite3` 계열 user DB와 journal/WAL/SHM sidecar, 로그, build/dist, repo-local `.tmp-unittest/`를 제외한다.
+
+## 17. 2026-06-10 SOLID 구조 분할 반영
+
+- `legacy_main_src.MainWindow.__init__`의 초기화 orchestration은 `smartclipboard_app/features/shell/window_bootstrap.py`로 이동했고, constructor 공개 시그니처는 유지한다.
+- MainWindow dialog launcher는 `smartclipboard_app/features/dialogs/`, 태그/컬렉션 필터와 헤더 정렬 interaction은 `smartclipboard_app/features/history/interactions.py`에 둔다.
+- QSS builder는 `smartclipboard_app/features/settings/styles/`로 분리하고, `features/settings/style_sections.py`는 compatibility facade로 유지한다.
+- `ExportImportManager` public API는 유지하며 timestamp/date filter/file path/image/metadata helper는 `smartclipboard_app/features/import_export/services.py`로 이동했다.
+- `smartclipboard_core/db_parts/history_ops.py`는 facade이고 실제 history 구현은 `db_parts/history/write.py`, `queries.py`, `metadata.py`, `deletion.py`, `maintenance.py`로 분리했다.
+- `scripts/refactor_signal_snapshot.py`는 `features/shell/window_bootstrap.py`를 함께 스캔해 constructor signal connect 이동 후에도 스냅샷 순서를 유지한다.
+- `smartclipboard.spec`는 기존 `collect_submodules("smartclipboard_app.features")`와 `collect_submodules("smartclipboard_core.db_parts")`로 새 하위 모듈을 포함하므로 hidden import/datas 추가가 필요 없다.
+- `.gitignore`는 `.codegraph/` 로컬 인덱스를 제외한다. `.codegraph/`는 분석 캐시이며 릴리스/런타임 자산이 아니다.

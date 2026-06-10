@@ -40,6 +40,7 @@ def _collect_connect_lines(lines: list[str], start: int = 1, end: int | None = N
 def _discover_helper_paths(target: pathlib.Path) -> list[pathlib.Path]:
     repo_root = target.parent.parent
     ordered_paths = [
+        repo_root / "smartclipboard_app" / "features" / "shell" / "window_bootstrap.py",
         repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "clipboard_runtime_ops.py",
         repo_root / "smartclipboard_app" / "features" / "clipboard" / "pipeline.py",
         repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "menu_ops.py",
@@ -76,11 +77,22 @@ def build_snapshot(
         return []
 
     class_start, class_end = bounds
-    snapshot = _collect_connect_lines(target_lines, start=class_start, end=class_end)
+    snapshot: list[str] = []
 
     helpers = discover_helper_paths(target) if helper_paths is None else [pathlib.Path(p) for p in helper_paths]
     target_resolved = target.resolve()
-    for helper_path in helpers:
+    pre_target_helpers = [helper_path for helper_path in helpers if helper_path.name == "window_bootstrap.py"]
+    post_target_helpers = [helper_path for helper_path in helpers if helper_path.name != "window_bootstrap.py"]
+
+    for helper_path in pre_target_helpers:
+        if helper_path.resolve() == target_resolved:
+            continue
+        helper_lines = helper_path.read_text(encoding="utf-8-sig").splitlines()
+        snapshot.extend(_collect_connect_lines(helper_lines))
+
+    snapshot.extend(_collect_connect_lines(target_lines, start=class_start, end=class_end))
+
+    for helper_path in post_target_helpers:
         if helper_path.resolve() == target_resolved:
             continue
         helper_lines = helper_path.read_text(encoding="utf-8-sig").splitlines()

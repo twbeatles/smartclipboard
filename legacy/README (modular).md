@@ -39,6 +39,9 @@ smartclipboard-main/
 │   ├── legacy_main_payload.marshal     # legacy runtime payload
 │   ├── legacy_main_payload.manifest.json # payload sync manifest
 │   ├── features/                       # 현재 MainWindow 기능 도메인 구현
+│   │   ├── dialogs/                    # dialog launcher
+│   │   ├── settings/styles/            # QSS section builders
+│   │   └── shell/window_bootstrap.py   # MainWindow startup orchestration
 │   ├── managers/
 │   └── ui/                             # 호환 shim/controller 레이어
 ├── smartclipboard_core/
@@ -46,6 +49,7 @@ smartclipboard-main/
 │   ├── actions.py                      # public facade
 │   ├── automation/                     # action manager 구현
 │   ├── db_parts/                       # facade + subpackages
+│   │   └── history/                    # history write/query/metadata/delete/maintenance
 │   └── worker.py
 └── tests/
 ```
@@ -111,11 +115,11 @@ pyinstaller --clean smartclipboard.spec
 - 2026-04-11 후속 반영으로 fetch_title 로컬/사설 URL 차단, `02`/`0505`/대표번호 전화 포맷 확장, FILE stale preview, 보안 보관함 Reset 복구, JSON 마이그레이션 문구 정리가 추가되었습니다.
 - 스니펫 `shortcut` 컬럼은 유지되지만 사용자 할당 UI/실행 경로는 아직 노출되지 않습니다.
 
-## 문서 정합성 기준 (2026-05-11)
+## 문서 정합성 기준 (2026-06-10)
 
 - 상세 변경 이력은 루트 `README.md`를 기준으로 관리합니다.
 - 개발 가이드는 `claude.md`, `.gemini/GEMINI.md`와 동일한 테스트/빌드 기준을 따릅니다.
-- 최신 감사 결과는 루트 `FUNCTIONAL_IMPLEMENTATION_AUDIT_2026-05-11.md`를 기준으로 확인합니다.
+- 최신 구조/검증 감사 기준은 루트 `PROJECT_ANALYSIS.md`와 `README.md`를 기준으로 확인합니다.
 
 ## Refactor Sync (2026-03-12)
 
@@ -127,12 +131,15 @@ pyinstaller --clean smartclipboard.spec
 - 2026-05-11 Note: 최신 CI 기준 검증 커맨드는 `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright` 입니다.
 - 2026-04-12 Note: import/export report, pre-import backup, FTS zero-hit LIKE fallback, vault shutdown clipboard cleanup에 대한 최신 설명은 루트 `README.md`를 우선 기준으로 삼습니다.
 - 2026-05-11 기준 spec 추가 자산은 없으며, payload manifest는 source hash뿐 아니라 payload size/SHA-256 검증을 포함합니다.
-- repo-wide `pyright`는 0 errors를 유지하며, 최신 기능 구현 리뷰 반영 내용은 루트 `README.md`와 `FUNCTIONAL_IMPLEMENTATION_AUDIT_2026-05-11.md`를 기준으로 확인합니다.
+- 2026-06-10 SOLID 분할도 기존 `collect_submodules` 범위 안에 있으므로 spec hidden import/datas 증설은 필요 없습니다.
+- `.codegraph/`는 로컬 분석 인덱스라 `.gitignore`로 제외합니다.
+- repo-wide `pyright`는 0 errors를 유지하며, 최신 기능 구현 리뷰 반영 내용은 루트 `README.md`와 `PROJECT_ANALYSIS.md`를 기준으로 확인합니다.
 
 ## 2026-04-15 Structure Refactor
 
 - `legacy_main_src.MainWindow`는 공개 시그니처를 유지한 채 feature controller 조합 방식으로 얇아졌습니다.
-- 실제 구현은 `smartclipboard_app/features/` 아래 `clipboard`, `history`, `settings`, `shell`, `shell_ui`, `tray_hotkey`, `shared`, `import_export`, `vault` 패키지로 이동했습니다.
+- 실제 구현은 `smartclipboard_app/features/` 아래 `clipboard`, `dialogs`, `history`, `settings`, `shell`, `shell_ui`, `tray_hotkey`, `shared`, `import_export`, `vault` 패키지로 이동했습니다.
+- `MainWindow.__init__` orchestration은 `features/shell/window_bootstrap.py`, QSS builders는 `features/settings/styles/`, import/export helpers는 `features/import_export/services.py`, DB history 구현은 `smartclipboard_core/db_parts/history/`에 있습니다.
 - `smartclipboard_core/actions.py`와 `smartclipboard_app/managers/*.py`는 facade를 유지하고, 실제 구현은 각각 `smartclipboard_core/automation/`, `smartclipboard_app/features/import_export/`, `smartclipboard_app/features/vault/`로 분리되었습니다.
 
 ## 2026-04-16 Functional Follow-up

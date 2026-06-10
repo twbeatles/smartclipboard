@@ -388,6 +388,11 @@ smartclipboard/
 │   ├── legacy_main_payload.marshal  # 런타임 payload
 │   ├── legacy_main_payload.manifest.json  # Python/source sync manifest
 │   ├── features/                   # 기능 도메인 구현체
+│   │   ├── dialogs/                # MainWindow dialog launcher orchestration
+│   │   ├── history/                # 메뉴/테이블/view/interaction 구현
+│   │   ├── import_export/          # import/export manager 구현 + services
+│   │   ├── settings/styles/        # QSS section builders
+│   │   └── shell/window_bootstrap.py # MainWindow 초기화 orchestration
 │   ├── managers/
 │   └── ui/
 │       ├── clipboard_guard.py       # internal copy flag helper
@@ -397,6 +402,7 @@ smartclipboard/
 │   ├── automation/                 # ClipboardActionManager 분리 구현
 │   ├── database.py
 │   ├── db_parts/                   # mixin facade + 하위 subpackage
+│   │   └── history/                # history write/query/metadata/delete/maintenance
 │   └── worker.py
 ├── tests/
 └── legacy/                          # 참조용 레거시 보관본
@@ -506,18 +512,20 @@ MIT License
 - `smartclipboard_app/legacy_main_src.py`의 `MainWindow` 공개 메서드 시그니처는 유지됩니다.
 - 실제 구현은 `smartclipboard_app/features/` 도메인 패키지로 이동했고, `smartclipboard_app/ui/mainwindow_parts/`는 import 호환용 shim으로 유지됩니다.
   - `features/settings`: 테마/QSS/controller
+  - `features/settings/styles`: QSS section builder
   - `features/shell_ui`: 메인 레이아웃, drag-drop, UI controller
-  - `features/history`: 메뉴/테이블/view/controller
+  - `features/history`: 메뉴/테이블/view/interaction/controller
   - `features/clipboard`: runtime pipeline/controller
   - `features/tray_hotkey`: 시스템 트레이/핫키/controller
-  - `features/shell`: 상태바/정리/종료 controller
+  - `features/shell`: MainWindow bootstrap, 상태바/정리/종료 controller
+  - `features/dialogs`: MainWindow dialog launcher
 - 시그널 스냅샷 검증(`scripts/refactor_signal_snapshot.py`, `tests/test_signal_snapshot.py`)은 `legacy_main_src.py`와 shim+feature 구현 파일을 함께 스캔합니다.
 - 로컬 사전검증(`scripts/preflight_local.py`)의 `py_compile` 단계는 `ui/**/*.py`, `features/**/*.py`, `db_parts/**/*.py`, `automation/**/*.py`를 재귀 포함합니다.
 
-## 문서 정합성 기준 (2026-05-11)
+## 문서 정합성 기준 (2026-06-10)
 
 - 실행/빌드/검증 기준 문서는 루트 `README.md`이며, `claude.md`, `.gemini/GEMINI.md`, `PROJECT_ANALYSIS.md`, `legacy/README (modular).md`, `legacy/README (legacy).md`는 동일 기준을 따릅니다.
-- 상세 감사 결과는 `FUNCTIONAL_IMPLEMENTATION_AUDIT_2026-05-11.md`에 보관하며, 이전 루트 `FUNCTIONAL_IMPLEMENTATION_REVIEW.md` 문서는 2026-05-11 기준 문서 세트에서 제거되었습니다.
+- 2026-06-10 기준 상세 구현/구조 감사 내용은 루트 `PROJECT_ANALYSIS.md`와 본 README에 통합되어 있으며, 이전 루트 감사 전용 문서는 현재 문서 세트에서 제거되었습니다.
 - 권장 회귀 테스트 기준은 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`입니다.
 
 ## 2026-05-11 Functional Hardening
@@ -538,6 +546,7 @@ MIT License
   - `db_parts/automation/`
   - `db_parts/catalog/`
   - `db_parts/retention/`
+  - `db_parts/history/`
 - `smartclipboard_core/actions.py` is a public facade; implementation lives in `smartclipboard_core/automation/`.
 - `smartclipboard_app/managers/export_import.py` / `secure_vault.py` are public facades; implementations live in `smartclipboard_app/features/import_export/` and `smartclipboard_app/features/vault/`.
 - `scripts/preflight_local.py` now compiles both `mainwindow_parts/*.py` and `db_parts/*.py`.
@@ -549,6 +558,16 @@ MIT License
 - `smartclipboard_app/features/shared/state.py` provides `WindowState`, `WindowServices`, `WindowWidgets` bundles and `bind_window_facets()` for controller synchronization.
 - `smartclipboard_app/ui/controllers/*.py` and `ui/mainwindow_parts/*.py` remain compatibility layers so external imports and payload contracts stay intact.
 - `smartclipboard.spec` now collects `smartclipboard_app.features` and `smartclipboard_core.automation` submodules as hidden imports in addition to the legacy shim modules.
+
+## 2026-06-10 SOLID Structure Split
+
+- `legacy_main_src.MainWindow.__init__` delegates startup orchestration to `smartclipboard_app/features/shell/window_bootstrap.py` while keeping the public constructor signature stable.
+- Dialog launcher methods now live in `smartclipboard_app/features/dialogs/`, and tag/filter/header interaction helpers live in `smartclipboard_app/features/history/interactions.py`.
+- QSS generation keeps `features/settings/style_sections.py` as a facade and moves section builders to `features/settings/styles/`.
+- `ExportImportManager` public methods still return `int`; timestamp/filter/file-path/image/metadata helpers moved to `features/import_export/services.py`.
+- `smartclipboard_core/db_parts/history_ops.py` is now a facade over `db_parts/history/write.py`, `queries.py`, `metadata.py`, `deletion.py`, and `maintenance.py`.
+- `smartclipboard.spec` requires no new datas or explicit hidden imports because the new modules remain under already collected feature/core subpackages.
+- `.gitignore` excludes `.codegraph/` so local CodeGraph indexes do not enter release commits.
 
 ## 2026-04-27 Functional Implementation Review
 

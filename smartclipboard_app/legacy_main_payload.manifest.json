@@ -1,10 +1,10 @@
 {
   "manifest_version": 1,
   "payload_name": "legacy_main_payload.marshal",
-  "payload_sha256": "9665140c4c498bb20e1cbf3c7b34f4b1b1ad785c30ae0992c6e2c704a4b3bf73",
-  "payload_size": 111172,
+  "payload_sha256": "c671421fdb5d6653ad0e6ac2dac1cb9e659b6f8d4de3ef25f33aea34959d5e4f",
+  "payload_size": 99415,
   "python_implementation": "cpython",
   "python_minor": "3.14",
   "source_name": "legacy_main_src.py",
-  "source_sha256": "5afaf0251531405f9841c4ee30da7a3425a2a89b55c63fe441ed068632f7b0e8"
+  "source_sha256": "d087728d9943407cec7810238b45c071c8153a228d8d09af6949ad3ccd9d8fe2"
 }

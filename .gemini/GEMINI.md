@@ -47,6 +47,10 @@
 - Windows 테스트 임시 경로는 repo-local `.tmp-unittest/`를 사용합니다.
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
 - 2026-05-11 기준 privacy debounce, `deleted_history.url_title`, action writeback merge, restore full/minimal 검증, 핫키 실패 알림, 설정 write/read-back, 텍스트 1MB 제한은 기존 `collect_submodules` 규칙 안에 있으며 spec 추가 자산은 없습니다.
+- 2026-06-10 SOLID 분할 이후에도 새 모듈은 `smartclipboard_app.features`와 `smartclipboard_core.db_parts` 하위에 있으므로 spec 추가 hidden import/datas는 필요 없습니다.
+- `MainWindow.__init__` orchestration은 `smartclipboard_app/features/shell/window_bootstrap.py`, dialog launcher는 `features/dialogs/`, history interaction은 `features/history/interactions.py`, QSS section builders는 `features/settings/styles/`, import/export helper는 `features/import_export/services.py`에 둡니다.
+- `smartclipboard_core/db_parts/history_ops.py`는 facade이고 실제 history 구현은 `smartclipboard_core/db_parts/history/` 하위 책임별 모듈에 있습니다.
+- `.codegraph/`는 로컬 분석 인덱스이며 `.gitignore` 제외 대상입니다.
 - 텍스트 clipboard는 기본 1MB 초과 시 저장하지 않고 status/toast로 사용자에게 알립니다. 이미지 5MB 제한은 유지합니다.
 - DB 복원은 full 검증을 우선하고, legacy/minimal 백업은 기능 데이터 누락 가능성을 경고한 뒤에만 진행합니다. replace 전후 target DB의 `-wal`, `-shm` sidecar를 정리합니다.
 - JSON migration export/import는 `url_title`을 포함하며, CSV/Markdown export 정책은 기존 범위를 유지합니다.
@@ -109,6 +113,12 @@ pyinstaller --clean smartclipboard.spec
 - `legacy_main_src.MainWindow` keeps its public method surface but now delegates to feature controllers for clipboard, history/table, tray_hotkey, lifecycle, settings, and shell_ui.
 - `smartclipboard_app/features/shared/state.py` binds `WindowState`, `WindowServices`, `WindowWidgets` so feature controllers do not depend on the raw Qt window indiscriminately.
 - `tests/test_signal_snapshot.py` and `scripts/refactor_signal_snapshot.py` now scan both shim files and feature implementation files to preserve the legacy signal contract while the implementation is split.
+
+## 2026-06-10 SOLID Structure Split
+
+- `legacy_main_src.py` remains the compatibility source, but startup, dialog launchers, history interactions, settings QSS, import/export helpers, and DB history operations now live in focused feature/core modules.
+- Public `MainWindow`, `ClipboardDB`, manager, dialog, worker, payload, and root facade contracts remain stable.
+- `python scripts/preflight_local.py --with-pyright` is the required guard after changing these split modules; it rebuilds payload, smoke-imports it, compiles recursive feature/core packages, runs unit tests, and runs pyright.
 
 ## 2026-04-12 Stabilization Notes
 

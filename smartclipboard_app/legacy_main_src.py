@@ -123,9 +123,12 @@ from smartclipboard_app.ui.dialogs.tags import TagEditDialog as AppTagEditDialog
 from smartclipboard_app.ui.dialogs.trash_dialog import TrashDialog as AppTrashDialog
 from smartclipboard_app.features.clipboard.controller import ClipboardController
 from smartclipboard_app.features.history.controller import HistoryController
+from smartclipboard_app.features.history import interactions as history_interactions
+from smartclipboard_app.features import dialogs as dialog_launchers
 from smartclipboard_app.features.settings.controller import SettingsController
 from smartclipboard_app.features.shared import bind_window_facets
 from smartclipboard_app.features.shell.controller import LifecycleController
+from smartclipboard_app.features.shell.window_bootstrap import bootstrap_main_window
 from smartclipboard_app.features.shell_ui.controller import ShellUiController
 from smartclipboard_app.features.tray_hotkey.controller import TrayHotkeyController
 from smartclipboard_app.ui.mainwindow_parts import (
@@ -553,112 +556,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self, start_minimized=False):
         super().__init__()
-        self.start_minimized = start_minimized
-        self.is_data_dirty = True  # v10.4: Lazy loading flag
-        self.is_monitoring_paused = False  # v10.6: 모니터링 일시정지 플래그
-        try:
-            self.db = ClipboardDB()
-            self.apply_saved_log_level()
-            self.clipboard = QApplication.clipboard()
-            self.clipboard.dataChanged.connect(self.on_clipboard_change)
-            self.is_internal_copy = False
-            self.is_privacy_mode = False  # 프라이버시 모드 (모니터링 중지)
-            
-            # v8.0: 새 매니저들 초기화
-            self.vault_manager = SecureVaultManager(self.db)
-            self.action_manager = ClipboardActionManager(self.db)
-            self.export_manager = ExportImportManager(self.db)
-            
-            # v10.5: 비동기 액션 시그널 연결
-            self.action_manager.action_completed.connect(self.on_action_completed)
-            
-            self.settings = QSettings(ORG_NAME, APP_NAME)
-            self.current_theme = self.db.get_setting("theme", "dark")
-            
-            self.setWindowTitle(f"스마트 클립보드 프로 v{VERSION}")
-            self.restore_window_state()
-            
-            self.app_icon = self.create_app_icon()
-            self.setWindowIcon(self.app_icon)
-            
-            # v10.5: 기본값 변경 - 항상 위 해제
-            self.always_on_top = False
-            self.current_tag_filter = None  # 태그 필터
-            self.current_collection_filter = "__all__"  # 컬렉션 필터
-            self.sort_column = 3  # 기본 정렬: 시간 컨럼
-            self.sort_order = Qt.SortOrder.DescendingOrder  # 기본: 내림차순
-            self._search_sort_override = False
-            bind_window_facets(self)
-            self.clipboard_controller = ClipboardController(self)
-            self.history_controller = HistoryController(self)
-            self.table_controller = self.history_controller
-            self.tray_hotkey_controller = TrayHotkeyController(self)
-            self.lifecycle_controller = LifecycleController(self)
-            self.settings_controller = SettingsController(self)
-            self.shell_ui_controller = ShellUiController(self)
-            
-            # v10.0: 복사 규칙 캐싱 (성능 최적화)
-            self._rules_cache = None
-            self._rules_cache_dirty = True
-            self._last_hotkey_error = ""
-            self._base_shortcuts = []
-            self._snippet_shortcuts = []
-            
-            # v10.3: 클립보드 디바운스 타이머 (중복 호출 방지)
-            self._clipboard_debounce_timer = None
-            
-            self.apply_theme()
-            self.init_menu()
-            self.init_ui()
-            self.init_tray()
-            self.init_shortcuts()
-            bind_window_facets(self)
-            
-            # v8.0: 핫키 시그널 연결 (스레드 안전)
-            self.toggle_mini_signal.connect(self._toggle_mini_window_slot)
-            self.paste_last_signal.connect(self._paste_last_item_slot)
-            self.show_main_signal.connect(self.show_window_from_tray)
-
-            # v8.0: 플로팅 미니 창
-            self.mini_window = FloatingMiniWindow(self.db, self)
-            
-            # 핫키 설정 로드 및 등록 (안정성을 위해 지연 초기화)
-            QTimer.singleShot(1000, self.register_hotkeys_at_startup)
-            
-            self.update_always_on_top()
-            
-            # v10.4: Lazy loading - started minimized면 로드 지연
-            if not self.start_minimized:
-                self.load_data()
-            
-            self.update_status_bar()
-            
-            # v8.0: 보관함 자동 잠금 타이머
-            self.vault_timer = QTimer(self)
-            self.vault_timer.timeout.connect(self.check_vault_timeout)
-            self.vault_timer.start(60000)  # 1분마다 타임아웃 체크
-            
-            # v10.2: 만료 항목 정리 타이머 (1시간마다)
-            self.cleanup_timer = QTimer(self)
-            self.cleanup_timer.timeout.connect(self.run_periodic_cleanup)
-            self.cleanup_timer.start(3600000)  # 1시간 = 3600000ms
-            
-            # v10.7: 일일 자동 백업 (실행 중 날짜 변경 포함)
-            self.backup_timer = QTimer(self)
-            self.backup_timer.timeout.connect(self.run_daily_backup_if_needed)
-            self.backup_timer.start(3600000)  # 1시간마다 확인
-            QTimer.singleShot(3000, self.run_daily_backup_if_needed)
-            
-            # v10.2: 등록된 핫키 추적 (안전한 해제를 위해)
-            self._registered_hotkeys = []
-            
-            # 앱 시작 시 5초 후 정리 작업 실행
-            QTimer.singleShot(5000, self.run_periodic_cleanup)
-            
-            logger.info("SmartClipboard Pro v10.3 started")
-        except Exception as e:
-            logger.error(f"MainWindow Init Error: {e}", exc_info=True)
-            raise e
+        bootstrap_main_window(self, start_minimized, globals())
 
     def apply_saved_log_level(self):
         """저장된 로그 레벨을 root/logger에 반영."""
@@ -975,150 +873,49 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"✅ 테마 변경: {THEMES[theme_key]['name']}", 2000)
 
     def show_settings(self):
-        dialog = SettingsDialog(self, self.db, self.current_theme)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_theme = dialog.get_selected_theme()
-            if new_theme != self.current_theme:
-                self.change_theme(new_theme)
-            self.statusBar().showMessage("✅ 설정이 저장되었습니다.", 2000)
+        return dialog_launchers.show_settings_impl(self, SettingsDialog, QDialog)
 
     def show_snippet_manager(self):
-        """스니펫 관리 창 표시"""
-        dialog = SnippetManagerDialog(self, self.db)
-        dialog.exec()
+        return dialog_launchers.show_snippet_manager_impl(self, SnippetManagerDialog)
 
     def show_collection_manager(self):
-        """컬렉션 관리 창 표시"""
-        dialog = CollectionManagerDialog(self, self.db)
-        dialog.exec()
+        return dialog_launchers.show_collection_manager_impl(self, CollectionManagerDialog)
 
     def show_statistics(self):
-        """히스토리 통계 창 표시"""
-        dialog = StatisticsDialog(self, self.db)
-        dialog.exec()
+        return dialog_launchers.show_statistics_impl(self, StatisticsDialog)
 
     def show_copy_rules(self):
-        """복사 규칙 관리 창 표시"""
-        dialog = CopyRulesDialog(self, self.db)
-        dialog.exec()
-    
-    # --- v8.0: 새 다이얼로그 핸들러 ---
+        return dialog_launchers.show_copy_rules_impl(self, CopyRulesDialog)
+
     def show_secure_vault(self):
-        """보안 보관함 표시"""
-        if not HAS_CRYPTO:
-            QMessageBox.warning(self, "라이브러리 필요", 
-                "암호화 기능을 사용하려면 cryptography 라이브러리가 필요합니다.\n\npip install cryptography")
-            return
-        dialog = SecureVaultDialog(self, self.db, self.vault_manager)
-        dialog.exec()
-    
+        return dialog_launchers.show_secure_vault_impl(self, HAS_CRYPTO, QMessageBox, SecureVaultDialog)
+
     def show_clipboard_actions(self):
-        """클립보드 액션 자동화 관리"""
-        dialog = ClipboardActionsDialog(self, self.db, self.action_manager)
-        dialog.exec()
-    
+        return dialog_launchers.show_clipboard_actions_impl(self, ClipboardActionsDialog)
+
     def show_export_dialog(self):
-        """고급 내보내기 다이얼로그"""
-        dialog = ExportDialog(self, self.export_manager)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.statusBar().showMessage("✅ 내보내기 완료", 3000)
-    
+        return dialog_launchers.show_export_dialog_impl(self, ExportDialog, QDialog)
+
     def show_import_dialog(self):
-        """가져오기 다이얼로그"""
-        dialog = ImportDialog(self, self.export_manager)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.refresh_collection_filter_options()
-            self.load_data()
-            self.statusBar().showMessage("✅ 가져오기 완료", 3000)
-    
+        return dialog_launchers.show_import_dialog_impl(self, ImportDialog, QDialog)
+
     def show_trash(self):
-        """v10.2: 휴지통 다이얼로그 표시"""
-        dialog = TrashDialog(self, self.db)
-        dialog.exec()
-    
+        return dialog_launchers.show_trash_impl(self, TrashDialog)
+
     def show_hotkey_settings(self):
-        """핫키 설정 다이얼로그"""
-        dialog = HotkeySettingsDialog(self, self.db)
-        dialog.exec()
-    
+        return dialog_launchers.show_hotkey_settings_impl(self, HotkeySettingsDialog)
+
     def show_shortcuts_dialog(self):
-        """키보드 단축키 안내 다이얼로그"""
-        shortcuts_text = """
-<h2>⌨️ 키보드 단축키</h2>
-<table cellspacing="8">
-<tr><td><b>Ctrl+Shift+V</b></td><td>창 표시/숨기기 (글로벌)</td></tr>
-<tr><td><b>Ctrl+C</b></td><td>선택 항목 복사</td></tr>
-<tr><td><b>Enter</b></td><td>복사 후 붙여넣기</td></tr>
-<tr><td><b>Delete</b></td><td>선택 항목 삭제</td></tr>
-<tr><td><b>Ctrl+P</b></td><td>고정/해제 토글</td></tr>
-<tr><td><b>Ctrl+F</b></td><td>검색창 포커스</td></tr>
-<tr><td><b>Ctrl/Shift+클릭</b></td><td>다중 선택</td></tr>
-<tr><td><b>Escape</b></td><td>검색 클리어 / 창 숨기기</td></tr>
-<tr><td><b>↑↓</b></td><td>테이블 네비게이션</td></tr>
-<tr><td><b>Ctrl+Q</b></td><td>프로그램 종료</td></tr>
-</table>
-<br>
-<p><b>💡 Tip:</b> 헤더를 클릭하면 정렬할 수 있습니다!</p>
-"""
-        QMessageBox.information(self, "키보드 단축키", shortcuts_text)
-    
+        return dialog_launchers.show_shortcuts_dialog_impl(self, QMessageBox)
+
     def show_about_dialog(self):
-        """프로그램 정보 다이얼로그"""
-        about_text = f"""
-<h2>📋 스마트 클립보드 프로 v{VERSION}</h2>
-<p>고급 클립보드 매니저 - PyQt6 기반</p>
-<br>
-<p><b>주요 기능:</b></p>
-<ul>
-<li>클립보드 히스토리 자동 저장</li>
-<li>텍스트, 이미지, 링크, 코드 분류</li>
-<li>태그 시스템 및 스니펫 관리</li>
-<li>복사 규칙 자동화</li>
-<li>다크/라이트/오션 테마</li>
-</ul>
-<br>
-<p>© 2025-2026 MySmartTools</p>
-"""
-        QMessageBox.about(self, f"스마트 클립보드 프로 v{VERSION}", about_text)
+        return dialog_launchers.show_about_dialog_impl(self, QMessageBox, VERSION)
 
     def edit_tag(self):
-        """선택 항목 태그 편집"""
-        pid = self.get_selected_id()
-        if not pid:
-            return
-        current_tags = self.db.get_item_tags(pid)
-        dialog = TagEditDialog(self, self.db, pid, current_tags)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_tags = dialog.get_tags()
-            self.db.set_item_tags(pid, new_tags)
-            self.statusBar().showMessage("✅ 태그가 저장되었습니다.", 2000)
+        return history_interactions.edit_tag_impl(self, globals())
 
     def merge_selected(self):
-        """선택된 여러 항목 병합"""
-        rows = self.table.selectionModel().selectedRows()
-        if len(rows) < 2:
-            QMessageBox.information(self, "알림", "병합하려면 2개 이상의 항목을 선택하세요.")
-            return
-        
-        # 구분자 선택
-        separators = {"줄바꿈": "\n", "콤마": ", ", "공백": " ", "탭": "\t"}
-        sep_name, ok = QInputDialog.getItem(self, "병합", "구분자 선택:", list(separators.keys()), 0, False)
-        if not ok:
-            return
-        
-        separator = separators[sep_name]
-        contents = []
-        for row_idx in sorted([r.row() for r in rows]):
-            pid = self.table.item(row_idx, 0).data(Qt.ItemDataRole.UserRole)
-            data = self.db.get_content(pid)
-            if data and data[2] != "IMAGE":
-                contents.append(data[0])
-        
-        if contents:
-            merged = separator.join(contents)
-            mark_internal_copy(self)
-            self.clipboard.setText(merged)
-            self.statusBar().showMessage(f"✅ {len(contents)}개 항목 병합 완료", 2000)
+        return history_interactions.merge_selected_impl(self, globals())
 
     def show_tag_filter_menu(self):
         """태그 필터 메뉴 표시"""
@@ -1149,68 +946,16 @@ class MainWindow(QMainWindow):
         menu.exec(self.btn_tag_filter.mapToGlobal(self.btn_tag_filter.rect().bottomLeft()))
     
     def filter_by_tag(self, tag):
-        """태그로 필터링"""
-        self.current_tag_filter = tag
-        if tag:
-            self.statusBar().showMessage(f"🏷️ '{tag}' 태그 필터 적용", 2000)
-        self.load_data()
+        return history_interactions.filter_by_tag_impl(self, globals(), tag)
 
     def refresh_collection_filter_options(self):
-        """컬렉션 필터 콤보 항목 갱신."""
-        if not hasattr(self, "collection_filter_combo"):
-            return
-        current = getattr(self, "current_collection_filter", "__all__")
-        self.collection_filter_combo.blockSignals(True)
-        try:
-            self.collection_filter_combo.clear()
-            self.collection_filter_combo.addItem("📂 전체 컬렉션", "__all__")
-            self.collection_filter_combo.addItem("🧺 미분류", "__uncategorized__")
-            for cid, cname, cicon, _ccolor, _created_at in self.db.get_collections():
-                self.collection_filter_combo.addItem(f"{cicon} {cname}", cid)
-
-            idx = self.collection_filter_combo.findData(current)
-            if idx < 0:
-                idx = 0
-                current = "__all__"
-            self.current_collection_filter = current
-            self.collection_filter_combo.setCurrentIndex(idx)
-        finally:
-            self.collection_filter_combo.blockSignals(False)
+        return history_interactions.refresh_collection_filter_options_impl(self, globals())
 
     def on_collection_filter_changed(self, _index):
-        if not hasattr(self, "collection_filter_combo"):
-            return
-        self.current_collection_filter = self.collection_filter_combo.currentData()
-        self.load_data()
+        return history_interactions.on_collection_filter_changed_impl(self, globals(), _index)
 
     def on_header_clicked(self, section):
-        """헤더 클릭 시 정렬 토글"""
-        # 📌(0) 컬럼은 정렬 비활성화
-        if section == 0:
-            return
-        
-        # 같은 컬럼 클릭: 정렬 순서 토글
-        if self.sort_column == section:
-            if self.sort_order == Qt.SortOrder.AscendingOrder:
-                self.sort_order = Qt.SortOrder.DescendingOrder
-            else:
-                self.sort_order = Qt.SortOrder.AscendingOrder
-        else:
-            self.sort_column = section
-            self.sort_order = Qt.SortOrder.AscendingOrder
-        self._search_sort_override = not (
-            self.sort_column == 3 and self.sort_order == Qt.SortOrder.DescendingOrder
-        )
-        
-        # 헤더 라벨 업데이트 (정렬 표시자)
-        header_labels = ["📌", "유형", "내용", "시간", "사용"]
-        for i in range(len(header_labels)):
-            if i == section:
-                indicator = "▲" if self.sort_order == Qt.SortOrder.AscendingOrder else "▼"
-                header_labels[i] = f"{header_labels[i]} {indicator}"
-        self.table.setHorizontalHeaderLabels(header_labels)
-        
-        self.load_data()
+        return history_interactions.on_header_clicked_impl(self, globals(), section)
 
     def init_ui(self):
         return self.shell_ui_controller.init_ui(HAS_QRCODE)
