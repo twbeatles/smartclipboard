@@ -1,51 +1,61 @@
-﻿"""QSS section builders for MainWindow themes."""
+"""QSS section builders for MainWindow themes."""
 
 from __future__ import annotations
 
-def _build_window_input_table_section(theme, glass) -> str:
+from .tokens import derive_tokens
+
+
+def _build_window_input_table_section(theme, glass, tokens=None) -> str:
+    t = tokens if tokens is not None else derive_tokens(theme, glass)
     return f"""
     QMainWindow {{
         background-color: {theme["background"]};
     }}
 
-    /* v9.0: 글래스모피즘 메뉴바 */
+    /* 글래스모피즘 메뉴바 */
     QMenuBar {{
-        background-color: {glass["glass_bg"]};
+        background-color: {t["glass_bg"]};
         color: {theme["text"]};
         font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
-        padding: 6px 4px;
-        border-bottom: 1px solid {theme["border"]};
+        padding: 6px 6px;
+        border-bottom: 1px solid {t["divider"]};
     }}
     QMenuBar::item {{
-        padding: 6px 12px;
-        border-radius: 6px;
+        padding: 7px 14px;
+        border-radius: {t["radius_small"]}px;
         margin: 0 2px;
+        color: {theme["text_secondary"]};
     }}
     QMenuBar::item:selected {{
+        background-color: {t["primary_soft"]};
+        color: {theme["text"]};
+    }}
+    QMenuBar::item:pressed {{
         background-color: {theme["primary"]};
-        border-radius: 6px;
+        color: {t["on_primary"]};
     }}
 
-    /* v9.0: 글래스모피즘 메뉴 */
+    /* 글래스모피즘 컨텍스트/드롭 메뉴 */
     QMenu {{
-        background-color: {glass["glass_bg"]};
+        background-color: {theme["surface"]};
         color: {theme["text"]};
         border: 1px solid {theme["border"]};
-        border-radius: 12px;
+        border-radius: {t["radius_control"]}px;
         font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
         padding: 8px;
     }}
     QMenu::item {{
-        padding: 10px 24px;
-        border-radius: 8px;
-        margin: 2px 4px;
+        padding: 9px 22px;
+        border-radius: {t["radius_small"]}px;
+        margin: 1px 4px;
     }}
     QMenu::item:selected {{
         background-color: {theme["primary"]};
+        color: {t["on_primary"]};
     }}
     QMenu::separator {{
         height: 1px;
-        background-color: {theme["border"]};
+        background-color: {t["divider"]};
         margin: 6px 12px;
     }}
 
@@ -55,104 +65,122 @@ def _build_window_input_table_section(theme, glass) -> str:
         font-size: 13px;
     }}
 
-    /* v9.0: 글래스모피즘 검색창 */
+    QToolTip {{
+        background-color: {theme["surface"]};
+        color: {theme["text"]};
+        border: 1px solid {theme["border"]};
+        border-radius: {t["radius_small"]}px;
+        padding: 6px 10px;
+        font-size: 12px;
+    }}
+
+    /* 글래스모피즘 검색창/콤보 */
     QLineEdit, QComboBox {{
-        background-color: {glass["glass_bg"]};
-        border: 2px solid {theme["border"]};
-        border-radius: 14px;
-        padding: 10px 18px;
+        background-color: {t["surface_high"]};
+        border: 1px solid {theme["border"]};
+        border-radius: {t["radius_pill"]}px;
+        padding: 9px 16px;
         color: {theme["text"]};
         selection-background-color: {theme["primary"]};
+        selection-color: {t["on_primary"]};
         font-size: 14px;
-    }}
-    QLineEdit:focus, QComboBox:focus {{
-        border: 2px solid {theme["primary"]};
-        background-color: {theme["surface_variant"]};
     }}
     QLineEdit:hover, QComboBox:hover {{
         border-color: {theme["primary_variant"]};
+        background-color: {theme["surface_variant"]};
+    }}
+    QLineEdit:focus, QComboBox:focus {{
+        border: 1px solid {theme["primary"]};
+        background-color: {theme["surface_variant"]};
     }}
     QComboBox::drop-down {{
         border: none;
         padding-right: 12px;
-        width: 20px;
+        width: 22px;
+    }}
+    QComboBox::down-arrow {{
+        width: 0;
+        height: 0;
     }}
     QComboBox QAbstractItemView {{
-        background-color: {glass["glass_bg"]};
+        background-color: {theme["surface"]};
         border: 1px solid {theme["border"]};
-        border-radius: 10px;
+        border-radius: {t["radius_control"]}px;
         selection-background-color: {theme["primary"]};
-        padding: 4px;
+        selection-color: {t["on_primary"]};
+        padding: 6px;
+        outline: none;
     }}
 
-    /* v9.0: 글래스모피즘 테이블 */
+    /* 글래스모피즘 히스토리 테이블 */
     QTableWidget {{
-        background-color: {glass["glass_bg"]};
-        border: none;
-        border-radius: 16px;
-        selection-background-color: {theme["primary"]};
+        background-color: {t["glass_bg"]};
+        alternate-background-color: {t["overlay_hover"]};
+        border: 1px solid {t["divider"]};
+        border-radius: {t["radius_card"]}px;
+        selection-background-color: transparent;
         gridline-color: transparent;
         outline: none;
-        padding: 4px;
+        padding: 6px;
     }}
     QTableWidget::item {{
-        padding: 14px 12px;
-        border-bottom: 1px solid {theme["border"]};
+        padding: 12px 12px;
+        border-bottom: 1px solid {t["divider"]};
         border-radius: 0px;
+        color: {theme["text"]};
     }}
     QTableWidget::item:selected {{
-        background-color: {theme["primary"]};
-        color: {theme.get("selected_text", "#ffffff")};
-        font-weight: 500;
-        border-left: 4px solid {theme.get("gradient_end", theme["primary_variant"])};
-        padding-left: 10px;
+        background-color: {t["primary_soft"]};
+        color: {theme["text"]};
+        font-weight: 600;
+        border-left: 3px solid {theme["primary"]};
+        padding-left: 9px;
     }}
     QTableWidget::item:hover:!selected {{
-        background-color: {theme.get("hover_bg", theme["surface_variant"])};
+        background-color: {t["overlay_hover"]};
         color: {theme.get("hover_text", theme["text"])};
-        border-left: 4px solid {theme["primary"]};
-        padding-left: 8px;
+        border-left: 3px solid {theme["primary_variant"]};
+        padding-left: 9px;
     }}
     QTableWidget::item:focus {{
         outline: none;
-        border: 2px solid {theme["primary"]};
-        border-radius: 4px;
     }}
 
     QHeaderView::section {{
-        background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 {theme["surface_variant"]}, stop:1 {theme["surface"]});
-        padding: 12px 8px;
+        background-color: transparent;
+        padding: 10px 8px;
         border: none;
-        border-bottom: 2px solid {theme["border"]};
+        border-bottom: 1px solid {theme["border"]};
         font-weight: 700;
-        font-size: 12px;
+        font-size: 11px;
+        letter-spacing: 0.6px;
         color: {theme["text_secondary"]};
     }}
     QHeaderView::section:hover {{
-        background-color: {theme["surface_variant"]};
         color: {theme["primary"]};
     }}
 
     QTextEdit {{
-        background-color: {glass["glass_bg"]};
-        border: 2px solid {theme["border"]};
-        border-radius: 14px;
+        background-color: {t["surface_high"]};
+        border: 1px solid {theme["border"]};
+        border-radius: {t["radius_control"]}px;
         padding: 14px;
         font-family: 'Malgun Gothic', 'Cascadia Code', 'Consolas', 'D2Coding', monospace;
         font-size: 14px;
         line-height: 1.5;
         selection-background-color: {theme["primary"]};
+        selection-color: {t["on_primary"]};
     }}
     QTextEdit:focus {{
         border-color: {theme["primary"]};
     }}
 
     QLabel#ImagePreview {{
-        background-color: {glass["glass_bg"]};
-        border: 2px solid {theme["border"]};
-        border-radius: 16px;
+        background-color: {t["surface_high"]};
+        border: 1px solid {theme["border"]};
+        border-radius: {t["radius_card"]}px;
     }}
     """
+
 
 __all__ = ["_build_window_input_table_section"]

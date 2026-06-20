@@ -131,20 +131,24 @@ def show_empty_state_impl(self, theme):
         current_collection_label = self.collection_filter_combo.currentText() if hasattr(self, "collection_filter_combo") else "선택한 컬렉션"
         empty_msg = f"📁 '{current_collection_label}'에 항목이 없습니다\n\n항목을 우클릭하여 컬렉션으로 이동해보세요"
     else:
-        empty_msg = "📋 클립보드 히스토리가 비어있습니다\n\n"
-        empty_msg += "💡 시작 방법:\n"
-        empty_msg += "• 텍스트, 이미지, 파일을 복사하면 자동 저장\n"
-        empty_msg += "• Ctrl+Shift+V: 클립보드 창 열기\n"
-        empty_msg += "• Alt+V: 미니 창 열기\n"
-        empty_msg += "• 더블클릭으로 항목 붙여넣기"
+        empty_msg = "📋  클립보드 히스토리가 비어 있습니다\n"
+        empty_msg += "무언가를 복사하면 여기에 자동으로 쌓입니다\n\n"
+        empty_msg += "💡  이렇게 시작해 보세요\n"
+        empty_msg += "•  텍스트 · 이미지 · 파일을 복사 → 자동 저장\n"
+        empty_msg += "•  Ctrl + Shift + V  →  클립보드 창 열기\n"
+        empty_msg += "•  Alt + V  →  미니 창 열기\n"
+        empty_msg += "•  항목 더블클릭  →  바로 붙여넣기"
 
     empty_item = QTableWidgetItem(empty_msg)
     empty_item.setForeground(QColor(theme["text_secondary"]))
     empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
     empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+    empty_font = empty_item.font()
+    empty_font.setPointSize(max(empty_font.pointSize() + 1, 11))
+    empty_item.setFont(empty_font)
     self.table.setItem(0, 0, empty_item)
     self.table.setSpan(0, 0, 1, 5)
-    self.table.setRowHeight(0, 150)
+    self.table.setRowHeight(0, 200)
 
 
 def populate_table_impl(self, items, theme, TYPE_ICONS):
