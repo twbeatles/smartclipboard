@@ -25,10 +25,13 @@ def update_status_bar_impl(self, selection_count, qt_module):
     if hasattr(self, "privacy_indicator"):
         if self.is_privacy_mode:
             self.privacy_indicator.setText("🔒 프라이버시")
+            self.privacy_indicator.setVisible(True)
         elif self.is_monitoring_paused:
             self.privacy_indicator.setText("⏸ 일시정지")
+            self.privacy_indicator.setVisible(True)
         else:
             self.privacy_indicator.setText("")
+            self.privacy_indicator.setVisible(False)
 
     if self.is_privacy_mode:
         self.statusBar().showMessage("🔒 프라이버시 모드 활성화됨 (클립보드 기록 중지)")

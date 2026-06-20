@@ -103,9 +103,12 @@ class FloatingMiniWindow(QWidget):
 
         header = QHBoxLayout()
         self.title_label = QLabel("📋 빠른 클립보드")
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.title_label.setObjectName("MiniTitle")
+        self.title_label.setStyleSheet("font-weight: 700; font-size: 14px;")
         self.btn_close = QPushButton("✕")
+        self.btn_close.setObjectName("MiniClose")
         self.btn_close.setFixedSize(28, 28)
+        self.btn_close.setToolTip("닫기")
         self.btn_close.clicked.connect(self.hide)
         header.addWidget(self.title_label)
         header.addStretch()
@@ -137,11 +140,12 @@ class FloatingMiniWindow(QWidget):
         theme = self.themes.get(theme_name, self.themes["dark"])
         glass = self.glass_styles.get(theme_name, self.glass_styles["dark"])
 
+        primary = theme["primary"]
         self.container.setStyleSheet(
             f"""
             QFrame#MiniContainer {{
                 background-color: {glass["glass_bg"]};
-                border-radius: 14px;
+                border-radius: 16px;
                 border: 1px solid {theme["border"]};
             }}
             QLabel {{
@@ -153,31 +157,45 @@ class FloatingMiniWindow(QWidget):
                 border: none;
                 color: {theme["text"]};
                 font-size: 13px;
+                outline: none;
             }}
             QListWidget::item {{
                 padding: 10px 12px;
-                border-radius: 8px;
-                margin: 2px 4px;
+                border-radius: 10px;
+                margin: 2px 2px;
             }}
             QListWidget::item:hover {{
                 background-color: {theme["hover_bg"]};
                 color: {theme["hover_text"]};
             }}
             QListWidget::item:selected {{
-                background-color: {theme["primary"]};
+                background-color: {primary};
                 color: {theme["selected_text"]};
             }}
             QPushButton {{
                 background-color: {theme["surface_variant"]};
                 border: 1px solid {theme["border"]};
-                border-radius: 8px;
+                border-radius: 10px;
                 padding: 8px 14px;
                 color: {theme["text"]};
-                font-weight: 500;
+                font-weight: 600;
             }}
             QPushButton:hover {{
-                background-color: {theme["primary"]};
-                border-color: {theme["primary"]};
+                background-color: {primary};
+                border-color: {primary};
+                color: white;
+            }}
+            QPushButton#MiniClose {{
+                background-color: transparent;
+                border: none;
+                border-radius: 14px;
+                padding: 0;
+                color: {theme["text"]};
+                font-size: 14px;
+                font-weight: 700;
+            }}
+            QPushButton#MiniClose:hover {{
+                background-color: {theme["error"] if "error" in theme else primary};
                 color: white;
             }}
             """
