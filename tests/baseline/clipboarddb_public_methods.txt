@@ -30,6 +30,7 @@ get_collections
 get_content
 get_copy_rules
 get_deleted_items
+get_item_annotations
 get_item_tags
 get_items
 get_items_by_collection

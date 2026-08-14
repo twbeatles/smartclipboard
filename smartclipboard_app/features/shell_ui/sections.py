@@ -174,7 +174,7 @@ def build_main_ui(self, HAS_QRCODE):
 
     self.btn_google = QPushButton("🔍 구글")
     self.btn_google.setObjectName("ToolBtn")
-    self.btn_google.setToolTip("구글에서 검색 (Ctrl+G)")
+    self.btn_google.setToolTip("구글에서 검색")
     self.btn_google.clicked.connect(self.search_google)
 
     self.btn_qr = QPushButton("📱 QR")

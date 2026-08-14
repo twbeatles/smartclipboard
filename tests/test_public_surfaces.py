@@ -82,6 +82,8 @@ class PublicSurfaceTests(unittest.TestCase):
             "smartclipboard_app.features.shell.controller",
             "smartclipboard_app.features.shell_ui.controller",
             "smartclipboard_app.features.settings.controller",
+            "smartclipboard_app.features.action_palette.controller",
+            "smartclipboard_core.action_palette",
             "smartclipboard_app.features.import_export.manager",
             "smartclipboard_app.features.vault.service",
             "smartclipboard_core.automation.manager",

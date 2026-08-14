@@ -28,6 +28,7 @@ def bootstrap_main_window(self: Any, start_minimized: bool, namespace: Mapping[s
     LifecycleController = namespace["LifecycleController"]
     SettingsController = namespace["SettingsController"]
     ShellUiController = namespace["ShellUiController"]
+    ActionPaletteController = namespace["ActionPaletteController"]
     FloatingMiniWindow = namespace["FloatingMiniWindow"]
     QTimer = namespace["QTimer"]
     logger = namespace["logger"]
@@ -75,6 +76,8 @@ def bootstrap_main_window(self: Any, start_minimized: bool, namespace: Mapping[s
         self.lifecycle_controller = LifecycleController(self)
         self.settings_controller = SettingsController(self)
         self.shell_ui_controller = ShellUiController(self)
+        self.action_palette_controller = ActionPaletteController(self)
+        self._show_action_palette_preview = self.action_palette_controller.show_preview
 
         # v10.0: 복사 규칙 캐싱 (성능 최적화)
         self._rules_cache = None

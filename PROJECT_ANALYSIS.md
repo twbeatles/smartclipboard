@@ -1,6 +1,6 @@
 # SmartClipboard Pro — 프로젝트 구조 분석
 
-> **기준일:** 2026-06-10
+> **기준일:** 2026-08-14 (디렉터리/단축키/Palette 동기화)
 > **버전:** v10.6
 > **목적:** 신규 기능 추가를 위한 코드베이스 심층 분석
 
@@ -68,6 +68,7 @@ smartclipboard/
 │   │   └── secure_vault.py        ← PBKDF2+Fernet 암호화 관리자
 │   │
 │   ├── features/                  ← 도메인별 실제 구현
+│   │   ├── action_palette/        ← Contextual Action Palette UI (수동)
 │   │   ├── clipboard/             ← clipboard runtime pipeline/controller
 │   │   ├── dialogs/               ← MainWindow dialog launcher
 │   │   ├── history/               ← table/menu/view/interaction
@@ -121,7 +122,9 @@ smartclipboard/
 ├── smartclipboard_core/
 │   ├── database.py                ← ClipboardDB 컴포지터 (mixin 조합)
 │   ├── app_paths.py               ← source/frozen app data directory resolver
-│   ├── actions.py                 ← ClipboardActionManager
+│   ├── actions.py                 ← ClipboardActionManager facade
+│   ├── action_palette/            ← 수동 Palette 코어 (models/registry/builtins)
+│   ├── automation/                ← 자동 액션 구현 (fetch_title/formatters)
 │   ├── file_paths.py              ← FILE 경로 정규화/설명/중복 시그니처 헬퍼
 │   ├── worker.py                  ← 비동기 Worker + WorkerSignals
 │   │
@@ -141,12 +144,14 @@ smartclipboard/
 │   ├── test_migration_collections.py ← JSON 마이그레이션·컬렉션 remap
 │   ├── test_signal_snapshot.py    ← 시그널 연결 스냅샷
 │   ├── test_public_surfaces.py    ← ClipboardDB 공개 API 회귀
+│   ├── test_action_palette_core.py ← Palette 순수 변환/applicability
+│   ├── test_action_palette_ui.py   ← Palette 다이얼로그/writeback/fetch
 │   ├── test_legacy_ui_contracts.py
 │   ├── test_ui_dialogs_widgets.py
 │   ├── test_core.py
 │   ├── test_symbol_inventory.py
 │   └── baseline/
-│       ├── clipboarddb_public_methods.txt   ← 71개 공개 메서드 기준선
+│       ├── clipboarddb_public_methods.txt   ← 공개 메서드 기준선 (`get_item_annotations` 포함)
 │       ├── mainwindow_signal_connects.txt
 │       └── symbol_inventory_v10_6.json      ← 심볼 인벤토리 (39KB)
 │
@@ -247,7 +252,7 @@ class ClipboardDB(
 - SQLite WAL 모드, `synchronous=NORMAL`
 - `threading.RLock()` — 재진입 가능 스레드 안전
 
-**71개 공개 메서드** (기준선: `tests/baseline/clipboarddb_public_methods.txt`)
+**73개 공개 메서드** (기준선: `tests/baseline/clipboarddb_public_methods.txt`, `get_item_annotations` 포함)
 
 #### `smartclipboard_core/db_parts/`
 
@@ -331,7 +336,7 @@ class Worker(QRunnable):
 | `Ctrl+F` | 검색창 포커스 |
 | `Ctrl+C` | 선택 항목 복사 |
 | `Ctrl+P` | 고정/해제 토글 |
-| `Ctrl+G` | 구글 검색 |
+| `Alt+A` | 선택 항목 작업 실행 (Action Palette) |
 | `Enter` | 복사 후 붙여넣기 |
 | `Delete` | 항목 삭제 |
 | `Escape` | 창 숨기기 |
@@ -411,7 +416,7 @@ class Worker(QRunnable):
 | `id` | INTEGER PK | 자동 증가 |
 | `content` | TEXT | 텍스트 내용 |
 | `image_data` | BLOB | 이미지 데이터 (최신 20개 유지) |
-| `type` | TEXT | `TEXT` / `LINK` / `IMAGE` / `CODE` / `COLOR` |
+| `type` | TEXT | `TEXT` / `LINK` / `IMAGE` / `CODE` / `COLOR` / `FILE` |
 | `timestamp` | TEXT | ISO 형식 생성 시각 |
 | `pinned` | INTEGER | 고정 여부 (1=고정) |
 | `pin_order` | INTEGER | 고정 항목 정렬 순서 |
@@ -476,6 +481,10 @@ ClipboardActionManager.process(text, item_id)
     └─► transform   → 즉시 변환
 ```
 
+자동 규칙은 `ClipboardActionManager`만 담당한다. 선택 항목에 대한 수동 변환은
+`smartclipboard_core.action_palette` + `features/action_palette` (Alt+A / 우클릭 `작업 실행...`)이며
+`actions.py` facade를 확장하지 않는다.
+
 ### 내부 복사 루프 방지
 
 ```python
@@ -527,6 +536,7 @@ clipboard.setText(text)
 - [x] 패턴 기반 토스트 알림
 - [x] 액션/규칙 생성·수정·삭제·우선순위 이동 UI
 - [x] 빈 문자열 허용 `custom_replace` 삭제 치환
+- [x] Contextual Action Palette (Alt+A / 우클릭 작업 실행, 자동 규칙과 분리)
 
 ### UI/UX
 - [x] 5가지 테마 (다크/라이트/오션/퍼플/미드나잇)
@@ -599,6 +609,17 @@ clipboard.setText(text)
 - JSON 마이그레이션 문구는 히스토리 메타데이터 + 컬렉션 범위만 의미하도록 정리되었고, 스키마 자체는 확장하지 않았다.
 - `smartclipboard.spec`는 이번 변경에서 추가 hidden import 없이 현행 상태를 유지해도 충분하다.
 
+## 8.5 2026-08-14 Contextual Action Palette
+
+- 수동 Palette는 `smartclipboard_core/action_palette/`(변환·applicability)와 `smartclipboard_app/features/action_palette/`(다이얼로그·writeback)에 있다.
+- `ClipboardActionManager` / `actions.py` facade는 자동 규칙 전용으로 유지한다.
+- 텍스트 결과는 `mark_internal_copy()` 후 `setText()`, 선택 행은 `replace_text_item_or_merge()`로 writeback 한다.
+- `fetch_title`는 `validate_title_fetch_url`·title cache·inflight 합치기·종료 시 `shutdown_palette_workers()`를 재사용한다.
+- 민감 태그(단어 경계)와 본문 heuristic(PEM/`sk-`/`AKIA`/JWT)이면 Google 검색·제목 조회를 숨긴다.
+- QR은 2048자 상한과 렌더 예외 안내를 유지한다.
+- 패키징은 기존 `collect_submodules("smartclipboard_core")` / `collect_submodules("smartclipboard_app.features")`로 포함되며 spec 추가 hidden import는 없다.
+- 비공식 명세: `smartclipboard_action_palette_agent_spec.md`. 감사 기록: `PROJECT_AUDIT.md`.
+
 ---
 
 ## 8. 기능 추가 가이드
@@ -612,11 +633,9 @@ clipboard.setText(text)
 
 ### 8.2 새 클립보드 액션 추가
 
-`smartclipboard_core/actions.py`의 `process()` 메서드에 액션 타입 추가:
-```python
-elif action_type == "my_new_action":
-    result = self._handle_my_new_action(text, params)
-```
+자동 규칙 액션은 `smartclipboard_core/automation/`에 구현하고 `actions.py` facade 계약을 유지한다.
+수동 Palette 액션은 `smartclipboard_core/action_palette/builtins/`에 추가한 뒤 registry에 등록한다.
+`ClipboardActionManager.process()`에 Palette 로직을 넣지 않는다.
 
 ### 8.3 새 다이얼로그 추가
 
@@ -671,6 +690,8 @@ QApplication (bootstrap.py)
                     │
                     ├── ClipboardActionManager (smartclipboard_core/actions.py)
                     │       └── Worker (smartclipboard_core/worker.py)
+                    │
+                    ├── ActionPalette (core/action_palette + features/action_palette)
                     │
                     ├── SecureVaultManager (managers/secure_vault.py)
                     ├── ExportImportManager (managers/export_import.py)
@@ -740,6 +761,8 @@ python -m unittest discover -s tests -v
 | `test_legacy_ui_contracts.py` | 토스트·선택모드·가시성 가드 |
 | `test_signal_snapshot.py` | MainWindow 시그널 스냅샷 |
 | `test_public_surfaces.py` | ClipboardDB 공개 API 회귀 |
+| `test_action_palette_core.py` | Palette 변환/applicability/민감 가드 |
+| `test_action_palette_ui.py` | Palette 다이얼로그/writeback/fetch 가드 |
 
 ### 빌드
 

@@ -233,6 +233,7 @@ class SettingsDialog(QDialog):
 <b>Enter</b> - 붙여넣기<br>
 <b>Escape</b> - 창 숨기기<br>
 <b>Ctrl+F</b> - 검색창 포커스<br>
+<b>Alt+A</b> - 선택 항목 작업 실행<br>
 <b>↑/↓</b> - 리스트 탐색
         """
         )

@@ -125,6 +125,23 @@ class HistoryMetadataMixin(DBRuntimeMixin):
                 logger.error(f"Get Note Error: {e}")
                 return ""
 
+    def get_item_annotations(self, item_id: int) -> tuple[str, str, str] | None:
+        """tags, note, url_title을 한 번에 읽는다."""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "SELECT tags, note, url_title FROM history WHERE id = ?",
+                    (item_id,),
+                )
+                row = cursor.fetchone()
+            except sqlite3.Error as e:
+                logger.error(f"Get Annotations Error: {e}")
+                return None
+        if not row:
+            return None
+        return str(row[0] or ""), str(row[1] or ""), str(row[2] or "")
+
     def set_item_metadata(self, item_id: int, **metadata) -> bool:
         """항목 메타데이터를 키-값 형태로 일괄 업데이트."""
         with self.lock:

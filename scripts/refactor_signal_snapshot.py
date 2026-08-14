@@ -57,6 +57,11 @@ def _discover_helper_paths(target: pathlib.Path) -> list[pathlib.Path]:
         repo_root / "smartclipboard_app" / "features" / "shell_ui" / "sections.py",
         repo_root / "smartclipboard_app" / "ui" / "mainwindow_parts" / "ui_ops.py",
         repo_root / "smartclipboard_app" / "features" / "shell_ui" / "view.py",
+        repo_root / "smartclipboard_app" / "features" / "action_palette" / "dialog.py",
+        repo_root / "smartclipboard_app" / "features" / "action_palette" / "preview.py",
+        repo_root / "smartclipboard_app" / "features" / "action_palette" / "integration.py",
+        repo_root / "smartclipboard_app" / "features" / "action_palette" / "controller.py",
+        repo_root / "smartclipboard_app" / "features" / "action_palette" / "services.py",
     ]
     return [path for path in ordered_paths if path.exists() and path.name != "__init__.py"]
 

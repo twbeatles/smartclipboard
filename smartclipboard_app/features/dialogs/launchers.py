@@ -83,6 +83,7 @@ def show_shortcuts_dialog_impl(self, message_box_cls):
 <tr><td><b>Delete</b></td><td>선택 항목 삭제</td></tr>
 <tr><td><b>Ctrl+P</b></td><td>고정/해제 토글</td></tr>
 <tr><td><b>Ctrl+F</b></td><td>검색창 포커스</td></tr>
+<tr><td><b>Alt+A</b></td><td>선택 항목 작업 실행</td></tr>
 <tr><td><b>Ctrl/Shift+클릭</b></td><td>다중 선택</td></tr>
 <tr><td><b>Escape</b></td><td>검색 클리어 / 창 숨기기</td></tr>
 <tr><td><b>↑↓</b></td><td>테이블 네비게이션</td></tr>

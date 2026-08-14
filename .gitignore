@@ -15,7 +15,12 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+.tox/
+.nox/
+.hypothesis/
 *.egg-info/
+pip-log.txt
+pip-delete-this-directory.txt
 
 # Virtual environments
 .venv/
@@ -24,8 +29,20 @@ env/
 
 # --- OS / Editor ---
 Thumbs.db
+ehthumbs.db
 Desktop.ini
 .DS_Store
+.idea/
+*.swp
+*.swo
+*~
+*.orig
+*.bak
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
 
 # --- App local data (do not version) ---
 *.db
@@ -44,6 +61,17 @@ Desktop.ini
 *.log.*
 debug_startup_error.log
 
+# Agent/session caches (project skills under these dirs stay tracked)
+.grok/sessions/
+.grok/cache/
+.grok/tmp/
+.claude/cache/
+.claude/plugins/cache/
+.claude/settings.local.json
+.agents/cache/
+.agents/sessions/
+.specify/.cache/
+
 # Backups (contains user DB snapshots)
 backups/
 
@@ -53,6 +81,7 @@ dist/
 dist3/
 *.spec.bak
 .tmp-unittest/
+*.7z
 
 # Bytecode caches that may appear inside build outputs
 build/**/localpycs/

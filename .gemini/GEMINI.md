@@ -4,7 +4,7 @@
 
 - 엔트리: `클립모드 매니저.py`
 - 앱 부트스트랩: `smartclipboard_app/bootstrap.py`
-- 코어 모듈: `smartclipboard_core/`
+- 코어 모듈: `smartclipboard_core/` (`automation/`, `action_palette/`, `db_parts/`)
 - 정적 분석 범위: 루트 `pyrightconfig.json`
 - 레거시 런타임:
   - `smartclipboard_app/legacy_main.py`는 로더
@@ -29,6 +29,8 @@
 - `fetch_title`은 로컬/사설/메타데이터 주소를 기본 차단하고, HTML 응답만 제한 크기로 읽으며, URL title cache는 256개/24시간 TTL 제한을 유지합니다.
 - 동일 비이미지 재복사는 기존 history row를 갱신하는 정책이며 메타데이터를 유지해야 합니다.
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅합니다.
+- Action Palette 텍스트 결과도 동일하게 `mark_internal_copy()` 후 `setText()`하며, 변환 텍스트는 선택 history 행에 `replace_text_item_or_merge()`로 writeback 합니다. 자동 `ClipboardActionManager`를 다시 타지 않습니다.
+- Palette `fetch_title`는 기존 `validate_title_fetch_url` 사전검증·title cache·inflight 합치기·종료 시 disconnect를 유지합니다.
 - JSON 마이그레이션(`include_metadata=True`)에는 top-level `collections` 메타데이터가 포함되며 import 시 컬렉션 ID remap이 수행됩니다.
 - JSON 마이그레이션 범위는 히스토리 메타데이터 + 컬렉션까지만 의미하며, 스니펫/규칙/핫키/보안 보관함 상태까지 포함하는 것으로 확장하지 않습니다.
 - JSON export/import는 `IMAGE` 항목의 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 제외합니다.
@@ -48,6 +50,7 @@
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지합니다.
 - 2026-05-11 기준 privacy debounce, `deleted_history.url_title`, action writeback merge, restore full/minimal 검증, 핫키 실패 알림, 설정 write/read-back, 텍스트 1MB 제한은 기존 `collect_submodules` 규칙 안에 있으며 spec 추가 자산은 없습니다.
 - 2026-06-10 SOLID 분할 이후에도 새 모듈은 `smartclipboard_app.features`와 `smartclipboard_core.db_parts` 하위에 있으므로 spec 추가 hidden import/datas는 필요 없습니다.
+- 2026-08-14 Contextual Action Palette는 `smartclipboard_core.action_palette`와 `smartclipboard_app.features.action_palette`에 있으며 기존 `collect_submodules` 범위로 포함됩니다. spec 추가 hidden import/datas는 없습니다.
 - `MainWindow.__init__` orchestration은 `smartclipboard_app/features/shell/window_bootstrap.py`, dialog launcher는 `features/dialogs/`, history interaction은 `features/history/interactions.py`, QSS section builders는 `features/settings/styles/`, import/export helper는 `features/import_export/services.py`에 둡니다.
 - `smartclipboard_core/db_parts/history_ops.py`는 facade이고 실제 history 구현은 `smartclipboard_core/db_parts/history/` 하위 책임별 모듈에 있습니다.
 - `.codegraph/`는 로컬 분석 인덱스이며 `.gitignore` 제외 대상입니다.
@@ -81,6 +84,8 @@ python -m unittest discover -s tests -v
 - `tests/test_legacy_ui_contracts.py`
 - `tests/test_signal_snapshot.py`
 - `tests/test_public_surfaces.py`
+- `tests/test_action_palette_core.py`
+- `tests/test_action_palette_ui.py`
 
 ## 빌드
 

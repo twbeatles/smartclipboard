@@ -4,7 +4,7 @@
 
 - 실행 진입점: `클립모드 매니저.py`
 - 부트스트랩: `smartclipboard_app/bootstrap.py`
-- 코어 비즈니스 로직: `smartclipboard_core/`
+- 코어 비즈니스 로직: `smartclipboard_core/` (`automation/`, `action_palette/`, `db_parts/`)
 - 정적 분석 범위: 루트 `pyrightconfig.json` (현행 유지보수 대상 기준)
 - 레거시 런타임:
   - `smartclipboard_app/legacy_main.py`는 **marshal payload 로더**
@@ -30,6 +30,8 @@
 - 동일 비이미지 재복사는 기존 history row를 갱신하는 정책이며, 메타데이터(tags/note/bookmark/collection/pin/use_count)를 유지해야 합니다.
 - 동일 `FILE` path 집합 재복사도 기존 history row를 갱신하는 정책이며, `content`는 newline-joined absolute paths, `file_path`는 첫 경로로 유지합니다.
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 통해 내부 복사 플래그를 먼저 세팅합니다.
+- Action Palette 텍스트 결과도 동일하게 `mark_internal_copy()` 후 `setText()`하며, 변환 텍스트는 선택 history 행에 `replace_text_item_or_merge()`로 writeback 합니다. 자동 `ClipboardActionManager`를 다시 타지 않습니다.
+- Palette `fetch_title`는 기존 `validate_title_fetch_url` 사전검증·title cache·inflight 합치기·종료 시 disconnect를 유지하고, 성공 후 `load_data()`(또는 dirty)로 UI를 갱신합니다.
 - 파일 clipboard 복원 경로는 `smartclipboard_app.ui.clipboard_guard.restore_file_clipboard()`를 사용하고, 일부 파일만 남아 있으면 부분 복원, 모두 없으면 clipboard를 건드리지 않습니다.
 - `FILE` 항목은 복원 직전뿐 아니라 목록/상세/미니 창에서도 stale/missing 경로 수를 먼저 보여주는 UX를 유지합니다.
 - JSON 마이그레이션 포맷(`include_metadata=True`)은 `items` 외에 top-level `collections` 메타데이터(legacy_id/name/icon/color)를 포함하며, import 시 컬렉션 ID remap을 수행합니다.
@@ -55,6 +57,7 @@
 - `smartclipboard.spec`는 `smartclipboard_core`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` 하위 모듈을 hidden import로 자동 수집하도록 유지하고, payload에서 직접 참조하는 `smartclipboard_app.ui.dialogs.collections`도 명시적으로 포함합니다.
 - 2026-05-11 기준 privacy debounce, `deleted_history.url_title`, action writeback merge, restore full/minimal 검증, 핫키 실패 알림, 설정 write/read-back, 텍스트 1MB 제한은 기존 `collect_submodules` 규칙 안에 있으며 `smartclipboard.spec` 추가 자산은 없습니다.
 - 2026-06-10 기준 SOLID 분할은 `smartclipboard_app.features`와 `smartclipboard_core.db_parts` 하위에 머물러 있으므로 `smartclipboard.spec` 추가 hidden import/datas 없이 유지합니다.
+- 2026-08-14 기준 Contextual Action Palette는 `smartclipboard_core.action_palette`와 `smartclipboard_app.features.action_palette`에 있으며 기존 `collect_submodules("smartclipboard_core")` / `collect_submodules("smartclipboard_app.features")` 범위로 포함됩니다. spec 추가 hidden import/datas는 없습니다.
 - `.codegraph/`는 로컬 분석 인덱스이므로 `.gitignore`로 제외하고 버전 관리하지 않습니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
@@ -114,6 +117,8 @@ python -m unittest discover -s tests -v
 - `tests/test_signal_snapshot.py` (MainWindow 분할 구조 시그널 스냅샷)
 - `tests/test_legacy_loader.py` (payload 실패 시 src 폴백/활성 구현 상수)
 - `tests/test_public_surfaces.py` (공개 API/시그니처 회귀)
+- `tests/test_action_palette_core.py` (Palette 순수 변환/applicability/민감 가드)
+- `tests/test_action_palette_ui.py` (Palette 다이얼로그/복사 writeback/fetch 가드)
 - `tests/test_core.py`와 `tests/test_ui_dialogs_widgets.py`에는 2026-05-11 기준 privacy debounce, `url_title` 보존, action duplicate merge, restore full/minimal 검증, 설정 저장 실패, startup hotkey 실패, 대용량 텍스트 clipboard 회귀가 포함됩니다.
 
 ## 5. 빌드
@@ -166,3 +171,52 @@ pyinstaller --clean smartclipboard.spec
 - Added API surface regression check:
   - `tests/test_public_surfaces.py`
   - `tests/baseline/clipboarddb_public_methods.txt`
+
+<!-- SPECKIT-AGENT-GUIDE:START -->
+
+## Spec Kit / Spec-Driven Development (AI 에이전트 필독)
+
+> 이 블록은 GitHub Spec Kit 활성화 및 기능 명세 작업 결과를 AI 에이전트가 바로 쓰도록 정리한 안내입니다.
+> 수정 시 마커 주석을 유지하세요. 스크립트/후속 세션이 이 구간을 갱신합니다.
+
+### 이 저장소 상태
+
+- **프로젝트**: `smartclipboard`
+- **Spec Kit 초기화**: `.specify/ 있음`
+- **에이전트 스킬**: Grok=True, Claude=True, Codex/Agy(.agents)=True
+- **활성 기능**: Spec Kit `specs/` 없음. 비공식 루트 명세 `smartclipboard_action_palette_agent_spec.md` (Contextual Action Palette, 2026-08 구현)
+
+### 에이전트가 먼저 읽을 파일
+
+1. `.specify/` 및 `.grok/skills` / `.claude/skills` / `.agents/skills` 의 `speckit-*`
+2. 기능 작업 시작 시 `/speckit-specify` 로 `specs/00N-...` 생성
+
+### 권장 워크플로 (스킬 / 슬래시 커맨드)
+
+| 단계 | 커맨드 (Grok/Claude 등) | 산출 |
+|------|-------------------------|------|
+| 원칙 | `/speckit-constitution` | `.specify/memory/constitution.md` |
+| 명세 | `/speckit-specify` | `specs/<id>/spec.md` |
+| 계획 | `/speckit-plan` | `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md` |
+| 작업 | `/speckit-tasks` | `tasks.md` |
+| 구현 | `/speckit-implement` | 코드 (tasks 순서) |
+| 갭점검 | `/speckit-converge` | `tasks.md` 에 Phase Convergence **append-only** |
+
+- Codex skills 모드: `$speckit-specify` 형태일 수 있음
+- 스킬 파일: `.grok/skills/speckit-*/SKILL.md`, `.claude/skills/speckit-*/SKILL.md`
+
+### 작업 규칙 (에이전트)
+
+1. **새 기능/큰 변경 전** 활성 `spec.md`·`tasks.md` 를 읽고, 없으면 specify→plan→tasks 순으로 만든다.
+2. **구현은 tasks.md 체크리스트**를 따른다. 완료 시 `- [ ]` → `- [x]`.
+3. **`/speckit-converge` 는 tasks.md 를 rewrite 하지 않는다** — 잔여 갭만 하단 Phase 로 append.
+4. brownfield 프로젝트는 상당 기능이 이미 있을 수 있다. 중복 구현 전에 코드·`[x]` 태스크를 확인한다.
+5. 웹/데스크톱 패리티 등 **out-of-scope Assumptions** 는 새 feature 로 분리하는 것을 선호한다.
+6. 기본 integration 은 **grok** 이며, 동일 레포에 claude / codex / agy 스킬도 multi-install 되어 있을 수 있다.
+
+### 관련 링크
+
+- Spec Kit: https://github.com/github/spec-kit
+- 로컬 CLI: `specify` (uv tool, 버전은 `specify version`)
+
+<!-- SPECKIT-AGENT-GUIDE:END -->

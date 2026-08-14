@@ -973,6 +973,20 @@
           }
         },
         {
+          "name": "open_action_palette",
+          "signature": {
+            "posonly": [],
+            "args": [
+              "self"
+            ],
+            "vararg": null,
+            "kwonly": [],
+            "kwarg": null,
+            "defaults_count": 0,
+            "kw_defaults_count": 0
+          }
+        },
+        {
           "name": "open_link",
           "signature": {
             "posonly": [],

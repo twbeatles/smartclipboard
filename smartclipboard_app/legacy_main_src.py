@@ -121,6 +121,7 @@ from smartclipboard_app.ui.dialogs.settings import SettingsDialog as AppSettings
 from smartclipboard_app.ui.dialogs.statistics import StatisticsDialog as AppStatisticsDialog
 from smartclipboard_app.ui.dialogs.tags import TagEditDialog as AppTagEditDialog
 from smartclipboard_app.ui.dialogs.trash_dialog import TrashDialog as AppTrashDialog
+from smartclipboard_app.features.action_palette.controller import ActionPaletteController
 from smartclipboard_app.features.clipboard.controller import ClipboardController
 from smartclipboard_app.features.history.controller import HistoryController
 from smartclipboard_app.features.history import interactions as history_interactions
@@ -1078,6 +1079,10 @@ class MainWindow(QMainWindow):
         shortcut_copy.activated.connect(self.copy_item)
         self._base_shortcuts.append(shortcut_copy)
 
+        shortcut_palette = QShortcut(QKeySequence("Alt+A"), self)
+        shortcut_palette.activated.connect(self.open_action_palette)
+        self._base_shortcuts.append(shortcut_palette)
+
         self.refresh_snippet_shortcuts()
 
     def refresh_snippet_shortcuts(self):
@@ -1688,6 +1693,9 @@ class MainWindow(QMainWindow):
 
     def show_context_menu(self, pos):
         return self.history_controller.show_context_menu(pos, THEMES, webbrowser)
+
+    def open_action_palette(self):
+        return self.action_palette_controller.open_palette()
 
 
 if __name__ == "__main__":

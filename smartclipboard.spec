@@ -44,7 +44,13 @@ Notes:
     - If legacy source changes, rebuild payload first and keep tests green
       (`test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`,
        `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`,
-       `test_signal_snapshot`, `test_public_surfaces`).
+       `test_signal_snapshot`, `test_public_surfaces`, `test_action_palette_core`,
+       `test_action_palette_ui`).
+    - 2026-08-14 Contextual Action Palette keeps packaging scope unchanged:
+      `smartclipboard_core.action_palette` and
+      `smartclipboard_app.features.action_palette` are collected by the existing
+      `collect_submodules("smartclipboard_core")` and
+      `collect_submodules("smartclipboard_app.features")` rules.
 """
 
 from pathlib import Path

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from typing import TypeVar
-from urllib.parse import quote
 
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QMenu
 
 from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
+from smartclipboard_core.action_palette.builtins.search import build_google_search_url
 
 T = TypeVar("T")
 
@@ -21,13 +21,6 @@ def _ensure(value: T | None) -> T:
 def _copy_text(self, text: str) -> None:
     mark_internal_copy(self)
     self.clipboard.setText(text)
-
-
-def build_google_search_url(text: str) -> str:
-    query = str(text or "").strip()
-    if not query:
-        return "https://www.google.com/search"
-    return f"https://www.google.com/search?q={quote(query, safe='')}"
 
 
 def _sync_context_menu_selection(self, pos):
@@ -179,6 +172,15 @@ def show_context_menu_impl(self, pos, THEMES, webbrowser):
     copy_action.triggered.connect(self.copy_item)
     paste_action = _ensure(menu.addAction("📋 붙여넣기"))
     paste_action.triggered.connect(self.paste_selected)
+    menu.addSeparator()
+
+    palette_action = _ensure(menu.addAction("⚡ 작업 실행..."))
+    palette_action.setEnabled(bool(self.get_selected_id()))
+    opener = getattr(self, "open_action_palette", None)
+    if callable(opener):
+        palette_action.triggered.connect(opener)
+    else:
+        palette_action.setEnabled(False)
     menu.addSeparator()
 
     pid = self.get_selected_id()

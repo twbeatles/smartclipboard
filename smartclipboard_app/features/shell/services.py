@@ -148,6 +148,13 @@ def quit_app_impl(self, logger, keyboard, qapplication_cls):
             self.mini_window.close()
             logger.debug("미니 창 종료")
 
+        try:
+            from smartclipboard_app.features.action_palette.services import shutdown_palette_workers
+
+            shutdown_palette_workers(self)
+        except Exception:
+            pass
+
         if hasattr(self, "action_manager") and self.action_manager:
             try:
                 self.action_manager.action_completed.disconnect(self.on_action_completed)

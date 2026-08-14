@@ -41,6 +41,12 @@
 - 동기 텍스트 액션(`format_phone`/`format_email`/`transform`)은 결과를 같은 history row와 clipboard에 다시 반영하고, 같은 배치의 후속 액션은 변환된 텍스트 기준으로 평가
 - **v10.2**: 정규식 패턴 유효성 검증
 
+### ⚡ 작업 실행 (Action Palette)
+- 히스토리에서 항목을 고른 뒤 `Alt+A` 또는 우클릭 `작업 실행...`으로 적용 가능한 작업만 검색/실행
+- 자동 액션 규칙과 분리된 **수동** 경로
+- 변환 결과는 같은 history 행과 클립보드에 반영하며, 내부 복사로 자동 규칙을 다시 타지 않음
+- 민감 태그/본문(비밀번호·API 키 형태)에서는 Google 검색·제목 조회를 숨김
+
 ### 🗑️ 휴지통 기능
 - 삭제 항목 7일간 보관 후 자동 영구 삭제
 - **v10.2**: 휴지통 다이얼로그 다중 선택 지원
@@ -151,7 +157,7 @@ python scripts/preflight_local.py
 ```
 
 `preflight_local.py`는 payload 재생성, payload smoke import, `py_compile`, `unittest`(`test_payload_sync` 포함)을 순차 실행합니다.
-현재 핵심 회귀 범위에는 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`가 포함됩니다.
+현재 핵심 회귀 범위에는 `test_core`, `test_ui_dialogs_widgets`, `test_payload_sync`, `test_legacy_loader`, `test_migration_collections`, `test_legacy_ui_contracts`, `test_signal_snapshot`, `test_public_surfaces`, `test_action_palette_core`, `test_action_palette_ui`가 포함됩니다.
 `--with-pyright`를 붙이면 같은 preflight 흐름의 마지막 단계로 루트 `pyrightconfig.json` 기준 repo-wide 타입 검사를 실행합니다.
 Windows 로컬 테스트는 시스템 temp 권한 이슈를 피하기 위해 repo 루트의 `.tmp-unittest/` 하위 임시 디렉터리를 사용합니다.
 
@@ -197,7 +203,7 @@ pyright
 | `Ctrl+F` | 검색창 포커스 |
 | `Ctrl+C` | 선택 항목 복사 |
 | `Ctrl+P` | 고정/해제 토글 |
-| `Ctrl+G` | 구글 검색 |
+| `Alt+A` | 선택 항목 작업 실행 |
 | `Enter` | 복사 후 붙여넣기 |
 | `Delete` | 선택 항목 삭제 |
 | `Escape` | 창 숨기기 |
@@ -219,6 +225,16 @@ pyright
 - 텍스트 미리보기 영역 폰트 가독성 개선
 
 ---
+
+## 📝 2026-08 Contextual Action Palette
+
+- 히스토리 선택 항목에 `Alt+A` / 우클릭 `작업 실행...`으로 적용 가능한 변환·URL·JSON 작업을 실행
+- 자동 액션 규칙(`ClipboardActionManager`)과 분리된 수동 경로
+- 변환 결과는 같은 history 행에 writeback 하고, `mark_internal_copy()`로 자동 규칙을 다시 타지 않음
+- 민감 태그/본문에서는 Google 검색·제목 조회를 숨김
+- QR은 2048자 제한, `fetch_title`는 기존 SSRF 가드·캐시·종료 취소를 재사용
+- 코어: `smartclipboard_core/action_palette/`, UI: `smartclipboard_app/features/action_palette/`
+- 비공식 명세: `smartclipboard_action_palette_agent_spec.md`
 
 ## 📝 v10.6 변경사항
 
@@ -429,10 +445,11 @@ smartclipboard/
 
 1. **빠른 접근**: `Ctrl+Shift+V`로 언제든 히스토리 확인
 2. **미니 모드**: `Alt+V`로 작은 창에서 빠르게 항목 선택
-3. **고정 항목**: 자주 쓰는 텍스트는 📌 고정하여 상단에 유지
-4. **태그 활용**: 관련 항목끼리 태그로 분류
-5. **보안 보관함**: 비밀번호, API 키 등 민감 정보는 암호화 보관
-6. **스니펫**: 자주 사용하는 이메일 서명, 템플릿 등은 스니펫으로 저장
+3. **작업 실행**: 항목을 고른 뒤 `Alt+A` 또는 우클릭 `작업 실행...`으로 변환/URL/JSON 작업을 실행
+4. **고정 항목**: 자주 쓰는 텍스트는 📌 고정하여 상단에 유지
+5. **태그 활용**: 관련 항목끼리 태그로 분류
+6. **보안 보관함**: 비밀번호, API 키 등 민감 정보는 암호화 보관
+7. **스니펫**: 자주 사용하는 이메일 서명, 템플릿 등은 스니펫으로 저장
 
 ---
 
@@ -446,6 +463,7 @@ smartclipboard/
 - 복원된 원본 소스: `smartclipboard_app/legacy_main_src.py` (원본: `legacy/클립모드 매니저 (legacy).py`)
 - Pylance/pyright는 루트 `pyrightconfig.json`을 기준으로 현행 유지보수 코드 repo-wide 0 errors를 유지합니다.
 - 직접 `clipboard.setText()`를 호출하는 경로는 `smartclipboard_app.ui.clipboard_guard.mark_internal_copy()`를 먼저 거쳐 자기 재수집 루프를 피합니다.
+- Action Palette 변환 결과도 같은 규칙을 쓰며, 선택 history 행에 writeback 하고 자동 액션 파이프라인은 다시 타지 않습니다.
 - JSON export/import는 `IMAGE` 항목용 `image_data_b64` round-trip을 지원하고, CSV/Markdown은 이미지 BLOB를 의도적으로 제외합니다.
 - `FILE` 항목은 경로 목록 중심으로 동작하며, JSON은 `file_paths`/`file_path`, CSV/Markdown은 newline path content를 사용합니다.
 - `FILE` 항목은 복원 시점뿐 아니라 목록/상세/미니 창에서 누락 경로 수를 먼저 보여주며, 일부만 남아 있으면 부분 복원 정책을 유지합니다.

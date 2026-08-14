@@ -40,6 +40,7 @@ APP_LOCAL_SHORTCUTS = {
     "paste_selected": "Return",
     "copy_selected": "Ctrl+C",
     "quit": "Ctrl+Q",
+    "action_palette": "Alt+A",
 }
 
 
