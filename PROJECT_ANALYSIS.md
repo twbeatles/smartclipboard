@@ -783,6 +783,12 @@ pyinstaller --clean smartclipboard.spec
 - preflight 단계: `python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright`
 - PyInstaller/EXE startup smoke는 일반 CI가 아니라 수동 workflow `.github/workflows/package-smoke.yml`에서 실행한다.
 
+---
+
+*이 문서는 2026-06-10 기준 v10.6 코드베이스를 기반으로 작성되었습니다.*
+
+<!--
+
 ## 12. 2026-04-12 Stabilization Delta
 
 - `ExportImportManager`는 public `int` return을 유지하면서 `last_import_report` / `last_export_report`에 결과 요약을 남긴다.
@@ -858,3 +864,5 @@ pyinstaller --clean smartclipboard.spec
 - `scripts/refactor_signal_snapshot.py`는 `features/shell/window_bootstrap.py`를 함께 스캔해 constructor signal connect 이동 후에도 스냅샷 순서를 유지한다.
 - `smartclipboard.spec`는 기존 `collect_submodules("smartclipboard_app.features")`와 `collect_submodules("smartclipboard_core.db_parts")`로 새 하위 모듈을 포함하므로 hidden import/datas 추가가 필요 없다.
 - `.gitignore`는 `.codegraph/` 로컬 인덱스를 제외한다. `.codegraph/`는 분석 캐시이며 릴리스/런타임 자산이 아니다.
+
+-->

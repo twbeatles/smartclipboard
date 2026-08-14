@@ -34,8 +34,8 @@ def build_main_ui(self, HAS_QRCODE):
     central_widget = QWidget()
     self.setCentralWidget(central_widget)
     main_layout = QVBoxLayout(central_widget)
-    main_layout.setContentsMargins(16, 16, 16, 16)
-    main_layout.setSpacing(12)
+    main_layout.setContentsMargins(18, 16, 18, 14)
+    main_layout.setSpacing(14)
 
     quick_bar = QHBoxLayout()
     quick_bar.setSpacing(8)
@@ -67,7 +67,8 @@ def build_main_ui(self, HAS_QRCODE):
     quick_bar.addStretch()
 
     self.privacy_indicator = QLabel("")
-    self.privacy_indicator.setStyleSheet("font-size: 12px; color: #fbbf24;")
+    self.privacy_indicator.setObjectName("PrivacyIndicator")
+    self.privacy_indicator.setVisible(False)
     quick_bar.addWidget(self.privacy_indicator)
 
     main_layout.addLayout(quick_bar)
@@ -133,7 +134,7 @@ def build_main_ui(self, HAS_QRCODE):
     vertical_header = self.table.verticalHeader()
     if vertical_header is not None:
         vertical_header.setVisible(False)
-        vertical_header.setDefaultSectionSize(42)
+        vertical_header.setDefaultSectionSize(46)
 
     self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
