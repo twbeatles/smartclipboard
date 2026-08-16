@@ -147,6 +147,11 @@ def init_menu_impl(self, THEMES):
     action_shortcuts = QAction("⌨️ 키보드 단축키", self)
     action_shortcuts.triggered.connect(self.show_shortcuts_dialog)
     help_menu.addAction(action_shortcuts)
+    action_update = QAction("🚀 업데이트 확인...", self)
+    checker = getattr(self, "check_for_updates", None)
+    if callable(checker):
+        action_update.triggered.connect(lambda: checker(True))
+    help_menu.addAction(action_update)
     help_menu.addSeparator()
     action_about = QAction("ℹ️ 정보", self)
     action_about.triggered.connect(self.show_about_dialog)

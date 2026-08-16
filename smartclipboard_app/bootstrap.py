@@ -27,8 +27,25 @@ def _global_exception_handler(exctype, value, tb):
 
 def run(argv: list[str] | None = None) -> int:
     """Run SmartClipboard application."""
-    argv = argv if argv is not None else sys.argv
+    argv = list(argv if argv is not None else sys.argv)
     sys.excepthook = _global_exception_handler
+
+    if "--apply-update" in argv:
+        from scripts.apply_update import main as apply_main
+
+        # Filter out '--apply-update' and process updater arguments
+        apply_args = [arg for arg in argv[1:] if arg != "--apply-update"]
+        return apply_main(apply_args)
+
+    if "--smoke" in argv:
+        from smartclipboard_core.config import Config
+        from smartclipboard_core.database import ClipboardDB
+        from smartclipboard_core.actions import ClipboardActionManager
+
+        logger.info("Running SmartClipboard smoke check (version=%s)...", Config.VERSION)
+        assert Config.VERSION
+        assert Config.UPDATE_PUBLIC_KEY_B64
+        return 0
 
     try:
         os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"

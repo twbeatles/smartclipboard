@@ -1,4 +1,4 @@
-﻿"""Run local preflight checks for SmartClipboard.
+"""Run local preflight checks for SmartClipboard.
 
 This script standardizes the minimum verification sequence before packaging:
 1) rebuild payload + smoke import
@@ -41,10 +41,24 @@ def compile_targets() -> list[str]:
         "smartclipboard_app/bootstrap.py",
         "smartclipboard_app/legacy_main.py",
         "smartclipboard_app/legacy_main_src.py",
+        "smartclipboard_core/config.py",
         "smartclipboard_core/database.py",
         "smartclipboard_core/actions.py",
         "smartclipboard_core/worker.py",
+        "smartclipboard_core/update_manifest.py",
+        "smartclipboard_core/update_installer.py",
+        "scripts/apply_update.py",
+        "scripts/build_update_manifest.py",
+        "scripts/verify_update_release_key.py",
     }
+
+    core_dir = REPO_ROOT / "smartclipboard_core"
+    if core_dir.exists():
+        targets.update(
+            str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+            for path in sorted(core_dir.rglob("*.py"))
+            if "__pycache__" not in path.parts
+        )
 
     ui_dir = REPO_ROOT / "smartclipboard_app" / "ui"
     if ui_dir.exists():
@@ -59,22 +73,6 @@ def compile_targets() -> list[str]:
         targets.update(
             str(path.relative_to(REPO_ROOT)).replace("\\", "/")
             for path in sorted(feature_dir.rglob("*.py"))
-            if "__pycache__" not in path.parts
-        )
-
-    db_parts_dir = REPO_ROOT / "smartclipboard_core" / "db_parts"
-    if db_parts_dir.exists():
-        targets.update(
-            str(path.relative_to(REPO_ROOT)).replace("\\", "/")
-            for path in sorted(db_parts_dir.rglob("*.py"))
-            if "__pycache__" not in path.parts
-        )
-
-    automation_dir = REPO_ROOT / "smartclipboard_core" / "automation"
-    if automation_dir.exists():
-        targets.update(
-            str(path.relative_to(REPO_ROOT)).replace("\\", "/")
-            for path in sorted(automation_dir.rglob("*.py"))
             if "__pycache__" not in path.parts
         )
 

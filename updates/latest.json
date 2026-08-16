@@ -1,0 +1,10 @@
+{
+  "payload": {
+    "artifact_url": "https://github.com/twbeatles/smartclipboard/releases/download/v10.6/SmartClipboard-v10.6.exe",
+    "expires_at": "2030-01-01T00:00:00Z",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size": 1,
+    "version": "10.6"
+  },
+  "signature": ""
+}

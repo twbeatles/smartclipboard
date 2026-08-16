@@ -196,7 +196,7 @@ MAX_HISTORY = 100
 HOTKEY = "ctrl+shift+v"
 APP_NAME = "SmartClipboardPro"
 ORG_NAME = "MySmartTools"
-VERSION = "10.6"
+VERSION = "10.7"
 
 # 기본 핫키 설정
 DEFAULT_HOTKEYS = {

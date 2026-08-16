@@ -2,7 +2,7 @@
 
 > Windows용 고급 클립보드 매니저 — 복사한 모든 것을 저장하고, 검색하고, 활용하세요.
 
-![Version](https://img.shields.io/badge/version-10.6-blue)
+![Version](https://img.shields.io/badge/version-10.7-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -73,6 +73,12 @@
 - 삭제한 항목을 7일간 보관 후 자동 영구 삭제
 - 원클릭 복원 및 영구 삭제, 다중 선택 일괄 처리 지원
 - 전체 기록 삭제 시 고정 항목을 제외하고 휴지통으로 이동
+
+### 🚀 자동 업데이트 (GitHub Releases)
+
+- Ed25519 디지털 서명과 SHA-256 해시 검증 기반의 안전한 자동 업데이트
+- 앱 기동 시 백그라운드 확인 및 `도움말 > 🚀 업데이트 확인...`을 통한 원클릭 설치
+- 업데이트 적용 시 이전 버전 자동 백업 및 문제 발생 시 안전한 자동 롤백 지원
 
 ### 🎨 UI/UX
 

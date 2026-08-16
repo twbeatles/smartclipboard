@@ -1,312 +1,156 @@
 # Project Audit
 
-감사 범위: Contextual Action Palette (2026-08 추가분)  
-근거: `README.md`, `Claude.md`, CodeGraph 호출 경로, 해당 소스 본문  
-작성일: 2026-08-14  
-감사 시점에는 코드 수정을 하지 않음. **권고안은 같은 날 구현에 반영됨** — 섹션 7 참고.
-
----
-
 ## 1. Executive Summary
 
-Action Palette는 기존 자동 액션(`ClipboardActionManager`)과 분리된 수동 실행 경로로 잘 나뉘어 있다. 코어 변환·applicability·예외 isolation은 테스트가 있고, `fetch_title` HTTP는 기존 `fetch_title_logic`의 SSRF 가드를 재사용한다.
+본 감사는 SmartClipboard Pro 프로젝트의 전체 아키텍처, 핵심 데이터 흐름, 보안 체계 및 최근 구현된 Ed25519 디지털 서명 기반 GitHub Releases 자동 업데이트 시스템을 기능 구현 및 안정성 관점에서 종합적으로 분석한 결과입니다.
 
-다만 **클립보드 쓰기 정책이 프로젝트 계약과 충돌**하고, **제목 조회의 수명주기/중복 실행 가드가 자동 경로보다 약하다**. 민감 정보 가드는 태그/메모 부분 문자열에만 의존해, 비밀번호·토큰이 본문에만 있는 항목은 Google 검색이 그대로 노출된다.
-
-전체 위험도: **Medium-High**. 즉시 장애를 낼 Critical은 드물지만, 종료 중 콜백·대용량 QR·비밀 텍스트 외부 검색은 실제 사용에서 터질 수 있다.
-
-핵심 문제 3개:
-
-1. Palette `setText`가 `mark_internal_copy`를 쓰지 않아, 변환 결과가 다시 자동 액션 파이프라인을 탄다.
-2. `start_fetch_title`는 shutdown 가드·캐시·inflight dedupe·사전 URL 검증이 없다.
-3. `is_sensitive`가 본문/보관함 출처를 보지 않아 네트워크 액션 가드가 쉽게 비어 있다.
+* **전체 위험도**: **Medium-Low (양호)**
+* **주요 강점**:
+  * Ed25519 비대칭 암호화 서명 검증 및 SHA-256 해시/크기 검증을 통한 안전한 업데이트 파이프라인 구축
+  * 업데이트 실패 시 이전 실행 파일 자동 롤백 및 사후 결과 기록/소비 메커니즘 구비
+  * PBKDF2-HMAC-SHA256 및 Fernet을 활용한 보안 보관함 암호화 및 5분 타임아웃 자동 잠금
+  * FTS5 전문 검색, 내부 복사 루프 방지 가드(`mark_internal_copy`), URL 안전 가드(`NetworkGuard`)
+* **핵심 개선 필요 사항**:
+  1. 레거시 UI 진입점(`legacy_main_src.py`)의 데이터 복원 로직이 신규 모듈화된 안전 복원 엔진(`backup.py`)을 우회하고 단순 파일 복사를 수행하는 문제
+  2. 업데이트 헬퍼 실행 시 메인 프로세스 종료 지연에 따른 타임아웃/파일 잠금 가능성
+  3. 백그라운드 주기적 업데이트 확인 옵션 부재 및 관리자 권한(Program Files 설치 시) 대응
 
 ---
 
 ## 2. Project Understanding
 
-### 제품
+### 2.1 아키텍처 및 핵심 모듈 구조
 
-SmartClipboard Pro는 Windows PyQt6 클립보드 매니저다. 히스토리 저장·검색·자동화 규칙·보안 보관함·내보내기/가져오기가 본래 기능이고, 이번 추가는 **선택 항목으로 일을 처리하는 수동 Palette**다.
-
-### 아키텍처 규칙 (`Claude.md`)
-
-- 신규 로직은 `smartclipboard_core/` 또는 `smartclipboard_app/features/`에 둔다.
-- `legacy_main.py`는 marshal payload 로더이며, UI 변경은 `legacy_main_src.py` + payload 재생성.
-- `clipboard.setText()` 경로는 `mark_internal_copy()`를 먼저 호출한다.
-- `fetch_title`은 첫 URL만, 로컬/사설 차단, Worker + 전용 thread pool.
-- `smartclipboard_core/actions.py` facade와 `ClipboardActionManager` public contract는 유지.
-
-### 추가 기능 실행 흐름 (CodeGraph)
-
-```text
-선택 item
-  → Alt+A / 우클릭 "작업 실행..."
-  → MainWindow.open_action_palette
-  → ActionPaletteController.open_palette
-  → open_palette_impl
-       → context_from_item(db) → build_context
-       → ActionPaletteDialog (적용 가능 목록)
-       → ActionExecutor.execute
-       → preview 또는 apply_result
-            ├─ fetch_title → Worker(fetch_title_logic) → _handle_title_result
-            ├─ url/google  → webbrowser.open
-            └─ text 복사   → clipboard.setText (internal flag 없음)
-                 → on_clipboard_change_impl
-                 → process_text_clipboard_impl
-                 → ClipboardActionManager.process
+```
+[클립모드 매니저.py (Facade/Entry)]
+          │
+          ▼
+[smartclipboard_app/bootstrap.py]
+  ├── --smoke (무결성 진단)
+  ├── --apply-update (업데이트 헬퍼)
+  └── GUI App 실행 (MainWindow)
+          │
+          ├── [smartclipboard_app/ui/main_window.py]
+          │     ├── ClipboardController (클립보드 모니터링/디바운스/파이프라인)
+          │     ├── TableController (목록 표시, FTS 검색, 정렬, 필터)
+          │     ├── TrayHotkeyController (글로벌 핫키, 트레이 아이콘)
+          │     ├── LifecycleController (시작/종료, 백업/정리)
+          │     └── UpdaterController (업데이트 확인, 다운로드, 무결성 검증, 설치)
+          │
+          └── [smartclipboard_core/]
+                ├── config.py (버전, 업데이트 채널, Ed25519 공개키)
+                ├── update_manifest.py (Ed25519 서명 검증, 버전 비교, HTTPS)
+                ├── update_installer.py (스테이징, 백업, 무결성 교체, 롤백)
+                ├── database.py / db_parts/ (SQLite DB, FTS5, 트랜잭션 락)
+                ├── automation/ (URL fetch_title, NetworkGuard, 정규식 액션)
+                └── action_palette/ (Contextual Action Palette 수동 실행)
 ```
 
-자동 파이프라인과 Palette는 클래스를 공유하지 않는다. 교차점은 **클립보드 쓰기**와 **같은 `fetch_title_logic` / thread pool**뿐이다.
+### 2.2 주요 데이터 흐름 및 실행 흐름
+
+1. **클립보드 캡처 흐름**:
+   `QClipboard.dataChanged` 발생 ➔ 100ms 디바운스 ➔ `process_clipboard()` ➔ 내부 복사(`mark_internal_copy`) 여부 및 프라이버시 모드 확인 ➔ 텍스트/이미지/파일 분석 ➔ 복사 규칙 적용 ➔ SQLite DB에 `add_item` (동일 텍스트/파일 중복 시 기존 메타데이터 유지하며 타임스탬프 갱신) ➔ 자동 액션 실행 (URL 제목 조회 등) ➔ UI 갱신
+
+2. **자동 업데이트 흐름**:
+   `도움말 > 🚀 업데이트 확인...` 클릭 ➔ 백그라운드 스레드에서 `latest.json` HTTPS 다운로드 ➔ Ed25519 공개키로 디지털 서명 및 버전/해시/만료일 검증 ➔ 새 버전 발견 시 확인 다이얼로그 ➔ `.updates/`에 스트리밍 다운로드 및 스테이징 ➔ 설치 승인 시 `SmartClipboard.exe.vX.Y.bak` 백업 생성 ➔ `update-helper` 독립 프로세스 기동 ➔ 부모 프로세스 종료 대기 ➔ 원자적 교체 및 `--smoke` 검증 ➔ 실패 시 원본 롤백 및 `last-update-result.json` 기록
 
 ---
 
 ## 3. High-Risk Issues
 
-### H1. Palette 복사가 프로젝트 클립보드 계약을 깨고 자동 액션을 재실행한다
+### [Issue 1] 레거시 `restore_data()` 경로의 안전성 검증 및 백업 누락
 
-* 위치: `smartclipboard_app/features/action_palette/services.py` `apply_result`
-* 문제: `copy_to_clipboard`일 때 `clipboard.setText(result.value)`만 호출하고 `mark_internal_copy`를 쓰지 않는다.
-* 영향: 변환 결과가 새 history로 들어가며, 켜져 있는 copy rule / `format_phone` / `fetch_title` 자동 규칙이 한 번 더 돈다. 제목 조회·치환이 중복되고, 사용자가 “이 항목을 고쳐서 복사”했다고 생각한 결과가 다른 row로  entangle된다. `Claude.md`의 “모든 `setText`는 internal flag” 규칙과도 어긋난다.
-* 근거:
-  - `apply_result` 69–72행: `setText`만 수행.
-  - `on_clipboard_change_impl` 20–22행: `is_internal_copy`가 아니면 debounce 후 `process_clipboard`.
-  - `process_text_clipboard_impl` 108–110행: `add_item` 후 `_process_actions`.
-* 권장 수정 방향: 정책을 문서와 코드에서 하나로 고정한다. (A) Palette도 `mark_internal_copy` + 선택 row writeback(자동 액션과 동일 merge 규칙), 또는 (B) 새 history가 맞다면 `Claude.md`를 개정하고, 자동 `process_actions`가 Palette 결과에서 재실행되지 않도록 출처 플래그를 둔다. 둘을 섞지 말 것.
-* 우선순위: **High**
+* **위치**: `smartclipboard_app/legacy_main_src.py:3663` (`restore_data`)
+* **문제**:
+  모듈화된 `smartclipboard_app/features/import_export/backup.py`에는 `inspect_restore_database`(무결성 및 테이블 검증), `create_pre_restore_backup`(사전 백업), `replace_database_from_backup`(WAL/SHM sidecar 제거 및 임시 파일 교체)가 구현되어 있으나, 레거시 UI 진입점(`legacy_main_src.py`)에서는 `self.db.conn.close()` 후 검증 없이 `shutil.copy2(file_name, DB_FILE)`를 직접 호출하고 있습니다.
+* **영향**:
+  사용자가 손상된 DB나 호환되지 않는 파일을 복원용으로 선택할 경우, 사전 백업 없이 기존 DB가 덮어씌워지며 SQLite WAL 잔여 파일 충돌로 DB가 복구 불가능하게 깨질 수 있습니다.
+* **근거**:
+  `smartclipboard_app/legacy_main_src.py` 3663~3677행:
+  ```python
+  self.db.conn.close()
+  import shutil
+  shutil.copy2(file_name, DB_FILE)
+  ```
+  반면 `backup.py`에 정의된 안전한 복원 함수들이 호출되지 않고 있습니다.
+* **권장 수정 방향**:
+  `legacy_main_src.py`의 `restore_data()`가 `backup.py`의 `inspect_restore_database`, `create_pre_restore_backup`, `replace_database_from_backup`을 호출하도록 통일합니다.
+* **우선순위**: **High**
 
-### H2. 제목 조회 Worker가 종료/DB close 이후에도 UI·DB를 건드린다
+---
 
-* 위치: `services.py` `start_fetch_title`, `_handle_title_result`  
-  대비: `ClipboardActionManager.shutdown` / `_is_shutting_down`
-* 문제: Palette Worker 콜백은 shutdown 가드가 없다. `quit_app_impl`은 `action_manager.shutdown()`과 `db.close()`를 하지만, 이미 돌고 있는 Palette Worker의 `result` 시그널은 막지 않는다. 콜백은 `db.get_content` / `update_url_title` / toast / 모달 Preview를 연다.
-* 영향: 종료 직후 SQLite 사용, 파괴된 위젯 toast, 종료 중 모달 다이얼로그. Qt/스레드에서 간헐 크래시 가능.
-* 근거:
-  - `start_fetch_title` 81–92행: `Worker` + `result.connect(_handle_title_result)`, inflight 추적 없음.
-  - `_handle_title_result` 99–116행: `db`/`window` 유효성·shutdown 플래그 없음.
-  - `quit_app_impl` 151–162행: automation shutdown + `db.close()`만 수행. Palette 전용 취소 없음.
-  - `ClipboardActionManager._handle_title_result`는 `_is_shutting_down`과 `_db_is_available()`를 본다.
-* 권장 수정 방향: 자동 경로와 같은 가드를 넣거나, Palette fetch를 `action_manager.fetch_url_title_async`에 위임한다. 종료 시 Worker disconnect + 무시 플래그.
-* 우선순위: **High**
+### [Issue 2] 업데이트 헬퍼 프로세스 전환 시 프로세스 잔여 및 파일 잠금 가능성
 
-### H3. 민감 가드가 본문·보관함 출처를 보지 않는다
+* **위치**: `smartclipboard_app/features/updater/controller.py:240` 및 `smartclipboard_core/update_installer.py:230`
+* **문제**:
+  업데이트 설치를 위해 `launch_update_helper()` 실행 후 `QApplication.quit()`을 호출하지만, 백그라운드 스레드(키보드 훅 리스너, QThreadPool, 타이머 등)가 완전히 종료되지 않아 메인 프로세스가 완전히 죽지 않고 파일 핸들을 물고 있을 가능성이 있습니다.
+* **영향**:
+  `apply_update` 헬퍼가 30초 동안 부모 PID 종료를 대기하다가 `TimeoutError`가 발생하여 업데이트가 실패하고 롤백될 수 있습니다.
+* **근거**:
+  `_on_download_ready`에서 `launch_update_helper(...)` 직후 단순 `QApplication.quit()`만 호출됨. Windows 환경에서는 서브스레드가 남아있을 경우 프로세스가 즉시 종료되지 않을 수 있음.
+* **권장 수정 방향**:
+  헬퍼 실행 전 트레이 아이콘 및 핫키 리스너를 명시적으로 unhook/정리하고, 필요 시 `QTimer.singleShot` 또는 `sys.exit(0)`을 통해 프로세스가 신속하게 완전히 종료되도록 보장합니다.
+* **우선순위**: **Medium**
 
-* 위치: `smartclipboard_core/action_palette/context.py` `_is_sensitive`, `build_context`  
-  `registry.get_applicable` / `ActionExecutor.execute`
-* 문제: `is_sensitive`는 `tags`/`note`에 `password|secret|api_key|token|비밀번호` 부분 문자열이 있을 때만 True다. 클립보드 본문이 API 키여도 태그가 없으면 `search.google`이 적용된다. 보관함 복사는 `mark_internal_copy`라 history에 안 들어오므로, 명세의 “vault item → sensitive”는 Palette에서 거의 작동하지 않는다.
-* 영향: 사용자가 복사한 비밀을 명시적으로 Google에 보낼 수 있다. 반대로 메모에 `token`이 들어가면 정상 URL 제목 조회까지 막힌다(부분 일치).
-* 근거:
-  - `_is_sensitive` 39–43행: tags/note only, `in` 부분 문자열.
-  - `search.google` `network_required=True`, `url.fetch_title`만 숨김.
-  - `url.open` / `url.qr`은 `network_required=False`라 민감해도 남는다.
-* 권장 수정 방향: 본문 heuristic(PEM, `sk-`, `AKIA`, 긴 hex/base64)을 값싸게 추가하고, Google은 민감 시 숨김을 유지. `token`은 단어 경계로 좁힌다. `url.open`은 민감 URL에서 확인 또는 비추천.
-* 우선순위: **High**
+---
 
-### H4. QR 생성에 크기 제한·예외 처리가 없다
+### [Issue 3] URL 제목 가져오기(`fetch_title`) 레거시 경로와 신규 보안 가드 경로의 이원화
 
-* 위치: `builtins/url.py` `_qr` / `_has_text`  
-  `features/action_palette/qr.py` `render_qr_pixmap`  
-  `preview.py` Preview UI
-* 문제: 비어 있지 않은 텍스트면 QR이 뜬다. 1MB 히스토리 텍스트도 대상이다. `render_qr_pixmap`은 try/except가 없고, Preview는 렌더 실패 시 예외가 다이얼로그 생성으로 전파될 수 있다.
-* 영향: UI 정지, 메모리 급증, Preview 크래시.
-* 근거:
-  - `_has_text`: image/file만 제외.
-  - `render_qr_pixmap`: `qr.add_data(text); qr.make(fit=True)` 후 PIL 변환, 가드 없음.
-  - 기존 `MainWindow.generate_qr`는 try/except + 메시지 박스가 있다.
-* 권장 수정 방향: 길이 상한(예: 1–2KB) 후 미적용. `render_qr_pixmap`에서 예외를 잡고 Preview는 안내 문구.
-* 우선순위: **High**
-
-### H5. Palette `fetch_title`는 자동 경로의 사전검증·캐시·dedupe를 건너뛴다
-
-* 위치: `services.start_fetch_title` vs `ClipboardActionManager.fetch_url_title_async`
-* 문제: 자동 경로는 `validate_title_fetch_url` 선행, 256/24h 캐시, URL당 inflight 합치기를 한다. Palette는 매번 Worker를 띄운다. `_action_palette_title_worker`를 덮어써서 이전 작업은 계속 돌고 콜백만 둘 다 온다.
-* 영향: 같은 URL 중복 HTTP, 사설 URL도 워커가 뜬 뒤에야 실패, 연속 실행 시 Preview가 두 번.
-* 근거:
-  - `start_fetch_title` 76–92행: precheck/cache/pending map 없음, worker 핸들 덮어쓰기.
-  - `ClipboardActionManager.fetch_url_title_async` 125–167행: HAS_WEB, validate, cache, `_pending_by_url`.
-  - `fetch_title_logic` 내부 검증은 있으므로 SSRF 자체는 워커 안에서 막힌다.
-* 권장 수정 방향: `action_manager.fetch_url_title_async`를 재사용하거나, 동일 precheck/cache/pending을 Palette에 이식. 연속 실행 시 이전 시그널 disconnect.
-* 우선순위: **Medium**
-
-### H6. 제목 저장 후 목록/상세가 갱신되지 않는다
-
-* 위치: `_handle_title_result`
-* 문제: `update_url_title` 후 `load_data()` / `on_selection_changed()`가 없다. Preview만 띄운다.
-* 영향: 히스토리의 URL 제목 컬럼/상세가 다음 새로고침까지 비어 보인다. 자동 경로는 `action_completed` → UI 갱신 흐름이 있다.
-* 근거: `_handle_title_result` 108–116행은 DB 갱신 + Preview. `load_data` 호출 없음.
-* 권장 수정 방향: 성공 시 `window.load_data()` 또는 해당 row만 갱신. 창이 숨김이면 `is_data_dirty = True`.
-* 우선순위: **Medium**
-
-### H7. `url.open`이 텍스트 속 첫 URL을 확인 없이 연다
-
-* 위치: `builtins/url.py` `_open`, `_has_url`  
-  `services.apply_result` `webbrowser.open`
-* 문제: `extract_first_url`이 잡힌 http(s)면 적용된다. 본문이 “메모 + URL”이어도 첫 URL을 연다. `network_required=False`라 민감 가드도 우회한다. scheme은 http/https로 제한되므로 `javascript:`/`file:`은 `extract_first_url`에 안 걸린다.
-* 영향: 의도하지 않은 사이트 오픈. 피싱 URL이 클립보드에 있으면 한 번의 Enter로 방문.
-* 근거: `_open` 24–31행, `apply_result` 65–67행, `extract_first_url`은 `https?://`만.
-* 권장 수정 방향: 헤더에 열 URL을 명시. 본문≠URL이면 확인. 민감이면 숨기거나 경고.
-* 우선순위: **Medium**
-
-### H8. 종료 중 Preview 모달이 다시 뜰 수 있다
-
-* 위치: `_handle_title_result` → `show_preview` → `ActionPreviewDialog.exec`
-* 문제: 비동기 완료 시점에 모달 Preview를 연다. 앱 종료·창 숨김과 겹치면 종료가 막히거나 부모 없는 다이얼로그가 뜬다.
-* 영향: 종료 지연, 포커스 이상.
-* 근거: `_handle_title_result` 113–116행이 동기 `exec()`.
-* 권장 수정 방향: 창이 visible/active일 때만 Preview. 아니면 toast + 제목만 저장.
-* 우선순위: **Medium**
-
-### H9. Preview에서 QR “복사”는 이미지가 아니라 원문 텍스트다
-
-* 위치: `integration.show_preview_impl` 55–66행
-* 문제: QR 결과를 복사하면 `kind`를 `text`로 바꿔 `result.value`(원문)를 클립보드에 넣는다.
-* 영향: 사용자는 QR 이미지를 복사했다고 오해할 수 있다.
-* 근거: `kind="text" if result.kind == "qr" else result.kind`.
-* 권장 수정 방향: QR은 복사 비활성, 또는 `QImage`를 클립보드에. 버튼을 “원문 복사”로 표기.
-* 우선순위: **Medium**
-
-### H10. README / Claude.md와 구현 불일치
-
-* 위치: `README.md`, `Claude.md`, 구현
-* 문제:
-  1. README가 Palette를 “클립보드 액션 자동화” 아래에 두어 자동 규칙과 섞여 보인다.
-  2. README 앱 내 단축키에 `Ctrl+G` 구글 검색이 남아 있으나, 현재 `init_shortcuts`에는 Escape/Ctrl+F/Ctrl+P/Delete/Shift+Delete/Return/Ctrl+C/Alt+A만 있다. (`Ctrl+G`는 이번 기능 이전부터 문서만 남아 있는 것으로 보임.)
-  3. `Claude.md`는 모든 `setText`에 `mark_internal_copy`를 요구하는데 Palette는 의도적으로 위반한다.
-* 영향: 기여자/사용자가 잘못된 계약을 따른다. 다음 수정이 다시 어긋날 수 있다.
-* 근거: README 34–42, 193–204행; `init_shortcuts` 1043–1085행; `Claude.md` 32행 vs `apply_result` 69–72행.
-* 권장 수정 방향: Palette를 수동 기능으로 분리 서술. `Ctrl+G` 삭제 또는 구현. 클립보드 정책을 한쪽으로 문서화.
-* 우선순위: **Medium**
-
-### H11. 통합 테스트가 실제 실행 경로를 거의 안 탄다
-
-* 위치: `tests/test_action_palette_core.py`, `tests/test_action_palette_ui.py`
-* 문제: 순수 변환·다이얼로그 위젯·메뉴 라벨은 있다. `open_palette_impl`, `start_fetch_title`, shutdown 중 콜백, Palette 복사 후 `process_actions` 재진입, QR 예외, 사설 URL fetch는 없다. CodeGraph도 이들 심볼에 covering tests 없음을 표시한다.
-* 영향: H1–H8 회귀가 CI를 통과한 채로 남을 수 있다.
-* 근거: CodeGraph blast radius — `open_palette_impl`, `start_fetch_title`, `show_preview_impl` “no covering tests”.
-* 권장 수정 방향: 섹션 6 테스트 목록.
-* 우선순위: **Medium**
-
-### H12. `json.loads`가 Palette 오픈 시 전체 본문에 대해 실행된다
-
-* 위치: `context.py` `_looks_like_json` / `build_context`
-* 문제: 오픈마다 `json.loads(text.strip())`. 저장 한도는 1MB라 상한은 있지만, 깊게 중첩된 JSON은 CPU를 쓸 수 있다. 오픈 목표 50ms와 충돌할 수 있다.
-* 영향: 큰 JSON 항목에서 Palette가 늦게 뜬다. (추정: 일반적인 1MB pretty JSON은 보통 괜찮음.)
-* 근거: `build_context` 100행. 열린 직후 HTTP/FS는 하지 않음(좋음).
-* 권장 수정 방향: 길이 상한(예: 256KB) 초과 시 JSON 판정 skip. 필요하면 타임박스.
-* 우선순위: **Low**
-
-### H13. `_history_fields`가 DB 커넥션을 직접 조회한다
-
-* 위치: `services._history_fields`
-* 문제: public `ClipboardDB` API가 아니라 `db.conn` + raw SQL. mixin 추가 없이 surface를 우회한다. 스키마/락 관례 변경 시 Palette만 깨질 수 있다.
-* 영향: 유지보수 취약. 기능 버그 가능성은 낮음(파라미터 바인딩은 사용).
-* 근거: 18–35행. `Claude.md`는 public surface 안정을 요구.
-* 권장 수정 방향: 기존 metadata helper를 쓰거나, 읽기 전용 getter를 DB API에 추가하고 baseline을 갱신.
-* 우선순위: **Low**
+* **위치**: `smartclipboard_app/legacy_main_src.py:1440` vs `smartclipboard_core/automation/fetch_title.py`
+* **문제**:
+  `smartclipboard_core/automation/network_guard.py`에 로컬/사설망 IP 및 클라우드 메타데이터 IP를 차단하는 `validate_title_fetch_url`이 구현되어 있으나, 레거시 소스 `legacy_main_src.py` 내의 `_fetch_title_logic`에는 이 검증 단계 없이 단순 `requests.get`이 구현되어 있습니다.
+* **영향**:
+  레거시 런타임 모드(`SMARTCLIPBOARD_LEGACY_IMPL=src`)로 실행될 경우 내부 사설망 IP로의 불필요한 요청(SSRF)이 발생할 수 있습니다.
+* **근거**:
+  `legacy_main_src.py` 1440~1452행에 `NetworkGuard` 호출 부재.
+* **권장 수정 방향**:
+  `legacy_main_src.py`의 `_fetch_title_logic`에서도 `smartclipboard_core.automation.network_guard.is_safe_title_fetch_url`을 호출하도록 정합성을 맞춥니다.
+* **우선순위**: **Medium**
 
 ---
 
 ## 4. Potential Functional Gaps
 
-확실하지 않은 항목은 **추정**으로 표시한다.
+### [Gap 1] 백그라운드 자동 업데이트 주기적 확인 부재 *(추정)*
+* **내용**: 현재 업데이트 확인은 사용자가 메뉴를 직접 클릭할 때만 트리거됩니다. 앱 기동 시(시작 1회) 또는 매일 1회 백그라운드에서 조용히 매니페스트를 확인하고 새 버전이 있을 때만 알림을 띄우는 옵션(설정 UI 연동)이 제공되면 사용자 경험이 대폭 향상됩니다.
 
-| 항목 | 상태 | 설명 |
-|------|------|------|
-| 미니 창에서 Palette | 명세 비범위 | 미니 창 선택 항목에서는 `Alt+A`가 메인 창 단축키라 동작하지 않음. |
-| usage 통계로 추천 정렬 | 명세 optional, 미구현 | 항상 priority+title. |
-| 민감 본문 classifier | 부분 구현 | 태그/메모만. 본문 비밀은 Google 가능. |
-| FILE/IMAGE 액션 | 명세대로 빈 상태 | 경로 복사·탐색기 열기는 없음. **추정:** 사용자가 기대할 수 있음. |
-| `url.fetch_title` UX | 부분 | 사전 차단 사유(사설망)를 사용자에게 거의 안 보여 줌. |
-| Palette 결과와 선택 row 동기화 | 의도적 분기 | 상세 패널 변환은 internal copy, Palette는 새 history. 두 UX가 다름. |
-| 5 테마 육안 확인 | 미검증 | 토큰은 쓰지만 테마별 스크린 확인은 테스트에 없음. **추정:** light에서 contrast 이슈 가능. |
-| `Ctrl+G` | 문서만 존재 | Palette Google과 별개. 단축키는 없음. |
-| payload/EXE | payload는 재생성됨 | `smartclipboard.spec`은 `collect_submodules(features)`로 포함 가능. 수동 EXE smoke는 이 감사에서 실행하지 않음. **추정:** hidden import는 문제 없을 가능성 큼. |
-| 검색 500자 | 구현됨 | core `search.py`는 500자, 메뉴 `build_google_search_url`은 무제한. Palette만 제한. |
-| 다중 선택 | 미구현 | 첫 선택만. 병합 후 변환은 기존 메뉴에만 있음. |
+### [Gap 2] UAC / Program Files 설치 환경 권한 처리 *(추정)*
+* **내용**: 사용자가 일반 포터블 경로가 아닌 `C:\Program Files` 등에 실행 파일을 두고 실행할 경우, 일반 권한으로는 실행 파일 교체(`os.replace`) 시 `PermissionError`가 발생합니다. 업데이트 헬퍼 기동 시 권한 오류를 감지하고 UAC 승격(runas)을 요청하는 처리가 추가되면 설치 환경 호환성이 높아집니다.
+
+### [Gap 3] README 및 문서상의 업데이트 기능 설명 미기재 *(실제)*
+* **내용**: `README.md` 및 `claude.md`에 이번에 추가된 Ed25519 서명 기반 릴리즈 업데이트 시스템과 배포 방법(Git 태그 푸시)에 대한 설명이 누락되어 있습니다.
 
 ---
 
 ## 5. Recommended Fix Plan
 
-### 1단계 — 즉시 (동작·안전)
+### 1단계: 즉시 수정 (안전성 및 무결성)
+1. **`legacy_main_src.py` 복원 로직 통합**:
+   `restore_data()`가 `backup.py`의 `validate_restore_database`, `create_pre_restore_backup`, `replace_database_from_backup`을 호출하도록 교체.
+2. **`legacy_main_src.py` fetch_title 보안 가드 통일**:
+   `validate_title_fetch_url` 적용.
 
-1. 클립보드 정책 확정 후 `apply_result`와 `Claude.md`를 맞춘다. 자동 액션 재진입을 막거나, 새 history를 명시하고 자동화 skip 플래그를 둔다. (H1)
-2. Palette fetch 콜백에 shutdown/DB 유효성 가드를 넣고, `quit_app_impl`에서 disconnect한다. (H2, H8)
-3. QR 길이 제한 + `render_qr_pixmap` try/except. (H4)
-4. 민감 본문이 Google 검색에 안 나가게 최소 heuristic을 넣는다. (H3)
+### 2단계: 안정성 개선 (프로세스 및 헬퍼)
+1. **업데이트 헬퍼 프로세스 종료 보장**:
+   `UpdaterController`에서 헬퍼 기동 전 핫키 해제 및 `QApplication.exit(0)` / `sys.exit(0)` 클린업 처리 강화.
+2. **README.md 및 CLAUDE.md 동기화**:
+   자동 업데이트 기능 및 릴리즈 태그 배포 워크플로우 문서화.
 
-### 2단계 — 안정성
-
-1. `fetch_url_title_async` 재사용 또는 cache/dedupe/precheck 이식. (H5)
-2. 제목 저장 후 `load_data` / dirty 플래그. (H6)
-3. `url.open` 확인 또는 민감 시 숨김. (H7)
-4. QR 복사 라벨/동작을 분명히. (H9)
-5. README에서 Palette를 수동 기능으로 분리, `Ctrl+G` 정리, 클립보드 정책 한 줄 명시. (H10)
-
-### 3단계 — 구조
-
-1. `_history_fields`를 DB public read로 승격. (H13)
-2. 메뉴/코어 `build_google_search_url` 단일화.
-3. JSON 판정 비용 상한. (H12)
-4. 통합 테스트로 H1/H2/H4/H5를 고정. (H11, 섹션 6)
+### 3단계: 구조 및 기능 개선 (편의성)
+1. **주기적/시작 시 백그라운드 업데이트 확인 옵션 추가**:
+   설정 다이얼로그에 "시작 시 자동으로 업데이트 확인" 체크박스 추가 및 비간섭형 토스트 알림 연동.
+2. **UAC 권한 오류 처리 보강**:
+   Program Files 등 쓰기 권한이 없는 경로에서 `PermissionError` 발생 시 안내 또는 UAC 승격 실행 지원.
 
 ---
 
 ## 6. Test Recommendations
 
-기존 `test_action_palette_core` / `_ui`는 변환·위젯 smoke로는 충분하다. 아래는 빠진 실행 경로다.
-
-1. **Palette 복사 → 자동 액션**  
-   가짜 clipboard + `is_internal_copy` + `process_text_clipboard_impl`.  
-   현재 구현이면 새 history/`process_actions` 호출을 assert. 정책 변경 후면 호출되지 않음을 assert.
-
-2. **fetch_title shutdown**  
-   Worker 콜백을 직접 호출하되 `db.conn is None` / `_is_shutting_down` 상황에서 toast/Preview/`update_url_title`이 없음을 검증.
-
-3. **inflight 중복**  
-   `start_fetch_title` 두 번 → HTTP/Worker가 1회이거나 이전 시그널이 disconnect되는지.
-
-4. **사설 URL**  
-   `http://127.0.0.1/` fetch가 요청 없이 실패하고, 사용자 메시지가 남는지. (`fetch_title_logic` 단위는 `test_core`에 있음. Palette 진입 테스트가 없음.)
-
-5. **민감**  
-   본문만 있는 `sk-...` / `AKIA...` 에서 `search.google` 미노출. 태그 `documentation`에 `token` 부분일치가 과도하게 숨기지 않는지.
-
-6. **QR**  
-   10KB+ 텍스트는 미적용 또는 예외 없이 실패 메시지.
-
-7. **제목 저장 후 UI**  
-   `update_url_title` 이후 `load_data` 또는 dirty 플래그.
-
-8. **url.open**  
-   `webbrowser.open`에 넘기는 값이 `extract_first_url` 결과와 같고, `javascript:`/`file:`이 목록에 없는 것.
-
-9. **회귀 문서**  
-   README/설정 단축키 탭/`APP_LOCAL_SHORTCUTS`에 `Alt+A`가 있고 `Ctrl+G`가 구현과 일치하는지 문자열 계약 테스트.
-
-이 목록을 구현하기 전에는 코드를 바꾸지 않는 것이 이 감사의 범위다.
-
----
-
-## 7. Remediation status (2026-08-14)
-
-감사 직후 옵션 A로 반영했다. 아래는 구현 후 상태이며, 위 섹션 1–6은 감사 당시 스냅샷으로 남긴다.
-
-| ID | 조치 | 상태 |
-|----|------|------|
-| H1 | `apply_result`가 `mark_internal_copy()` 후 `setText()`, 선택 행은 `replace_text_item_or_merge()` | 반영 |
-| H2 | `shutdown_palette_workers()` + fetch 콜백 shutdown/DB 가드. `quit_app_impl`에서 호출 | 반영 |
-| H3 | 태그 단어 경계 + 본문 heuristic(PEM/`sk-`/`AKIA`/JWT). 민감 시 Google/제목 조회 숨김 | 반영 |
-| H4 | QR 2048자 상한, `render_qr_pixmap` try/except | 반영 |
-| H5 | `validate_title_fetch_url` 선행, manager cache, inflight disconnect | 반영 |
-| H6 | 제목 저장 후 `load_data()` | 반영 |
-| H7 | 민감 시 `url.open` 숨김, 혼합 텍스트는 확인 | 반영 |
-| H10 | README에서 Palette를 수동 기능으로 분리, `Ctrl+G` 제거, `Alt+A` 명시 | 반영 |
-| H11–H13 | `get_item_annotations` public read, Google URL 500자 단일화, JSON 256KB 상한, 통합 테스트 | 반영 |
-
-문서 정합:
-
-- 앱 내 단축키는 `Alt+A`(작업 실행). `Ctrl+G`는 구현에 없으며 현행 README/`PROJECT_ANALYSIS`에서 제거.
-- 패키징은 기존 `collect_submodules` 범위. `smartclipboard.spec` 추가 hidden import 없음.
-- 비공식 명세: `smartclipboard_action_palette_agent_spec.md` §20 writeback 정책.
-- Spec Kit `specs/` 디렉터리는 아직 없음. `.specify/` + 루트 명세로 관리.
+1. **`UpdaterController` UI Mocking 테스트**:
+   * 네트워크 다운로드 성공/실패 시그널 흐름 검증
+   * 사용자가 업데이트 다이얼로그에서 '나중에' 또는 '업데이트 다운로드'를 눌렀을 때의 상태 전이 검증
+2. **`restore_data` 비정상 파일 거부 테스트**:
+   * 손상된 SQLite 파일 복원 시도 시 기존 DB 유지 및 에러 알림 검증
+   * `-wal`, `-shm` 파일이 존재하는 상태에서의 복원 원자성 검증
+3. **업데이트 헬퍼 타임아웃 및 롤백 E2E 시뮬레이션**:
+   * 교체 후 `--smoke`가 에러 코드를 반환할 때 백업 파일이 정확하게 원상 복구되는지 검증

@@ -58,6 +58,7 @@
 - 2026-05-11 기준 privacy debounce, `deleted_history.url_title`, action writeback merge, restore full/minimal 검증, 핫키 실패 알림, 설정 write/read-back, 텍스트 1MB 제한은 기존 `collect_submodules` 규칙 안에 있으며 `smartclipboard.spec` 추가 자산은 없습니다.
 - 2026-06-10 기준 SOLID 분할은 `smartclipboard_app.features`와 `smartclipboard_core.db_parts` 하위에 머물러 있으므로 `smartclipboard.spec` 추가 hidden import/datas 없이 유지합니다.
 - 2026-08-14 기준 Contextual Action Palette는 `smartclipboard_core.action_palette`와 `smartclipboard_app.features.action_palette`에 있으며 기존 `collect_submodules("smartclipboard_core")` / `collect_submodules("smartclipboard_app.features")` 범위로 포함됩니다. spec 추가 hidden import/datas는 없습니다.
+- 2026-08-16 기준 GitHub Releases 서명 기반 자동 업데이트는 `smartclipboard_core.update_manifest`, `smartclipboard_core.update_installer`, `smartclipboard_app.features.updater` 및 CLI `--smoke`/`--apply-update`(`scripts.apply_update`)에 의해 구동됩니다. 릴리즈 워크플로우는 `.github/workflows/release.yml`이며 Ed25519 디지털 서명과 SHA-256 해시 검증 및 백업/자동 롤백 계약을 준수합니다.
 - `.codegraph/`는 로컬 분석 인덱스이므로 `.gitignore`로 제외하고 버전 관리하지 않습니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`

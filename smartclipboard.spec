@@ -58,7 +58,7 @@ from importlib.util import find_spec
 from PyInstaller.utils.hooks import collect_submodules
 
 APP_NAME = "SmartClipboard"
-APP_VERSION = "10.6"
+APP_VERSION = "10.7"
 MAIN_SCRIPT = "클립모드 매니저.py"
 ICON_FILE = "smartclipboard.ico"
 LEGACY_PAYLOAD = Path("smartclipboard_app/legacy_main_payload.marshal")
@@ -138,6 +138,11 @@ HIDDEN_IMPORTS = [
     "smartclipboard_app.managers.secure_vault",
     "smartclipboard_app.managers.export_import",
     "smartclipboard_core.file_paths",
+    "smartclipboard_core.config",
+    "smartclipboard_core.update_manifest",
+    "smartclipboard_core.update_installer",
+    "smartclipboard_app.features.updater",
+    "scripts.apply_update",
 ]
 
 OPTIONAL_HIDDEN_IMPORTS = [
