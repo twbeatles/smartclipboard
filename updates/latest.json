@@ -1,10 +1,10 @@
 {
   "payload": {
-    "artifact_url": "https://github.com/twbeatles/smartclipboard/releases/download/v10.6/SmartClipboard-v10.6.exe",
-    "expires_at": "2030-01-01T00:00:00Z",
-    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-    "size": 1,
-    "version": "10.6"
+    "artifact_url": "https://github.com/twbeatles/smartclipboard/releases/download/v10.7/SmartClipboard-v10.7.exe",
+    "expires_at": "2027-08-16T14:21:35Z",
+    "sha256": "092a7d9778f7d05a7560220cf4427415f8bf1fe429712aa6cf0822fb06cb6020",
+    "size": 39968172,
+    "version": "10.7"
   },
-  "signature": ""
+  "signature": "ZYUSTjrrCUMTZVg8hiiQPbG01is1B874q6n8hM6/rqvEvThat7AwFS+H478ydJHQoqNTy6AZONOP5+SA3TrWBA=="
 }
