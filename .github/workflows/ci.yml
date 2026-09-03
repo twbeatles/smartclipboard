@@ -7,25 +7,65 @@ on:
   pull_request:
 
 jobs:
-  windows-tests:
+  native-tests:
+    name: Native Tests & Build (Rust + Tauri 2)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Build Frontend
+        run: npm run build
+
+      - name: Run Rust Native Tests (30 tests)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --verbose
+
+      - name: Run Rust Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - name: Build Tauri Release Binary (Smoke)
+        run: npx tauri build
+
+  legacy-python-tests:
+    name: Legacy Python Tests (${{ matrix.python-version }})
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUTF8: "1"
 
+    defaults:
+      run:
+        working-directory: legacy/python
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: legacy/python/requirements.txt
 
       - name: Install dependencies
         run: |

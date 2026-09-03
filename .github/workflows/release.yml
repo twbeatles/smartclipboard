@@ -14,9 +14,55 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  release-native:
+    name: Build & Release Native (Rust + Tauri 2)
     runs-on: windows-latest
     timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Build Frontend
+        run: npm run build
+
+      - name: Build Tauri Release Binary
+        run: npx tauri build
+
+      - name: Prepare Artifact
+        shell: pwsh
+        run: |
+          $bin = "src-tauri/target/release/smartclipboard-native.exe"
+          if (-not (Test-Path $bin)) { throw "Binary not found: $bin" }
+          $tag = "${{ github.ref_name }}"
+          $dest = "SmartClipboard-Native-$tag-Windows.exe"
+          Copy-Item $bin $dest -Force
+          "NATIVE_ARTIFACT=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.NATIVE_ARTIFACT }}
+
+  release-legacy-python:
+    name: Build & Release Legacy Python
+    runs-on: windows-latest
+    if: "!contains(github.ref_name, 'native')"
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: legacy/python
     env:
       PYTHONUTF8: "1"
       QT_QPA_PLATFORM: offscreen
@@ -31,7 +77,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: legacy/python/requirements.txt
 
       - name: Install dependencies and verify
         run: |
@@ -44,8 +90,10 @@ jobs:
       - name: Build signed-update artifact
         shell: pwsh
         run: |
-          if (-not $env:SMARTCLIPBOARD_UPDATE_PUBLIC_KEY_B64) { throw "SMARTCLIPBOARD_UPDATE_PUBLIC_KEY_B64 is required" }
-          if (-not $env:SMARTCLIPBOARD_UPDATE_PRIVATE_KEY_B64) { throw "SMARTCLIPBOARD_UPDATE_PRIVATE_KEY_B64 is required" }
+          if (-not $env:SMARTCLIPBOARD_UPDATE_PUBLIC_KEY_B64) {
+            Write-Host "Skipping legacy signed update build (secrets not configured)"
+            exit 0
+          }
           python scripts/verify_update_release_key.py
           $version = '${{ github.ref_name }}'.TrimStart('v')
           if ($version -notmatch '^\d+(\.\d+)*$') { throw "Tag must use vX.Y.Z: $env:GITHUB_REF_NAME" }
@@ -61,8 +109,10 @@ jobs:
           $artifactUrl = "https://github.com/twbeatles/smartclipboard/releases/download/v$version/SmartClipboard-v$version.exe"
           python scripts/build_update_manifest.py --version $version --artifact $artifact --artifact-url $artifactUrl --output "$env:RUNNER_TEMP/latest.json"
           "ARTIFACT=$artifact" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "HAS_LEGACY_BUILD=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Create GitHub Release
+        if: env.HAS_LEGACY_BUILD == '1'
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -70,16 +120,17 @@ jobs:
             ${{ runner.temp }}/latest.json
 
       - name: Publish latest manifest on main
+        if: env.HAS_LEGACY_BUILD == '1'
         shell: pwsh
         run: |
           git fetch origin main
           git merge-base --is-ancestor $env:GITHUB_SHA origin/main
           if ($LASTEXITCODE -ne 0) { throw "Release tag commit must be contained in main before publishing latest manifest" }
           git checkout -B main origin/main
-          Copy-Item -LiteralPath "$env:RUNNER_TEMP/latest.json" -Destination updates/latest.json -Force
+          Copy-Item -LiteralPath "$env:RUNNER_TEMP/latest.json" -Destination ../../updates/latest.json -Force
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add updates/latest.json
+          git add ../../updates/latest.json
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 0) { exit 0 }
           git commit -m "chore: publish update manifest for ${{ github.ref_name }} [skip ci]"
