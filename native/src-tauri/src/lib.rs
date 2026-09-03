@@ -105,16 +105,9 @@ pub fn run() {
     let db_path = resolve_db_path();
     tracing::info!("Connecting to SQLite database at: {:?}", db_path);
 
-    let db = match Database::open_read_only(&db_path) {
-        Ok(db) => db,
-        Err(e) => {
-            tracing::warn!(
-                "Read-only open failed ({}), attempting read-write fallback (test synthetic)",
-                e
-            );
-            Database::open_read_write(&db_path).expect("Failed to initialize database connection")
-        }
-    };
+    let db = Database::open_read_write(&db_path)
+        .or_else(|_| Database::open_read_only(&db_path))
+        .expect("Failed to initialize database connection");
 
     let app_state = AppState::new(db);
 
@@ -126,9 +119,24 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .manage(app_state)
-        .setup(|app| {
+        .manage(app_state.clone())
+        .setup(move |app| {
             setup_tray(app.handle())?;
+
+            // Initialize and start background clipboard listener
+            let write_guard = std::sync::Arc::new(crate::clipboard::internal_guard::InternalWriteGuard::new());
+            let pipeline = std::sync::Arc::new(crate::clipboard::ClipboardPipeline::new(
+                std::sync::Arc::new(app_state),
+                write_guard,
+            ));
+
+            let handle = app.handle().clone();
+            let pipeline_clone = pipeline.clone();
+            let _listener = crate::clipboard::win32::start_clipboard_listener(move || {
+                pipeline_clone.process_event(Some(&handle));
+            });
+            Box::leak(Box::new(_listener));
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
