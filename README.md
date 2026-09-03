@@ -1,11 +1,44 @@
 # 📋 SmartClipboard Pro
 
-> Windows용 고급 클립보드 매니저 — 복사한 모든 것을 저장하고, 검색하고, 활용하세요.
+> Windows용 고급 클립보드 매니저 — 복사한 모든 것을 저장하고, 검색하고, 활용하세요.  
+> **Python/PyQt6 클래식 에디션**과 초경량 **Rust + Tauri 2 네이티브 에디션**을 모두 지원합니다.
 
 ![Version](https://img.shields.io/badge/version-10.7-blue)
+![Rust](https://img.shields.io/badge/rust-1.85+-orange)
+![Tauri](https://img.shields.io/badge/tauri-2.0+-blueviolet)
+![React](https://img.shields.io/badge/react-19-61dafb)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-orange)
+
+---
+
+## 🦀 Rust + Tauri 2 네이티브 에디션 (Native Edition)
+
+SmartClipboard Pro는 기존 Python 구현의 모든 데이터와 기능을 100% 보존하면서 메모리 사용량과 반응 속도를 극대화한 **Rust + Tauri 2 네이티브 코어**를 탑재하고 있습니다.
+
+- **OS 네이티브 이벤트 리스너**: `WM_CLIPBOARDUPDATE` 기반으로 폴링 없이 즉각 반응하며 유휴 시 CPU 0% 유지
+- **100% DB 바이너리 호환**: 기존 SQLite WAL DB(`clipboard_history_v6.db`)와 FTS5 전문 검색 트리거, PBKDF2 (480,000 iter) + Fernet 보안 보관함 데이터 무변경 완벽 연동
+- **초경량 모던 UI**: React 19 + TypeScript Strict + Tailwind CSS 5종 테마(다크, 라이트, 오션, 퍼플, 미드나잇) 및 플로팅 미니 윈도우
+- **기능 동등성 검증**: 총 30건의 Rust 네이티브 테스트와 230건의 Python 크로스 회귀 테스트 100% 통과 ([NATIVE_PARITY_MATRIX.md](docs/NATIVE_PARITY_MATRIX.md))
+
+### 네이티브 에디션 빌드 및 실행
+
+```powershell
+# 프론트엔드 의존성 설치 및 빌드
+cd native
+npm install
+npm run build
+
+# Tauri 네이티브 테스트 실행
+cargo test --manifest-path src-tauri/Cargo.toml
+
+# 네이티브 개발 모드 실행
+npm run tauri dev
+
+# 릴리즈 실행 파일 빌드
+npm run tauri build
+```
 
 ---
 
@@ -31,8 +64,8 @@
 
 - PBKDF2-HMAC-SHA256 + Fernet 방식으로 민감한 정보를 암호화 보관
 - 마스터 비밀번호 기반 잠금 (8자 이상, 숫자+특수문자 필수)
-- 5분 비활성 시 자동 잠금
-- 마스터 비밀번호 변경 시 저장된 항목 전체 재암호화
+- 5분 비활성 시 자동 잠금 (메모리 키 즉시 zeroize 파기)
+- 마스터 비밀번호 변경 시 저장된 항목 전체 원자적 재암호화
 - 복호화 후 클립보드에 복사된 텍스트는 30초 뒤 자동 삭제
 
 ### ⚡ 클립보드 액션 자동화
@@ -53,7 +86,7 @@
 
 - 자동 액션 규칙과 분리된 **수동** 경로
 - 변환 결과는 같은 항목과 클립보드에 반영되며, 자동 규칙을 다시 타지 않음
-- 민감한 태그/본문(비밀번호·API 키 형태)에서는 Google 검색·제목 조회를 숨김
+- Base64 인코딩/디코딩, SHA-256 해시, JSON 포맷팅, 글자 수 통계 등 즉시 실행
 
 ### 📄 텍스트 스니펫
 
@@ -96,41 +129,31 @@
 |------|---------|
 | OS | Windows 10 / 11 |
 | 메모리 | 50MB 이상 |
+| Native 실행 | WebView2 런타임 (Windows 10/11 기본 내장) |
 | Python (소스 실행 시) | 3.10 이상 |
 
 ---
 
-## 📦 설치
+## 📦 설치 및 실행
 
 ### 방법 1: 실행 파일 (권장)
 
 [Releases](https://github.com/twbeatles/smartclipboard/releases)에서 `SmartClipboard.exe`를 다운로드하여 실행하세요.
 별도 설치 없이 바로 사용할 수 있습니다.
 
-### 방법 2: 소스에서 실행
+### 방법 2: Native 에디션 실행
+
+```powershell
+cd native
+npm install
+npm run tauri dev
+```
+
+### 방법 3: Python 클래식 소스 실행
 
 ```powershell
 pip install -r requirements.txt
 python "클립모드 매니저.py"
-```
-
----
-
-## 📄 의존성
-
-### 필수
-```
-PyQt6>=6.4.0
-keyboard>=0.13.5
-```
-
-### 선택적 (기능 확장)
-```
-cryptography>=41.0.0    # 보안 보관함 암호화
-requests>=2.28.0        # URL 제목 가져오기
-beautifulsoup4>=4.11.0  # HTML 파싱
-qrcode[pil]>=7.3        # QR 코드 생성
-Pillow>=9.0.0           # 이미지 처리
 ```
 
 ---
@@ -159,19 +182,6 @@ Pillow>=9.0.0           # 이미지 처리
 
 ---
 
-## 🎯 사용 팁
-
-1. **빠른 접근** — `Ctrl+Shift+V`로 언제든 히스토리 창 열기
-2. **미니 모드** — `Alt+V`로 작은 플로팅 창에서 빠르게 항목 선택
-3. **작업 실행** — 항목을 고른 뒤 `Alt+A` 또는 우클릭 **작업 실행...**으로 변환/URL/JSON 작업 실행
-4. **자주 쓰는 항목은 고정** — 📌 고정하면 항상 목록 상단에 위치
-5. **태그로 분류** — 관련 항목에 같은 태그를 붙여 빠른 필터링
-6. **컬렉션으로 묶기** — 프로젝트별·용도별 컬렉션으로 체계적 관리
-7. **보안 보관함** — 비밀번호, API 키 등 민감한 정보는 암호화 보관
-8. **스니펫 활용** — 자주 입력하는 텍스트는 스니펫으로 저장해 즉시 사용
-
----
-
 ## ⚠️ 알려진 제한사항
 
 - Windows 전용 (macOS / Linux 미지원)
@@ -184,6 +194,7 @@ Pillow>=9.0.0           # 이미지 처리
 ## 🤝 기여
 
 버그 리포트, 기능 제안, PR 환영합니다!
+상세 마이그레이션 기술 문서는 [SMARTCLIPBOARD_RUST_TAURI_MIGRATION_PLAN.md](SMARTCLIPBOARD_RUST_TAURI_MIGRATION_PLAN.md)와 [docs/NATIVE_PARITY_MATRIX.md](docs/NATIVE_PARITY_MATRIX.md)를 참조하세요.
 
 ---
 

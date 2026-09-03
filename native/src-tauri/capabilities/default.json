@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "identifier": "default",
+  "description": "Default capability for SmartClipboard Pro",
+  "windows": ["main", "mini"],
+  "permissions": [
+    "core:default"
+  ]
+}

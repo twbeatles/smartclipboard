@@ -1,0 +1,42 @@
+[package]
+name = "smartclipboard-native"
+version = "10.7.0"
+description = "SmartClipboard Pro Native Rust + Tauri 2 Application"
+edition = "2021"
+
+[lib]
+name = "smartclipboard_native_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-global-shortcut = "2"
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+chrono = "0.4"
+regex = "1.10"
+csv = "1.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# SQLite with FTS5 bundled
+rusqlite = { version = "0.32", features = ["bundled", "bundled-full"] }
+
+# Vault Crypto primitives
+sha2 = "0.10"
+hmac = "0.12"
+pbkdf2 = { version = "0.12", features = ["hmac"] }
+aes = "0.8"
+cbc = { version = "0.1", features = ["block-padding"] }
+base64 = "0.22"
+getrandom = "0.2"
+zeroize = { version = "1.8", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3.10"

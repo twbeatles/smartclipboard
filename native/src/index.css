@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --theme-bg: #0f172a;
+  --theme-card: #1e293b;
+  --theme-text: #f8fafc;
+  --theme-muted: #94a3b8;
+  --theme-border: #334155;
+  --theme-accent: #0ea5e9;
+  --theme-hover: #334155;
+}
+
+[data-theme="Dark"] {
+  --theme-bg: #181825;
+  --theme-card: #1e1e2e;
+  --theme-text: #cdd6f4;
+  --theme-muted: #a6adc8;
+  --theme-border: #313244;
+  --theme-accent: #89b4fa;
+  --theme-hover: #313244;
+}
+
+[data-theme="Light"] {
+  --theme-bg: #f8fafc;
+  --theme-card: #ffffff;
+  --theme-text: #0f172a;
+  --theme-muted: #64748b;
+  --theme-border: #e2e8f0;
+  --theme-accent: #3b82f6;
+  --theme-hover: #f1f5f9;
+}
+
+[data-theme="Ocean"] {
+  --theme-bg: #0b132b;
+  --theme-card: #1c2541;
+  --theme-text: #f8fafc;
+  --theme-muted: #8da9c4;
+  --theme-border: #3a506b;
+  --theme-accent: #00b4d8;
+  --theme-hover: #3a506b;
+}
+
+[data-theme="Purple"] {
+  --theme-bg: #170f23;
+  --theme-card: #231934;
+  --theme-text: #f5f3ff;
+  --theme-muted: #a78bfa;
+  --theme-border: #3c2a57;
+  --theme-accent: #c084fc;
+  --theme-hover: #3c2a57;
+}
+
+[data-theme="Midnight"] {
+  --theme-bg: #030712;
+  --theme-card: #0f172a;
+  --theme-text: #e2e8f0;
+  --theme-muted: #64748b;
+  --theme-border: #1e293b;
+  --theme-accent: #38bdf8;
+  --theme-hover: #1e293b;
+}

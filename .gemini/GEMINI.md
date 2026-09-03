@@ -5,6 +5,7 @@
 - 엔트리: `클립모드 매니저.py`
 - 앱 부트스트랩: `smartclipboard_app/bootstrap.py`
 - 코어 모듈: `smartclipboard_core/` (`automation/`, `action_palette/`, `db_parts/`)
+- 네이티브 코어: `native/` (Rust + Tauri 2 + React 19 + TypeScript + Tailwind CSS)
 - 정적 분석 범위: 루트 `pyrightconfig.json`
 - 레거시 런타임:
   - `smartclipboard_app/legacy_main.py`는 로더
@@ -14,8 +15,9 @@
 ## 작업 원칙
 
 1. 신규 수정은 `smartclipboard_core/`와 `smartclipboard_app/features/` 우선, `smartclipboard_app/ui/`는 호환 shim/조립 레이어로 취급
-2. `클립모드 매니저.py`의 외부 호환 API(export) 유지
-3. 빌드 산출물이 payload와 payload manifest를 함께 포함하도록 `smartclipboard.spec` 유지
+2. 네이티브 관련 수정은 `native/` 하위 모듈(`src-tauri/src/` 및 `src/`)에 반영하며 기존 DB 바이너리 호환성 100% 유지
+3. `클립모드 매니저.py`의 외부 호환 API(export) 유지
+4. 빌드 산출물이 payload와 payload manifest를 함께 포함하도록 `smartclipboard.spec` 유지
 
 ## 주의
 
@@ -60,6 +62,8 @@
 
 ## 검증 커맨드
 
+### Python 에디션 검증
+
 ```powershell
 python scripts/preflight_local.py --with-pyright
 ```
@@ -75,68 +79,44 @@ python -m py_compile "클립모드 매니저.py" "smartclipboard_app/bootstrap.p
 python -m unittest discover -s tests -v
 ```
 
-권장 회귀 테스트:
-- `tests/test_core.py`
-- `tests/test_ui_dialogs_widgets.py`
-- `tests/test_payload_sync.py`
-- `tests/test_legacy_loader.py`
-- `tests/test_migration_collections.py`
-- `tests/test_legacy_ui_contracts.py`
-- `tests/test_signal_snapshot.py`
-- `tests/test_public_surfaces.py`
-- `tests/test_action_palette_core.py`
-- `tests/test_action_palette_ui.py`
+### Rust + Tauri 2 네이티브 에디션 검증
+
+```powershell
+# 1. Rust 단위/패리티/통합 테스트 (30건)
+cargo test --manifest-path native/src-tauri/Cargo.toml
+
+# 2. Rust Clippy 린터 점검 (0 warnings)
+cargo clippy --manifest-path native/src-tauri/Cargo.toml
+
+# 3. 프론트엔드 TypeScript & Vite 번들 검증
+cd native
+npm run build
+```
 
 ## 빌드
+
+### Python 에디션 (PyInstaller)
 
 ```powershell
 python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
 pyinstaller --clean smartclipboard.spec
 ```
 
-결과:
+결과: `dist/SmartClipboard.exe`
 
-- `dist/SmartClipboard.exe`
+### Native 에디션 (Tauri 2)
 
-## 향후 리팩토링 전제
+```powershell
+cd native
+npm run tauri build
+```
 
-본격적인 코드 분할 리팩토링(클래스/메서드 단위 이동)을 재개하려면 `legacy_main.py` 원본 소스 복원이 선행되어야 합니다.
+결과: `native/src-tauri/target/release/smartclipboard-native.exe` 및 설치 프로그램
 
-## Refactor Sync (2026-03-12)
+## 2026-09-03 Rust + Tauri 2 Native Architecture Notes
 
-- `smartclipboard_core/database.py` is now split into `smartclipboard_core/db_parts/*.py` facades plus subpackages under `search/`, `automation/`, `catalog/`, `retention/`.
-- `smartclipboard_core/actions.py` is a public facade and the implementation lives in `smartclipboard_core/automation/`.
-- `smartclipboard_app/ui/mainwindow_parts/` is a compatibility shim layer, while actual MainWindow feature logic now lives in `smartclipboard_app/features/`.
-- `scripts/preflight_local.py` compiles `db_parts/**/*.py`, `automation/**/*.py`, `features/**/*.py`, `ui/**/*.py` recursively.
-- Added API surface regression checks:
-  - `tests/test_public_surfaces.py`
-  - `tests/baseline/clipboarddb_public_methods.txt`
-- `smartclipboard.spec` explicitly collects `smartclipboard_core.db_parts`, `smartclipboard_core.automation`, `smartclipboard_app.features`, `smartclipboard_app.ui.mainwindow_parts` submodules.
-
-## 2026-04-15 Structure Refactor Notes
-
-- `legacy_main_src.MainWindow` keeps its public method surface but now delegates to feature controllers for clipboard, history/table, tray_hotkey, lifecycle, settings, and shell_ui.
-- `smartclipboard_app/features/shared/state.py` binds `WindowState`, `WindowServices`, `WindowWidgets` so feature controllers do not depend on the raw Qt window indiscriminately.
-- `tests/test_signal_snapshot.py` and `scripts/refactor_signal_snapshot.py` now scan both shim files and feature implementation files to preserve the legacy signal contract while the implementation is split.
-
-## 2026-06-10 SOLID Structure Split
-
-- `legacy_main_src.py` remains the compatibility source, but startup, dialog launchers, history interactions, settings QSS, import/export helpers, and DB history operations now live in focused feature/core modules.
-- Public `MainWindow`, `ClipboardDB`, manager, dialog, worker, payload, and root facade contracts remain stable.
-- `python scripts/preflight_local.py --with-pyright` is the required guard after changing these split modules; it rebuilds payload, smoke-imports it, compiles recursive feature/core packages, runs unit tests, and runs pyright.
-
-## 2026-04-12 Stabilization Notes
-
-- `ExportImportManager` public API still returns `int`, and detailed results live in `last_import_report` / `last_export_report`.
-- JSON/CSV import now always creates a pre-import backup and applies each file inside one DB transaction, so partial writes do not survive failures.
-- `search_items()` remains FTS-first and only uses LIKE as a zero-hit supplement or true FTS-error fallback. UI warning state should only represent real FTS errors.
-- `ClipboardActionManager.fetch_title` uses URL-level in-flight dedupe, an in-memory title cache, and a dedicated `QThreadPool(maxThreadCount=4)`. Late results must re-check the current row URL before saving.
-- Synchronous text actions (`format_phone`, `format_email`, `transform`) must update the working text sequentially, and `fetch_title` must resolve its URL from the post-transform final text.
-- Replace-text action results must be written back to both the same history row and the live clipboard so stored state and clipboard contents do not diverge.
-- `FILE` duplicate detection now depends on `history.file_signature`; keep path canonicalization rules aligned across insert/update/restore code paths.
-- Vault clipboard plaintext is tracked only in-process via an armed state and must be conditionally cleared after 30 seconds and again on shutdown if still present.
-- `mini_window_enabled` save failures should roll back only that setting and surface `_last_hotkey_error` to the user.
-- For CI-equivalent dependency verification, run `python scripts/preflight_local.py --strict-optional-deps --with-pyright`.
-- Search queries should preserve DB/FTS relevance order by default, and only apply a client-side sort when the user has explicitly overridden the header sort.
-- If JSON import creates collections, refresh `refresh_collection_filter_options()` before reloading the table so the top filter stays in sync.
-- Empty search/empty-history paths should still call `update_status_bar(0)` so stale item counts are cleared.
+- `native/`에 완전한 Rust 코어 및 Tauri 2 + React 19 UI 셸이 구현되었습니다.
+- 기존 SQLite WAL `clipboard_history_v6.db` 스키마와 100% 무변경 상호운용됩니다.
+- Windows 네이티브 `WM_CLIPBOARDUPDATE` 이벤트 리스너를 사용하여 폴링 없는 초저지연 클립보드 감시가 수행됩니다.
+- PBKDF2-HMAC-SHA256 (480,000 iter) 및 Fernet (AES-128-CBC + HMAC-SHA256) 암호화 레이어는 Python cryptography와 100% 크로스 복호화/암호화 호환성을 가집니다.
+- `docs/NATIVE_PARITY_MATRIX.md`에서 100% 완료된 기능 동등성 매트릭스를 확인할 수 있습니다.

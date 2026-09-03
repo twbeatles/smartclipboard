@@ -1,0 +1,10 @@
+{
+  "db_open_ms": 4.265,
+  "history_list_ms_median": 0.045,
+  "history_list_ms_p95": 0.136,
+  "fts_en_ms_median": 0.117,
+  "fts_en_ms_p95": 0.575,
+  "fts_kr_ms_median": 0.082,
+  "fts_kr_ms_p95": 0.103,
+  "rss_mb": 64.85
+}
