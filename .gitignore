@@ -94,10 +94,11 @@ build/**/localpycs/
 !smartclipboard_app/legacy_main_payload.manifest.json
 
 # --- Rust & Node (Native Edition) ---
-native/node_modules/
-native/dist/
-native/src-tauri/target/
+node_modules/
+dist/
+src-tauri/target/
 
 # Keep test fixtures
-!tests/native_parity/fixtures/*.db
+!src-tauri/fixtures/*.db
+!legacy/python/tests/native_parity/fixtures/*.db
 

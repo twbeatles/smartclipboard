@@ -5,7 +5,7 @@ use smartclipboard_native_lib::database::{Database, SearchFilter};
 
 #[test]
 fn test_native_benchmark_comparison() {
-    let db_path = PathBuf::from("../../tests/native_parity/fixtures/synthetic_test_v6.db");
+    let db_path = PathBuf::from("fixtures/synthetic_test_v6.db");
     assert!(db_path.exists());
 
     // 1. DB Open Latency

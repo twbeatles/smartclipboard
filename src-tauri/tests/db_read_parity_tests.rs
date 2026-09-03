@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use smartclipboard_native_lib::database::{Database, SearchFilter};
 
 fn get_test_db() -> Database {
-    let db_path = PathBuf::from("../../tests/native_parity/fixtures/synthetic_test_v6.db");
+    let db_path = PathBuf::from("fixtures/synthetic_test_v6.db");
     assert!(db_path.exists(), "Synthetic DB fixture missing: {:?}", db_path);
     Database::open_read_only(&db_path).expect("Failed to open synthetic DB in read-only mode")
 }

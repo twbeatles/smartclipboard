@@ -5,7 +5,7 @@ use tempfile::NamedTempFile;
 use smartclipboard_native_lib::database::{Database, SearchFilter};
 
 fn create_temp_db_copy() -> (NamedTempFile, Database) {
-    let fixture_path = PathBuf::from("../../tests/native_parity/fixtures/synthetic_test_v6.db");
+    let fixture_path = PathBuf::from("fixtures/synthetic_test_v6.db");
     assert!(fixture_path.exists());
 
     let temp = NamedTempFile::new().expect("create temp file");

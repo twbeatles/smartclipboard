@@ -2,22 +2,16 @@
 
 ## 프로젝트 현황
 
-- 엔트리: `클립모드 매니저.py`
-- 앱 부트스트랩: `smartclipboard_app/bootstrap.py`
-- 코어 모듈: `smartclipboard_core/` (`automation/`, `action_palette/`, `db_parts/`)
-- 네이티브 코어: `native/` (Rust + Tauri 2 + React 19 + TypeScript + Tailwind CSS)
-- 정적 분석 범위: 루트 `pyrightconfig.json`
-- 레거시 런타임:
-  - `smartclipboard_app/legacy_main.py`는 로더
-  - `smartclipboard_app/legacy_main_payload.marshal`을 실행해 기존 동작을 복원
-  - `smartclipboard_app/legacy_main_payload.manifest.json`으로 Python/source와 payload size/SHA-256 동기화를 검증
+- **메인 코어**: Rust + Tauri 2 + React 19 + TypeScript (`src-tauri/`, `src/`)
+- **레거시 에디션**: 기존 Python/PyQt6 구현체는 `legacy/python/`에 온전히 보존
+- **DB 스키마**: 기존 SQLite WAL `clipboard_history_v6.db` 바이너리 100% 호환
+- **테스트 스위트**: `src-tauri/tests/` (Rust 네이티브 30건), `legacy/python/tests/` (Python 230건)
 
 ## 작업 원칙
 
-1. 신규 수정은 `smartclipboard_core/`와 `smartclipboard_app/features/` 우선, `smartclipboard_app/ui/`는 호환 shim/조립 레이어로 취급
-2. 네이티브 관련 수정은 `native/` 하위 모듈(`src-tauri/src/` 및 `src/`)에 반영하며 기존 DB 바이너리 호환성 100% 유지
-3. `클립모드 매니저.py`의 외부 호환 API(export) 유지
-4. 빌드 산출물이 payload와 payload manifest를 함께 포함하도록 `smartclipboard.spec` 유지
+1. 신규 기능 및 버그 수정은 루트의 Tauri/Rust 네이티브 구현(`src-tauri/` 및 `src/`) 우선 반영
+2. 기존 Python 레거시 구현체(`legacy/python/`)는 기준 구현 및 백업 참조 목적으로 무결성 보존
+3. 기존 SQLite WAL DB 및 FTS5/Vault 바이너리 호환성 100% 엄격 준수
 
 ## 주의
 
@@ -83,35 +77,31 @@ python -m unittest discover -s tests -v
 
 ```powershell
 # 1. Rust 단위/패리티/통합 테스트 (30건)
-cargo test --manifest-path native/src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
 
 # 2. Rust Clippy 린터 점검 (0 warnings)
-cargo clippy --manifest-path native/src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml
 
 # 3. 프론트엔드 TypeScript & Vite 번들 검증
-cd native
 npm run build
 ```
 
 ## 빌드
 
-### Python 에디션 (PyInstaller)
+### Python 에디션 (Legacy)
 
 ```powershell
-python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
-pyinstaller --clean smartclipboard.spec
+python legacy/python/scripts/build_legacy_payload.py --src legacy/python/smartclipboard_app/legacy_main_src.py --out legacy/python/smartclipboard_app/legacy_main_payload.marshal --smoke-import
+pyinstaller --clean legacy/python/smartclipboard.spec
 ```
-
-결과: `dist/SmartClipboard.exe`
 
 ### Native 에디션 (Tauri 2)
 
 ```powershell
-cd native
 npm run tauri build
 ```
 
-결과: `native/src-tauri/target/release/smartclipboard-native.exe` 및 설치 프로그램
+결과: `src-tauri/target/release/smartclipboard-native.exe` 및 설치 프로그램
 
 ## 2026-09-03 Rust + Tauri 2 Native Architecture Notes
 

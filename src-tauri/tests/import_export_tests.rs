@@ -7,7 +7,7 @@ use smartclipboard_native_lib::import_export::{export_to_csv, export_to_json, im
 use smartclipboard_native_lib::paths::resolve_app_data_dir;
 
 fn get_source_db() -> Database {
-    let fixture_path = PathBuf::from("../../tests/native_parity/fixtures/synthetic_test_v6.db");
+    let fixture_path = PathBuf::from("fixtures/synthetic_test_v6.db");
     assert!(fixture_path.exists());
     Database::open_read_only(&fixture_path).expect("open read only")
 }
@@ -25,7 +25,7 @@ fn test_json_export_and_import_roundtrip() {
     assert!(json_str.contains("\"snippets\":"));
 
     // 2. Create fresh target DB
-    let fixture_path = PathBuf::from("../../tests/native_parity/fixtures/synthetic_test_v6.db");
+    let fixture_path = PathBuf::from("fixtures/synthetic_test_v6.db");
     let target_temp = NamedTempFile::new().expect("create temp");
     fs::copy(&fixture_path, target_temp.path()).expect("copy schema");
 

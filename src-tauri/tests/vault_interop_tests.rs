@@ -40,7 +40,7 @@ struct GoldenVectors {
 }
 
 fn load_vectors() -> GoldenVectors {
-    let path = PathBuf::from("../../tests/native_parity/fixtures/vault_golden_vectors.json");
+    let path = PathBuf::from("fixtures/vault_golden_vectors.json");
     let file = File::open(&path).unwrap_or_else(|_| panic!("Failed to open golden vectors file: {:?}", path));
     let reader = BufReader::new(file);
     serde_json::from_reader(reader).expect("Failed to parse golden vectors JSON")

@@ -1,0 +1,38 @@
+{
+  "kdf_params": {
+    "algorithm": "PBKDF2-HMAC-SHA256",
+    "iterations": 480000,
+    "key_length": 32,
+    "salt_b64": "AAECAwQFBgcICQoLDA0ODw=="
+  },
+  "master_password": "MasterPassword2026!@#",
+  "derived_key_b64": "Tv2_ozpn9iYWX59JMk9ovb_2ZKAV-RUVrNVg2IC5W-U=",
+  "verification_plaintext": "VAULT_VERIFIED",
+  "verification_token": "gAAAAABqmNlrHSqUMXtPxJfq3Iiz8ELDn3jhpuV2yIw14lStRlDMBpjiIRd1LK9ZV0gYLoyd-H4EbamBEaYuIhEGPrr7uuP__Q==",
+  "samples": [
+    {
+      "id": "ascii_password",
+      "plaintext": "SuperSecretPassphrase123!",
+      "ciphertext": "gAAAAABqmNlrm8FutZmWilHVXBf6alk5OLJWkvMzNdt3HhjlQKvsu7i_M12Oxs2jenFvrG6zNR2fY57IxSm4m82GY2TRkW_ThIZMHsLJgQyeyFDwYeMxfm0="
+    },
+    {
+      "id": "korean_secret",
+      "plaintext": "스마트클립보드 암호화 보관함 비밀 데이터",
+      "ciphertext": "gAAAAABqmNlr5isiadvRCDJzRvfgThC8DwVSTCY2U4JmhGoGOqNm_w2jVLr7J06DxqEJJDJ4l5x4R-8lMxBBrNhmvEsKIgNKLqLDOXPvWhBJaHgJD9NeWtH5kBJ_HXPIzMSJwTaS20we4JT3sMXULf8zKZxK_y77xw=="
+    },
+    {
+      "id": "api_key",
+      "plaintext": "sk-proj-abcdef0123456789ABCDEF0123456789",
+      "ciphertext": "gAAAAABqmNlrlPeyQ7iS9hvmuelQBUf3u-uz8Fx7Ent7G3v5aBwyPa6OUeQoaRvg0kl9ebLv0b5KkAWKC6hLT85dVMXXPJ3iyvgYflnCz03ZhN2eCJPTAZbeu4kmJQKvyuaIN6svVBi1"
+    },
+    {
+      "id": "multiline_secret",
+      "plaintext": "Line 1: Private Key\nLine 2: Certificate Data\nLine 3: End",
+      "ciphertext": "gAAAAABqmNlrmg6xOriSjTdBcgh1lUgyQXFxAA7ShbzroXqg-lGdS6xliHuFD41rX77vxK4Dq0Sv_XO_5T1O40tIfYF3jLohjfgwEM-GX1_5k1pBPe4oxo4xvSJBGF7bgoqCEhwX7ecT0FnV5t2xw0XvO2NRQuRsfQ=="
+    }
+  ],
+  "negative_cases": {
+    "wrong_password": "WrongPassword999!@#",
+    "corrupted_token": "gAAAAABqmNlrHSqUMXtPxJfq3Iiz8ELDn3jhpuV2yIw14lStRlDMBpjiIRd1LK9ZV0gYLoyd-H4EbamBEaYuIhEGPrr7uuP_XXXX"
+  }
+}

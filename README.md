@@ -26,11 +26,10 @@ SmartClipboard Pro는 기존 Python 구현의 모든 데이터와 기능을 100%
 
 ```powershell
 # 프론트엔드 의존성 설치 및 빌드
-cd native
 npm install
 npm run build
 
-# Tauri 네이티브 테스트 실행
+# Tauri 네이티브 테스트 실행 (30건)
 cargo test --manifest-path src-tauri/Cargo.toml
 
 # 네이티브 개발 모드 실행
@@ -141,19 +140,18 @@ npm run tauri build
 [Releases](https://github.com/twbeatles/smartclipboard/releases)에서 `SmartClipboard.exe`를 다운로드하여 실행하세요.
 별도 설치 없이 바로 사용할 수 있습니다.
 
-### 방법 2: Native 에디션 실행
+### 방법 2: Native 에디션 소스 실행
 
 ```powershell
-cd native
 npm install
 npm run tauri dev
 ```
 
-### 방법 3: Python 클래식 소스 실행
+### 방법 3: Python 클래식 에디션 (Legacy)
 
 ```powershell
-pip install -r requirements.txt
-python "클립모드 매니저.py"
+pip install -r legacy/python/requirements.txt
+python "legacy/python/클립모드 매니저.py"
 ```
 
 ---
