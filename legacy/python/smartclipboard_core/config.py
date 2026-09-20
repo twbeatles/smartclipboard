@@ -7,7 +7,7 @@ class Config:
     """SmartClipboard application configuration constants."""
 
     APP_NAME = "SmartClipboard"
-    VERSION = "10.7"
+    VERSION = "10.8"
 
     # Public update-channel metadata is configurable at build/run time.
     # The signing private key must never be present in this repository or an executable.

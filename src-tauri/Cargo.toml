@@ -1,6 +1,6 @@
 [package]
 name = "smartclipboard-native"
-version = "10.7.0"
+version = "10.8.0"
 description = "SmartClipboard Pro Native Rust + Tauri 2 Application"
 edition = "2021"
 

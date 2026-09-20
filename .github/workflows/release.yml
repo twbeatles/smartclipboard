@@ -76,7 +76,8 @@ jobs:
           python -m pip install --quiet cryptography
           $cargoVersion = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
           $tag = "${{ github.ref_name }}".TrimStart('v')
-          if ($tag -ne $cargoVersion) {
+          $cargoShort = $cargoVersion -replace '(\.0)+$',''
+          if ($tag -ne $cargoVersion -and $tag -ne $cargoShort) {
             Write-Host "Tag $tag does not match Cargo version $cargoVersion; skipping native manifest"
             exit 0
           }
