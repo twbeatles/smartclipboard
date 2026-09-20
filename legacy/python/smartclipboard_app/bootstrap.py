@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import traceback
+from pathlib import Path
 
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
@@ -45,6 +46,11 @@ def run(argv: list[str] | None = None) -> int:
         logger.info("Running SmartClipboard smoke check (version=%s)...", Config.VERSION)
         assert Config.VERSION
         assert Config.UPDATE_PUBLIC_KEY_B64
+        # Windowed PyInstaller builds do not report a readable process exit
+        # code to PowerShell, so --smoke can leave a success marker instead.
+        if "--smoke-file" in argv:
+            marker = argv[argv.index("--smoke-file") + 1]
+            Path(marker).write_text(f"ok {Config.VERSION}\n", encoding="utf-8")
         return 0
 
     try:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from scripts.check_release_prereqs import (
     check_icon,
+    check_spec_no_dunder_file,
     check_package_smoke_workdir,
     check_release_workflow_smoke,
     check_required_files,
@@ -59,6 +60,27 @@ class IconCheckTests(unittest.TestCase):
             icon = Path(tmp) / "smartclipboard.ico"
             icon.write_bytes(b"fake ico")
             self.assertIsNone(check_icon((icon,)))
+
+
+class SpecGuardTests(unittest.TestCase):
+    @staticmethod
+    def _write(tmp: str, text: str) -> Path:
+        path = Path(tmp) / "smartclipboard.spec"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_dunder_file_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = self._write(tmp, 'SPEC_DIR = Path(__file__).parent\n')
+            error = check_spec_no_dunder_file(spec)
+            self.assertIsNotNone(error)
+
+    def test_specpath_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = self._write(
+                tmp, 'SPEC_DIR = Path(globals().get("SPECPATH") or ".")\n'
+            )
+            self.assertIsNone(check_spec_no_dunder_file(spec))
 
 
 class WorkflowGuardTests(unittest.TestCase):

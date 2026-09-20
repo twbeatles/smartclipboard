@@ -109,7 +109,7 @@
 
 ## 5. 릴리즈 파이프라인 메모 (2026-09-20)
 
-- v10.8 `Release` 실패 2건 수정: spec 아이콘 탐색, GUI 바이너리 스모크 체크(`Start-Process -Wait`), `package-smoke.yml` 경로(`legacy/python`) 갱신.
+- v10.8 `Release` 실패 2건 수정: spec 아이콘 탐색, GUI 바이너리 스모크 체크(Native `Start-Process -Wait`, Legacy `--smoke-file` 마커), `package-smoke.yml` 경로(`legacy/python`) 갱신.
 - 매 push 실행되는 `release-guard` 잡이 `check_release_prereqs.py`로 릴리즈 전제조건(아이콘·버전 정합·스모크 패턴)을 검사.
 - 버전 정합 규칙: `Config.VERSION`은 `Cargo`/`package.json`과 short-form(`10.8` == `10.8.0`) 일치, `tauri.conf.json`은 Cargo와 완전 일치.
 

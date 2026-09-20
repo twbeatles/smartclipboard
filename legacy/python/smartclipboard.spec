@@ -60,7 +60,9 @@ from PyInstaller.utils.hooks import collect_submodules
 
 APP_NAME = "SmartClipboard"
 MAIN_SCRIPT = "클립모드 매니저.py"
-SPEC_DIR = Path(__file__).resolve().parent
+# PyInstaller executes the spec via exec() without the usual module
+# file global; it provides SPECPATH (the spec's directory) instead.
+SPEC_DIR = Path(globals().get("SPECPATH") or ".").resolve()
 REPO_ROOT = SPEC_DIR.parent.parent
 
 
@@ -131,7 +133,7 @@ EXCLUDES = [
     "PyQt6.Qt3DInput", "PyQt6.Qt3DLogic", "PyQt6.Qt3DRender",
     "tkinter", "tcl", "tk", "_tkinter", "xmlrpc", "pydoc", "doctest",
     "distutils", "lib2to3", "multiprocessing", "asyncio", "concurrent",
-    "curses", "ensurepip", "email", "http.server", "socketserver",
+    "curses", "ensurepip", "http.server", "socketserver",
     "ftplib", "imaplib", "poplib", "smtplib", "telnetlib",
     "turtle", "turtledemo", "pydoc_data", "idlelib",
 ]

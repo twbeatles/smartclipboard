@@ -331,5 +331,5 @@ Windows용 클립보드 매니저. 복사한 텍스트/이미지/파일을 저�
 v10.8 `Release` 워크플로 실패 2건의 사후 조치 기록 (감사 지적이 아닌 릴리즈 인프라 문제):
 
 - Legacy 잡: `smartclipboard.spec`의 `ICON_FILE`이 트리 이동(`legacy/python`) 후 존재하지 않는 경로를 가리켜 PyInstaller 실패 → spec 옆·리포 루트 순 탐색 + 명확한 즉시 실패로 수정, `APP_VERSION`은 `Config.VERSION`에서 읽도록 변경.
-- Native 잡: GUI 서브시스템 바이너리에 `&` + `$LASTEXITCODE` 스모크 검사가 대기하지 않아 오실패 → `Start-Process -Wait -PassThru` + `.ExitCode` 방식으로 교체 (Legacy windowed exe도 동일 패턴 적용).
+- Native 잡: GUI 서브시스템 바이너리에 `&` + `$LASTEXITCODE` 스모크 검사가 대기하지 않아 오실패 → `Start-Process -Wait -PassThru` + `.ExitCode` 방식으로 교체. Legacy windowed exe는 종료코드가 읽히지 않아 `--smoke-file` 성공 마커 + 타임아웃 방식으로 검사하고, spec `EXCLUDES`에서 전이 임포트되는 `email`을 제거했다.
 - 재발방지: `legacy/python/scripts/check_release_prereqs.py` + `ci.yml`의 `release-guard` 잡(매 push 실행) + `tests/test_release_prereqs.py` 회귀 테스트 13건.

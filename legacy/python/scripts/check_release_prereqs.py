@@ -86,6 +86,18 @@ def check_spec_references_icon(spec_file: Path = SPEC_FILE) -> Optional[str]:
     return None
 
 
+def check_spec_no_dunder_file(spec_file: Path = SPEC_FILE) -> Optional[str]:
+    """PyInstaller execs the spec without defining __file__ (use SPECPATH)."""
+    if not spec_file.is_file():
+        return f"PyInstaller spec not found: {spec_file}"
+    if "__file__" in spec_file.read_text(encoding="utf-8"):
+        return (
+            f"{spec_file.name} uses __file__, which PyInstaller does not define "
+            "when executing the spec; use the SPECPATH global instead"
+        )
+    return None
+
+
 def check_required_files(
     files: Sequence[Path] = (MAIN_SCRIPT, PAYLOAD, PAYLOAD_MANIFEST),
 ) -> Optional[str]:
@@ -183,6 +195,7 @@ def collect_errors() -> list[str]:
     checks = [
         check_icon(),
         check_spec_references_icon(),
+        check_spec_no_dunder_file(),
         check_required_files(),
         check_versions_from_tree(),
         check_release_workflow_smoke(),
