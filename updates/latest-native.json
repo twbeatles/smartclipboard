@@ -1,0 +1,10 @@
+{
+  "payload": {
+    "artifact_url": "https://github.com/twbeatles/smartclipboard/releases/download/v10.8/SmartClipboard-Native-v10.8-Windows.exe",
+    "expires_at": "2027-09-20T09:00:49Z",
+    "sha256": "23ce9fde28e8375d686d40d6e4152127e976f9f6c159ebc941a36984e11410ca",
+    "size": 16687616,
+    "version": "10.8"
+  },
+  "signature": "+aiCMe2Jk52aZI+0G1lnUWAUtzrwmbXpSrdakS2z2Ksxp/C3gbHizkkp6pvJVIxYxXSrOoWaNg1Qydn0ZQbnCg=="
+}
