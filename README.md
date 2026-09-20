@@ -137,7 +137,7 @@ npm run tauri build
 
 ### 방법 1: 실행 파일 (권장)
 
-[Releases](https://github.com/twbeatles/smartclipboard/releases)에서 `SmartClipboard.exe`를 다운로드하여 실행하세요.
+[Releases](https://github.com/twbeatles/smartclipboard/releases)에서 `SmartClipboard-vX.Y.exe`(Legacy) 또는 `SmartClipboard-Native-vX.Y-Windows.exe`(Native)를 다운로드하여 실행하세요.
 별도 설치 없이 바로 사용할 수 있습니다.
 
 ### 방법 2: Native 에디션 소스 실행

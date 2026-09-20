@@ -67,12 +67,16 @@ jobs:
           SMARTCLIPBOARD_UPDATE_PRIVATE_KEY_B64: ${{ secrets.SMARTCLIPBOARD_UPDATE_PRIVATE_KEY_B64 }}
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           if (-not $env:SMARTCLIPBOARD_UPDATE_PRIVATE_KEY_B64) {
             Write-Host "Skipping native signed manifest (secrets not configured)"
             exit 0
           }
-          & ".\${{ env.NATIVE_ARTIFACT }}" --smoke
-          if ($LASTEXITCODE -ne 0) { throw "Native smoke check failed: $LASTEXITCODE" }
+          # The release binary is windows_subsystem="windows" (GUI), so the
+          # call operator (&) returns without waiting and leaves $LASTEXITCODE
+          # unset. Start-Process -Wait reports the real exit code instead.
+          $smoke = Start-Process -FilePath (Join-Path $PWD "${{ env.NATIVE_ARTIFACT }}") -ArgumentList "--smoke" -NoNewWindow -Wait -PassThru
+          if ($smoke.ExitCode -ne 0) { throw "Native smoke check failed: $($smoke.ExitCode)" }
           python -m pip install --quiet cryptography
           $cargoVersion = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
           $tag = "${{ github.ref_name }}".TrimStart('v')
@@ -144,22 +148,28 @@ jobs:
       - name: Build signed-update artifact
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           if (-not $env:SMARTCLIPBOARD_UPDATE_PUBLIC_KEY_B64) {
             Write-Host "Skipping legacy signed update build (secrets not configured)"
             exit 0
           }
           python scripts/verify_update_release_key.py
+          if ($LASTEXITCODE -ne 0) { throw "Release key verification failed: $LASTEXITCODE" }
           $version = '${{ github.ref_name }}'.TrimStart('v')
           if ($version -notmatch '^\d+(\.\d+)*$') { throw "Tag must use vX.Y.Z: $env:GITHUB_REF_NAME" }
           $configuredVersion = (python -c "from smartclipboard_core.config import Config; print(Config.VERSION)").Trim()
           if ($configuredVersion -ne $version) { throw "Tag $version does not match Config.VERSION $configuredVersion" }
           pyinstaller --clean smartclipboard.spec
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed: $LASTEXITCODE" }
           $source = Get-ChildItem dist -Filter 'SmartClipboard.exe' | Select-Object -First 1
           if ($null -eq $source) { throw 'PyInstaller did not create SmartClipboard.exe' }
           $artifact = Join-Path $PWD "dist/SmartClipboard-v$version.exe"
           Copy-Item -LiteralPath $source.FullName -Destination $artifact -Force
-          & $artifact --smoke
-          if ($LASTEXITCODE -ne 0) { throw "Frozen smoke check failed: $LASTEXITCODE" }
+          # PyInstaller builds a windowed exe (console=False), so the call
+          # operator (&) returns without waiting and $LASTEXITCODE is stale.
+          # Start-Process -Wait reports the real exit code instead.
+          $smoke = Start-Process -FilePath $artifact -ArgumentList "--smoke" -NoNewWindow -Wait -PassThru
+          if ($smoke.ExitCode -ne 0) { throw "Frozen smoke check failed: $($smoke.ExitCode)" }
           $artifactUrl = "https://github.com/twbeatles/smartclipboard/releases/download/v$version/SmartClipboard-v$version.exe"
           python scripts/build_update_manifest.py --version $version --artifact $artifact --artifact-url $artifactUrl --output "$env:RUNNER_TEMP/latest.json"
           "ARTIFACT=$artifact" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

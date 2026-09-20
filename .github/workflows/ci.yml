@@ -40,6 +40,21 @@ jobs:
       - name: Build Tauri Release Binary (Smoke)
         run: npx tauri build
 
+  release-guard:
+    name: Release Prerequisites Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check release prerequisites
+        run: python legacy/python/scripts/check_release_prereqs.py
+
   legacy-python-tests:
     name: Legacy Python Tests (${{ matrix.python-version }})
     runs-on: windows-latest

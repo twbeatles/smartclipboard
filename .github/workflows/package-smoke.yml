@@ -11,6 +11,10 @@ jobs:
       QT_QPA_PLATFORM: offscreen
       PYTHONUTF8: "1"
 
+    defaults:
+      run:
+        working-directory: legacy/python
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,6 +23,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: legacy/python/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -35,12 +41,15 @@ jobs:
           python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright
 
       - name: Build frozen package
+        shell: pwsh
         run: |
           pyinstaller --clean smartclipboard.spec
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed: $LASTEXITCODE" }
 
       - name: Smoke frozen executable startup
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $exe = Resolve-Path "dist\SmartClipboard.exe"
           $env:QT_QPA_PLATFORM = "offscreen"
           $process = Start-Process -FilePath $exe -ArgumentList "--minimized" -WindowStyle Hidden -PassThru

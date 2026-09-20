@@ -323,3 +323,13 @@ Windows용 클립보드 매니저. 복사한 텍스트/이미지/파일을 저�
 1. **Fernet 결정적 IV → CSPRNG** ([ISSUE-003]) — 수정 1줄, 보안 효과 최대, 호환성 영향 없음.
 2. **비밀번호 변경 원자성 + unlock 실패 리셋** ([ISSUE-002], [ISSUE-004]) — 보관함 전체 잠금/상태 불일치는 IPC 연결 전에 반드시 제거.
 3. **제품 스코프 확정 + 스키마 마이그레이션** ([ISSUE-007], §7-5) — 구 DB 기동 실패와 "100%" 문서 과장을 동시에 해소하는 분기점.
+
+---
+
+## 10. 릴리즈 파이프라인 수정 (2026-09-20)
+
+v10.8 `Release` 워크플로 실패 2건의 사후 조치 기록 (감사 지적이 아닌 릴리즈 인프라 문제):
+
+- Legacy 잡: `smartclipboard.spec`의 `ICON_FILE`이 트리 이동(`legacy/python`) 후 존재하지 않는 경로를 가리켜 PyInstaller 실패 → spec 옆·리포 루트 순 탐색 + 명확한 즉시 실패로 수정, `APP_VERSION`은 `Config.VERSION`에서 읽도록 변경.
+- Native 잡: GUI 서브시스템 바이너리에 `&` + `$LASTEXITCODE` 스모크 검사가 대기하지 않아 오실패 → `Start-Process -Wait -PassThru` + `.ExitCode` 방식으로 교체 (Legacy windowed exe도 동일 패턴 적용).
+- 재발방지: `legacy/python/scripts/check_release_prereqs.py` + `ci.yml`의 `release-guard` 잡(매 push 실행) + `tests/test_release_prereqs.py` 회귀 테스트 13건.

@@ -54,13 +54,49 @@ Notes:
 """
 
 from pathlib import Path
+import sys
 from importlib.util import find_spec
 from PyInstaller.utils.hooks import collect_submodules
 
 APP_NAME = "SmartClipboard"
-APP_VERSION = "10.7"
 MAIN_SCRIPT = "클립모드 매니저.py"
-ICON_FILE = "smartclipboard.ico"
+SPEC_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SPEC_DIR.parent.parent
+
+
+def _resolve_app_version() -> str:
+    """Read the canonical version from smartclipboard_core.config."""
+    sys.path.insert(0, str(SPEC_DIR))
+    try:
+        from smartclipboard_core.config import Config
+
+        return str(Config.VERSION)
+    except Exception:
+        return "10.7"
+    finally:
+        try:
+            sys.path.remove(str(SPEC_DIR))
+        except ValueError:
+            pass
+
+
+APP_VERSION = _resolve_app_version()
+
+
+def _resolve_icon_file() -> str:
+    """Locate the window icon (next to the spec first, then the repo root)."""
+    candidates = [
+        SPEC_DIR / "smartclipboard.ico",
+        REPO_ROOT / "smartclipboard.ico",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    searched = ", ".join(str(path) for path in candidates)
+    raise FileNotFoundError(f"Window icon not found; searched: {searched}")
+
+
+ICON_FILE = _resolve_icon_file()
 LEGACY_PAYLOAD = Path("smartclipboard_app/legacy_main_payload.marshal")
 LEGACY_PAYLOAD_MANIFEST = Path("smartclipboard_app/legacy_main_payload.manifest.json")
 
