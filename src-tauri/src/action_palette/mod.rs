@@ -1,5 +1,5 @@
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -74,8 +74,9 @@ pub fn execute_action(action_id: &str, text: &str) -> Result<String> {
             let decoded = BASE64
                 .decode(text.trim())
                 .map_err(|e| AppError::Internal(format!("Base64 decoding failed: {}", e)))?;
-            String::from_utf8(decoded)
-                .map_err(|e| AppError::Internal(format!("Decoded bytes are not valid UTF-8: {}", e)))
+            String::from_utf8(decoded).map_err(|e| {
+                AppError::Internal(format!("Decoded bytes are not valid UTF-8: {}", e))
+            })
         }
         "sha256_hash" => {
             let mut hasher = Sha256::new();
@@ -100,6 +101,9 @@ pub fn execute_action(action_id: &str, text: &str) -> Result<String> {
                 lines
             ))
         }
-        _ => Err(AppError::NotFound(format!("Unknown action id: {}", action_id))),
+        _ => Err(AppError::NotFound(format!(
+            "Unknown action id: {}",
+            action_id
+        ))),
     }
 }

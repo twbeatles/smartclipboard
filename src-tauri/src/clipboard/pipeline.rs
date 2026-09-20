@@ -48,7 +48,12 @@ impl ClipboardPipeline {
                     return;
                 }
                 if let Ok((id, updated)) = self.app_state.db.add_item(&content, None, "FILE") {
-                    tracing::info!("Captured FILE clipboard item: id={}, count={}", id, files.len());
+                    tracing::info!(
+                        "Captured FILE clipboard item: id={}, count={}",
+                        id,
+                        files.len()
+                    );
+                    self.enforce_limit();
                     self.emit_history_changed(app_handle, id, "FILE", updated);
                     return;
                 }
@@ -57,9 +62,24 @@ impl ClipboardPipeline {
 
         // 4. Priority 2: Check IMAGE (CF_DIB)
         if let Some(png_bytes) = super::image_reader::read_clipboard_image() {
-            let label = format!("이미지 [{}x{}]", 0, 0);
-            if let Ok((id, updated)) = self.app_state.db.add_item(&label, Some(&png_bytes), "IMAGE") {
-                tracing::info!("Captured IMAGE clipboard item: id={}, bytes={}", id, png_bytes.len());
+            let seq = get_sequence_number();
+            if self.write_guard.is_internal_bytes(seq, &png_bytes) {
+                tracing::debug!("Clipboard event skipped: Internal image write guard match");
+                return;
+            }
+            let (img_w, img_h) = super::image_reader::png_dimensions(&png_bytes).unwrap_or((0, 0));
+            let label = format!("이미지 [{}x{}]", img_w, img_h);
+            if let Ok((id, updated)) = self
+                .app_state
+                .db
+                .add_item(&label, Some(&png_bytes), "IMAGE")
+            {
+                tracing::info!(
+                    "Captured IMAGE clipboard item: id={}, bytes={}",
+                    id,
+                    png_bytes.len()
+                );
+                self.enforce_limit();
                 self.emit_history_changed(app_handle, id, "IMAGE", updated);
                 return;
             }
@@ -103,7 +123,9 @@ impl ClipboardPipeline {
                     updated_existing
                 );
 
+                self.enforce_limit();
                 self.emit_history_changed(app_handle, item_id, type_tag, updated_existing);
+                self.maybe_fetch_title(app_handle, item_id, type_tag, &processed_text);
             }
             Err(e) => {
                 tracing::error!("Failed to save captured clipboard item: {:?}", e);
@@ -111,7 +133,13 @@ impl ClipboardPipeline {
         }
     }
 
-    fn emit_history_changed(&self, app_handle: Option<&AppHandle>, id: i64, type_tag: &str, updated: bool) {
+    fn emit_history_changed(
+        &self,
+        app_handle: Option<&AppHandle>,
+        id: i64,
+        type_tag: &str,
+        updated: bool,
+    ) {
         if let Some(app) = app_handle {
             #[derive(serde::Serialize, Clone)]
             struct HistoryChangedEvent {
@@ -128,6 +156,66 @@ impl ClipboardPipeline {
                 },
             );
         }
+    }
+
+    fn enforce_limit(&self) {
+        if let Err(e) = self.app_state.db.enforce_history_limit() {
+            tracing::warn!("Failed to enforce history limit: {:?}", e);
+        }
+    }
+
+    fn title_fetch_enabled(&self) -> bool {
+        self.app_state
+            .db
+            .get_setting("title_fetch_enabled")
+            .ok()
+            .flatten()
+            .map(|v| v.trim() != "0")
+            .unwrap_or(true)
+    }
+
+    /// Queue a background page-title fetch for captured text containing a
+    /// URL (automatic `fetch_title`, mirroring the Python action manager).
+    /// The fetch never blocks capture; results arrive via `title_fetch_result`.
+    fn maybe_fetch_title(
+        &self,
+        app_handle: Option<&AppHandle>,
+        item_id: i64,
+        type_tag: &str,
+        text: &str,
+    ) {
+        if type_tag != "TEXT" && type_tag != "LINK" {
+            return;
+        }
+        if !self.title_fetch_enabled() {
+            return;
+        }
+        let url = match super::fetch_title::extract_first_url(text) {
+            Some(u) => u,
+            None => return,
+        };
+        let fetcher = Arc::clone(&self.app_state.title_fetcher);
+        let app = app_handle.cloned();
+        fetcher.fetch_async(&url, item_id, move |event| {
+            if let Some(app) = app.as_ref() {
+                #[derive(serde::Serialize, Clone)]
+                struct TitleFetchEvent {
+                    item_ids: Vec<i64>,
+                    url: String,
+                    title: Option<String>,
+                    message: String,
+                }
+                let _ = app.emit(
+                    "title_fetch_result",
+                    TitleFetchEvent {
+                        item_ids: event.item_ids,
+                        url: event.url,
+                        title: event.title,
+                        message: event.message,
+                    },
+                );
+            }
+        });
     }
 
     fn load_copy_rules(&self) -> Vec<CopyRule> {

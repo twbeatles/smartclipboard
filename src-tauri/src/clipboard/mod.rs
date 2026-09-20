@@ -1,5 +1,6 @@
 pub mod classifier;
 pub mod copy_rules;
+pub mod fetch_title;
 pub mod file_reader;
 pub mod image_reader;
 pub mod internal_guard;

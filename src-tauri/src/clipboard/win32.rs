@@ -74,7 +74,12 @@ extern "system" {
     ) -> isize;
     fn DestroyWindow(hwnd: isize) -> i32;
     fn DefWindowProcW(hwnd: isize, msg: u32, w_param: usize, l_param: isize) -> isize;
-    fn GetMessageW(lp_msg: *mut MSG, hwnd: isize, w_msg_filter_min: u32, w_msg_filter_max: u32) -> i32;
+    fn GetMessageW(
+        lp_msg: *mut MSG,
+        hwnd: isize,
+        w_msg_filter_min: u32,
+        w_msg_filter_max: u32,
+    ) -> i32;
     fn TranslateMessage(lp_msg: *const MSG) -> i32;
     fn DispatchMessageW(lp_msg: *const MSG) -> isize;
     fn PostMessageW(hwnd: isize, msg: u32, w_param: usize, l_param: isize) -> i32;
@@ -126,7 +131,9 @@ pub fn read_clipboard_text() -> Option<String> {
     None
 }
 
-/// Writes CF_UNICODETEXT to Windows clipboard
+/// Writes CF_UNICODETEXT to Windows clipboard.
+/// Reports failure instead of claiming success: the previous clipboard
+/// content is left untouched whenever staging the new data fails.
 pub fn write_clipboard_text(text: &str) -> bool {
     let wide = to_wide(text);
     let bytes_len = wide.len() * 2;
@@ -134,20 +141,24 @@ pub fn write_clipboard_text(text: &str) -> bool {
     unsafe {
         for _ in 0..5 {
             if OpenClipboard(0) != 0 {
-                EmptyClipboard();
+                let mut staged = false;
                 let hmem = GlobalAlloc(GMEM_MOVEABLE, bytes_len);
                 if hmem != 0 {
                     let ptr = GlobalLock(hmem) as *mut u16;
                     if !ptr.is_null() {
                         std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
                         GlobalUnlock(hmem);
-                        SetClipboardData(CF_UNICODETEXT, hmem);
-                    } else {
+                        EmptyClipboard();
+                        staged = SetClipboardData(CF_UNICODETEXT, hmem) != 0;
+                    }
+                    if !staged {
                         GlobalFree(hmem);
                     }
                 }
                 CloseClipboard();
-                return true;
+                if staged {
+                    return true;
+                }
             }
             thread::sleep(std::time::Duration::from_millis(20));
         }

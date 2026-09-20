@@ -1,5 +1,5 @@
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -69,7 +69,9 @@ impl VaultManager {
     /// Sets master password for the first time
     pub fn set_master_password(&self, password: &str, db: &Database) -> Result<()> {
         if password.len() < 8 {
-            return Err(AppError::Crypto("Password must be at least 8 characters".into()));
+            return Err(AppError::Crypto(
+                "Password must be at least 8 characters".into(),
+            ));
         }
 
         let mut salt = [0u8; SALT_LEN];
@@ -81,6 +83,11 @@ impl VaultManager {
         let verification = fernet.encrypt(b"VAULT_VERIFIED", None, None)?;
 
         let salt_b64 = BASE64.encode(salt);
+        if db.vault_has_password().unwrap_or(false) {
+            return Err(AppError::Crypto(
+                "Vault is already initialized; use change_master_password".into(),
+            ));
+        }
 
         db.with_conn(|conn| {
             conn.execute(
@@ -105,7 +112,9 @@ impl VaultManager {
     /// Unlock vault with master password
     pub fn unlock(&self, password: &str, db: &Database) -> Result<bool> {
         let (salt_b64, verification) = db.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT key, value FROM settings WHERE key IN ('vault_salt', 'vault_verification')")?;
+            let mut stmt = conn.prepare(
+                "SELECT key, value FROM settings WHERE key IN ('vault_salt', 'vault_verification')",
+            )?;
             let mut salt = None;
             let mut verif = None;
             let rows = stmt.query_map([], |row| {
@@ -124,7 +133,11 @@ impl VaultManager {
 
         let (salt_b64, verification) = match (salt_b64, verification) {
             (Some(s), Some(v)) => (s, v),
-            _ => return Err(AppError::Crypto("Vault has not been initialized with a password".into())),
+            _ => {
+                return Err(AppError::Crypto(
+                    "Vault has not been initialized with a password".into(),
+                ))
+            }
         };
 
         let salt = BASE64
@@ -143,37 +156,47 @@ impl VaultManager {
                 self.touch();
                 Ok(true)
             }
-            _ => Ok(false),
+            _ => {
+                self.lock();
+                Ok(false)
+            }
         }
     }
 
-    /// Atomically changes master password and re-encrypts all rows in secure_vault
+    /// Atomically changes master password and re-encrypts all rows in secure_vault.
+    /// The whole change is a single transaction: any failure rolls everything
+    /// back, and rows that cannot be decrypted fail the operation instead of
+    /// being silently dropped.
     pub fn change_master_password(
         &self,
         current_pwd: &str,
         new_pwd: &str,
         db: &Database,
     ) -> Result<()> {
+        if new_pwd.len() < 8 {
+            return Err(AppError::Crypto(
+                "New password must be at least 8 characters".into(),
+            ));
+        }
         if !self.unlock(current_pwd, db)? {
-            return Err(AppError::Crypto("Current password verification failed".into()));
+            self.lock();
+            return Err(AppError::Crypto(
+                "Current password verification failed".into(),
+            ));
         }
 
-        let old_fernet = {
-            let lock = self.fernet.lock().unwrap();
-            match lock.as_ref() {
-                Some(_) => Fernet::from_b64_key(&derive_key(
-                    current_pwd,
-                    &BASE64.decode(
-                        &db.get_setting("vault_salt")?.ok_or_else(|| AppError::Crypto("No salt".into()))?,
-                    ).unwrap(),
-                )?)?,
-                None => return Err(AppError::Crypto("Vault is locked".into())),
-            }
-        };
+        let old_salt_b64 = db
+            .get_setting("vault_salt")?
+            .ok_or_else(|| AppError::Crypto("Vault salt is missing".into()))?;
+        let old_salt = BASE64
+            .decode(&old_salt_b64)
+            .map_err(|e| AppError::Crypto(format!("Invalid salt encoding: {}", e)))?;
+        let old_fernet = Fernet::from_b64_key(&derive_key(current_pwd, &old_salt)?)?;
 
-        // 1. Decrypt all existing items
+        // 1. Decrypt all existing items (outside the write transaction)
         let existing_items: Vec<(i64, Vec<u8>)> = db.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT id, encrypted_content FROM secure_vault ORDER BY id ASC")?;
+            let mut stmt =
+                conn.prepare("SELECT id, encrypted_content FROM secure_vault ORDER BY id ASC")?;
             let rows = stmt.query_map([], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
             })?;
@@ -184,14 +207,13 @@ impl VaultManager {
             Ok(list)
         })?;
 
-        let mut reencrypted_items = Vec::new();
+        let mut reencrypted_items = Vec::with_capacity(existing_items.len());
         for (id, cipher_bytes) in &existing_items {
             let token_str = String::from_utf8_lossy(cipher_bytes);
-            if let Ok(decrypted_plain) = old_fernet.decrypt(&token_str) {
-                reencrypted_items.push((*id, decrypted_plain));
-            } else {
-                tracing::warn!("Skipping corrupted/dummy vault row id={}", id);
-            }
+            let decrypted_plain = old_fernet.decrypt(&token_str).map_err(|e| {
+                AppError::Crypto(format!("Vault row id={} cannot be decrypted: {}", id, e))
+            })?;
+            reencrypted_items.push((*id, decrypted_plain));
         }
 
         // 2. Generate new salt and key
@@ -204,29 +226,38 @@ impl VaultManager {
         let new_verification = new_fernet.encrypt(b"VAULT_VERIFIED", None, None)?;
         let new_salt_b64 = BASE64.encode(new_salt);
 
-        // 3. Atomically update database in a transaction
+        // 3. Atomically update database; roll back on any failure
         db.with_conn(|conn| {
-            conn.execute("BEGIN TRANSACTION", [])?;
+            conn.execute("BEGIN IMMEDIATE", [])?;
+            let outcome: Result<()> = (|| {
+                for (id, plain_bytes) in &reencrypted_items {
+                    let new_token = new_fernet.encrypt(plain_bytes, None, None)?;
+                    conn.execute(
+                        "UPDATE secure_vault SET encrypted_content = ? WHERE id = ?",
+                        params![new_token.into_bytes(), id],
+                    )?;
+                }
 
-            for (id, plain_bytes) in reencrypted_items {
-                let new_token = new_fernet.encrypt(&plain_bytes, None, None)?;
                 conn.execute(
-                    "UPDATE secure_vault SET encrypted_content = ? WHERE id = ?",
-                    params![new_token.into_bytes(), id],
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('vault_salt', ?)",
+                    params![new_salt_b64],
                 )?;
+                conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('vault_verification', ?)",
+                    params![new_verification],
+                )?;
+                Ok(())
+            })();
+            match outcome {
+                Ok(()) => {
+                    conn.execute("COMMIT", [])?;
+                    Ok(())
+                }
+                Err(e) => {
+                    let _ = conn.execute("ROLLBACK", []);
+                    Err(e)
+                }
             }
-
-            conn.execute(
-                "UPDATE settings SET value = ? WHERE key = 'vault_salt'",
-                params![new_salt_b64],
-            )?;
-            conn.execute(
-                "UPDATE settings SET value = ? WHERE key = 'vault_verification'",
-                params![new_verification],
-            )?;
-
-            conn.execute("COMMIT", [])?;
-            Ok(())
         })?;
 
         if let Ok(mut lock) = self.fernet.lock() {
@@ -239,7 +270,9 @@ impl VaultManager {
     pub fn add_secret(&self, label: &str, secret_text: &str, db: &Database) -> Result<i64> {
         self.touch();
         let lock = self.fernet.lock().unwrap();
-        let fernet = lock.as_ref().ok_or_else(|| AppError::Crypto("Vault is locked".into()))?;
+        let fernet = lock
+            .as_ref()
+            .ok_or_else(|| AppError::Crypto("Vault is locked".into()))?;
 
         let token = fernet.encrypt(secret_text.as_bytes(), None, None)?;
         let token_bytes = token.into_bytes();
@@ -257,7 +290,9 @@ impl VaultManager {
     pub fn get_secret(&self, item_id: i64, db: &Database) -> Result<String> {
         self.touch();
         let lock = self.fernet.lock().unwrap();
-        let fernet = lock.as_ref().ok_or_else(|| AppError::Crypto("Vault is locked".into()))?;
+        let fernet = lock
+            .as_ref()
+            .ok_or_else(|| AppError::Crypto("Vault is locked".into()))?;
 
         let cipher_bytes: Vec<u8> = db.with_conn(|conn| {
             conn.query_row(
@@ -276,7 +311,8 @@ impl VaultManager {
     pub fn list_secrets(&self, db: &Database) -> Result<Vec<VaultItem>> {
         self.touch();
         db.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT id, label, created_at FROM secure_vault ORDER BY id DESC")?;
+            let mut stmt =
+                conn.prepare("SELECT id, label, created_at FROM secure_vault ORDER BY id DESC")?;
             let rows = stmt.query_map([], |row| {
                 Ok(VaultItem {
                     id: row.get(0)?,

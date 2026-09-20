@@ -16,6 +16,11 @@ pub enum AppError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    /// Verified manifest is valid but offers no newer version. Commands
+    /// translate this into a "no update" response instead of an error.
+    #[error("No newer version available: {0}")]
+    UpdateNotNewer(String),
 }
 
 impl serde::Serialize for AppError {

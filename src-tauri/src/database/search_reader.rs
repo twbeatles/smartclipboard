@@ -97,31 +97,37 @@ impl Database {
 
                 let param_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(&param_refs[..], |row| {
-                    Ok(HistoryItem {
-                        id: row.get(0)?,
-                        content: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                        r#type: row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "TEXT".into()),
-                        timestamp: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                        pinned: row.get::<_, i64>(4)? == 1,
-                        pin_order: row.get(5)?,
-                        use_count: row.get(6)?,
-                        bookmark: row.get::<_, i64>(7)? == 1,
-                        tags: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
-                        note: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
-                        url_title: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
-                        collection_id: row.get(11)?,
-                        has_image: row.get::<_, i64>(12)? == 1,
-                    })
-                })?;
+                // A broken FTS index must degrade to LIKE, not fail the search.
+                let fts_outcome: Result<Vec<HistoryItem>> = (|| {
+                    let mut stmt = conn.prepare(&sql)?;
+                    let rows = stmt.query_map(&param_refs[..], |row| {
+                        Ok(HistoryItem {
+                            id: row.get(0)?,
+                            content: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                            r#type: row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "TEXT".into()),
+                            timestamp: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                            pinned: row.get::<_, i64>(4)? == 1,
+                            pin_order: row.get(5)?,
+                            use_count: row.get(6)?,
+                            bookmark: row.get::<_, i64>(7)? == 1,
+                            tags: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                            note: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                            url_title: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                            collection_id: row.get(11)?,
+                            has_image: row.get::<_, i64>(12)? == 1,
+                        })
+                    })?;
 
-                let mut results = Vec::new();
-                for r in rows {
-                    results.push(r?);
-                }
-                if !results.is_empty() {
-                    return Ok(results);
+                    let mut results = Vec::new();
+                    for r in rows {
+                        results.push(r?);
+                    }
+                    Ok(results)
+                })();
+                match fts_outcome {
+                    Ok(results) if !results.is_empty() => return Ok(results),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("FTS search failed, using LIKE fallback: {}", e),
                 }
             }
 

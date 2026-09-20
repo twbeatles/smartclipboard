@@ -29,9 +29,25 @@ pub fn resolve_app_data_dir() -> PathBuf {
 }
 
 pub fn resolve_db_path() -> PathBuf {
+    // 0. Explicit override (tests, portable installs)
     if let Ok(override_path) = std::env::var("SMARTCLIPBOARD_DB_PATH") {
         return PathBuf::from(override_path);
     }
-    let data_dir = resolve_app_data_dir();
-    data_dir.join("clipboard_history_v6.db")
+    // 1. Development fixture when present (never created, only reused)
+    let dev_fixture = PathBuf::from("../../tests/native_parity/fixtures/synthetic_test_v6.db");
+    if dev_fixture.exists() {
+        return dev_fixture;
+    }
+    // 2. Canonical location
+    let canonical = resolve_app_data_dir().join("clipboard_history_v6.db");
+    if canonical.exists() {
+        return canonical;
+    }
+    // 3. Backward compatibility: a database next to the working directory
+    // (written by older builds) keeps being used instead of starting fresh.
+    let adjacent = PathBuf::from("clipboard_history_v6.db");
+    if adjacent.exists() {
+        return adjacent;
+    }
+    canonical
 }

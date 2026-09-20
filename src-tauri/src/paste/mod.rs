@@ -65,20 +65,21 @@ pub fn simulate_ctrl_v() -> bool {
     }
 }
 
-/// Retrieves latest item, writes to clipboard with internal guard, and simulates Ctrl+V
+/// Retrieves the most recent pasteable item, writes it to the clipboard
+/// with the shared internal guard, and simulates Ctrl+V.
+///
+/// Recency is strictly newest-copy-first (pinned-first ordering does NOT
+/// apply here). The guard is marked AFTER the write with the real clipboard
+/// sequence number so the capture pipeline recognizes its own echo.
 pub fn paste_last(state: &AppState, guard: &InternalWriteGuard) -> Result<()> {
-    let items = state.db.list_history(1)?;
-    if let Some(latest) = items.first() {
-        if latest.r#type != "IMAGE" {
+    if let Some(latest) = state.db.latest_paste_candidate()? {
+        if write_clipboard_text(&latest.content) {
             let seq = get_sequence_number();
-            guard.mark_internal(seq + 1, &latest.content);
-
-            if write_clipboard_text(&latest.content) {
-                // Short wait to allow the target focused window to read clipboard
-                thread::sleep(Duration::from_millis(100));
-                if simulate_ctrl_v() {
-                    return Ok(());
-                }
+            guard.mark_internal(seq, &latest.content);
+            // Short wait to allow the target focused window to read clipboard
+            thread::sleep(Duration::from_millis(100));
+            if simulate_ctrl_v() {
+                return Ok(());
             }
         }
     }

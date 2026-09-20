@@ -6,13 +6,24 @@ static RE_HEX_COLOR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^#(?:[0-9a-fA-F]{3}){1,2}$").unwrap());
 static RE_RGB_COLOR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$").unwrap());
-static RE_HSL_COLOR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^hsl\s*\(\s*\d+\s*,\s*\d+%?\s*,\s*\d+%?\s*\)$").unwrap()
-});
+static RE_HSL_COLOR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^hsl\s*\(\s*\d+\s*,\s*\d+%?\s*,\s*\d+%?\s*\)$").unwrap());
 
 const CODE_INDICATORS: &[&str] = &[
-    "def ", "class ", "function ", "const ", "let ", "var ", "{", "}", "=>", "import ",
-    "from ", "#include", "public ", "private ",
+    "def ",
+    "class ",
+    "function ",
+    "const ",
+    "let ",
+    "var ",
+    "{",
+    "}",
+    "=>",
+    "import ",
+    "from ",
+    "#include",
+    "public ",
+    "private ",
 ];
 
 /// Identical to Python's analyze_text_impl

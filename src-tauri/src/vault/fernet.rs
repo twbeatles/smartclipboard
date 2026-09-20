@@ -1,7 +1,7 @@
 use aes::cipher::block_padding::Pkcs7;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
-use base64::Engine;
 use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
+use base64::Engine;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use zeroize::Zeroize;
@@ -27,12 +27,7 @@ pub fn derive_key(password: &str, salt: &[u8]) -> Result<String> {
     }
 
     let mut key_bytes = [0u8; KEY_LEN];
-    pbkdf2::pbkdf2_hmac::<Sha256>(
-        password.as_bytes(),
-        salt,
-        PBKDF2_ITERATIONS,
-        &mut key_bytes,
-    );
+    pbkdf2::pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, PBKDF2_ITERATIONS, &mut key_bytes);
 
     let key_b64 = URL_SAFE.encode(key_bytes);
     key_bytes.zeroize();
@@ -114,7 +109,12 @@ impl Fernet {
     }
 
     /// Encrypt plaintext bytes into Fernet token
-    pub fn encrypt(&self, plaintext: &[u8], timestamp: Option<u64>, iv_opt: Option<[u8; 16]>) -> Result<String> {
+    pub fn encrypt(
+        &self,
+        plaintext: &[u8],
+        timestamp: Option<u64>,
+        iv_opt: Option<[u8; 16]>,
+    ) -> Result<String> {
         let ts = timestamp.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -124,12 +124,10 @@ impl Fernet {
 
         let iv = iv_opt.unwrap_or_else(|| {
             let mut rand_iv = [0u8; 16];
-            use sha2::Digest;
-            let mut hasher = Sha256::new();
-            hasher.update(ts.to_be_bytes());
-            hasher.update(plaintext);
-            let out = hasher.finalize();
-            rand_iv.copy_from_slice(&out[0..16]);
+            // IV comes from the OS CSPRNG (parity with Python cryptography).
+            // Deterministic IV removed: identical plaintexts must not share a token.
+
+            getrandom::getrandom(&mut rand_iv).expect("CSPRNG failure during Fernet encryption");
             rand_iv
         });
 

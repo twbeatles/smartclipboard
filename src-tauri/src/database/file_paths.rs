@@ -62,7 +62,8 @@ pub fn file_signature_from_paths(paths: &[String]) -> String {
         return String::new();
     }
 
-    let mut lowercase_paths: Vec<String> = normalized.into_iter().map(|p| p.to_lowercase()).collect();
+    let mut lowercase_paths: Vec<String> =
+        normalized.into_iter().map(|p| p.to_lowercase()).collect();
     lowercase_paths.sort();
 
     let source = lowercase_paths.join("\n");

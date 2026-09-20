@@ -26,7 +26,6 @@ impl std::str::FromStr for ItemType {
 }
 
 impl ItemType {
-
     pub fn as_str(&self) -> &'static str {
         match self {
             ItemType::TEXT => "TEXT",

@@ -70,9 +70,38 @@
 
 ## 3. 검증 통과 요약
 
-- **Rust 테스트**: 총 30개 전체 통과 (`cargo test`)
-- **Rust Clippy**: 경고 0건 (`cargo clippy`)
-- **Frontend 빌드**: 성공 (`npm run build`, 1.05s)
-- **Python 회귀 테스트**: 230개 전체 통과 (`pytest`)
-- **Python 정적 분석**: 0 errors, 1 warning (`pyright`)
-- **Python Preflight**: ok (`preflight_local.py`)
+- **Rust 테스트**: 전체 그린 (G-3 업데이터 16건 + G-4 fetch_title 12건 포함; vault/pipeline/parity 스위트 포함)
+- **Rust Clippy**: `cargo clippy --all-targets -- -D warnings` 클린 (CI 게이트와 동일 조건)
+- **Frontend 빌드**: 변경 후 재확인 필요 (`npm run build`)
+- **Python 회귀 테스트**: 230개 전체 통과 (`pytest`, 레거시 기준)
+- **Python 정적 분석**: 0 errors, 1 warning (`pyright`, 레거시 기준)
+
+> 2026-09-20 기능 감사 후속 조치(Follow-up 2 포함)는 로컬에서 검증했다.
+> `cargo test` 전체 그린, `cargo clippy --all-targets -- -D warnings` 클린, `tsc --noEmit` 클린.
+> `npx tauri build` 전체 패키징은 CI(`ci.yml`)에서 확인한다.
+
+## 4. 감사 후속 조치 (2026-09-20, `PROJECT_AUDIT.md` 대응)
+
+| 감사 이슈 | 상태 | 비고 |
+|---|---|---|
+| ISSUE-001 paste-last 가드·순서 | ✅ 수정 | guard 공유(AppState) + 최근복사 쿼리 + 쓰기 후 표시 |
+| ISSUE-002 비밀번호 변경 원자성 | ✅ 수정 | BEGIN/COMMIT+ROLLBACK, 손상 행 전체 실패, INSERT OR REPLACE, 새 비밀번호 8자, 재초기화 거부 |
+| ISSUE-003 Fernet 결정적 IV | ✅ 수정 | `getrandom` CSPRNG 사용 |
+| ISSUE-004 unlock 실패 리셋 | ✅ 수정 | 실패 분기 `self.lock()` |
+| ISSUE-005 복원 컬렉션·FILE 손실 | ✅ 수정 | dangling → NULL, `deleted_history`에 file 컬럼 + 마이그레이션 |
+| ISSUE-006 JSON 크로스호환 단절 | ✅ 수정 | `items`/`history` 이중 읽기, remap, 백업, FILE 서명, CSV import·Markdown export 추가 |
+| ISSUE-007 마이그레이션·DB 경로 | ✅ 수정 | `PRAGMA user_version` + `migrate_schema()`, 경로 리졸버 일원화 |
+| ISSUE-008 이미지 라벨·가드 | ✅ 수정 | 실측 dims, IMAGE 분기 guard 검사 |
+| ISSUE-009 쓰기 거짓 성공 | ✅ 수정 | 실패 시 `false` + 원본 보존 순서 |
+| ISSUE-010 보존 미집행 | ✅ 수정 | `purge_expired_trash` + `max_history` + 기동 purge + 캡처 후 enforce |
+| G-1 쓰기 IPC 부재 | ✅ 수정 | 32개 신규 command 등록 (히스토리/컬렉션/스니펫/설정/팔레트/IO/Vault) |
+| G-2 단축키·미니윈도우 | ✅ 수정 | Alt+V / Ctrl+Shift+Z 등록 + 실패 시 UI 이벤트 |
+| G-3 네이티브 자동 업데이트 | ✅ 수정 | `updater/` 검증·스테이징·적용 + CLI + 커맨드 5개 + UI, 릴리즈 서명 발행 |
+| G-4 URL 제목 자동화 | ✅ 수정 | SSRF 차단·HTML 제한 읽기·256개/24h 캐시 + 파이프라인 연동 |
+| G-5 tray 상태 이원화 | ✅ 수정 | IPC + emit + settings 영속 + 기동 복원 |
+| G-6 CSV import·Markdown | ✅ 수정 | 구현됨 |
+| G-7 스니펫 충돌 검증 | ✅ 수정 | 스니펫 간 중복 거부 (앱·글로벌 핫키 대조는 UI 범위) |
+| G-8 FTS 하드 실패 | ✅ 수정 | LIKE 폴백 |
+
+여전히 남은 것: CSP 정책 확정(G-10), 평문 zeroize(G-9), `claude.md` 전면 갱신. G-3/G-4는 Follow-up 2에서 해소했다.
+

@@ -1,5 +1,5 @@
-use std::io::Cursor;
 use image::{ImageFormat, RgbaImage};
+use std::io::Cursor;
 
 use super::win32::CF_DIB;
 
@@ -77,7 +77,11 @@ pub fn dib_to_png(dib: &[u8]) -> Option<Vec<u8>> {
     if bit_count == 32 {
         let row_stride = (width as usize) * 4;
         for y in 0..abs_height {
-            let src_y = if is_top_down { y as usize } else { (abs_height - 1 - y) as usize };
+            let src_y = if is_top_down {
+                y as usize
+            } else {
+                (abs_height - 1 - y) as usize
+            };
             let row_start = src_y * row_stride;
             if row_start + row_stride > pixel_data.len() {
                 break;
@@ -96,7 +100,11 @@ pub fn dib_to_png(dib: &[u8]) -> Option<Vec<u8>> {
     } else if bit_count == 24 {
         let row_stride = (width as usize * 3).div_ceil(4) * 4; // 4-byte aligned
         for y in 0..abs_height {
-            let src_y = if is_top_down { y as usize } else { (abs_height - 1 - y) as usize };
+            let src_y = if is_top_down {
+                y as usize
+            } else {
+                (abs_height - 1 - y) as usize
+            };
             let row_start = src_y * row_stride;
             if row_start + (width as usize * 3) > pixel_data.len() {
                 break;
@@ -117,4 +125,21 @@ pub fn dib_to_png(dib: &[u8]) -> Option<Vec<u8>> {
     let mut cursor = Cursor::new(&mut out);
     img.write_to(&mut cursor, ImageFormat::Png).ok()?;
     Some(out)
+}
+
+/// Reads (width, height) from PNG bytes without a full decode.
+/// Used for history labels so captures show real dimensions.
+pub fn png_dimensions(png: &[u8]) -> Option<(u32, u32)> {
+    if png.len() < 24 {
+        return None;
+    }
+    if &png[0..8] != b"\x89PNG\r\n\x1a\n" {
+        return None;
+    }
+    if &png[12..16] != b"IHDR" {
+        return None;
+    }
+    let width = u32::from_be_bytes(png[16..20].try_into().ok()?);
+    let height = u32::from_be_bytes(png[20..24].try_into().ok()?);
+    Some((width, height))
 }

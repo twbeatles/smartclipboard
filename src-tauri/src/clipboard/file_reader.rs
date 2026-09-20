@@ -1,6 +1,6 @@
-use std::ptr::null_mut;
 use super::win32::CF_HDROP;
 use crate::database::file_paths::normalize_local_file_paths;
+use std::ptr::null_mut;
 
 #[link(name = "user32")]
 extern "system" {

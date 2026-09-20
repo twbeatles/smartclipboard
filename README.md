@@ -20,7 +20,7 @@ SmartClipboard Pro는 기존 Python 구현의 모든 데이터와 기능을 100%
 - **OS 네이티브 이벤트 리스너**: `WM_CLIPBOARDUPDATE` 기반으로 폴링 없이 즉각 반응하며 유휴 시 CPU 0% 유지
 - **100% DB 바이너리 호환**: 기존 SQLite WAL DB(`clipboard_history_v6.db`)와 FTS5 전문 검색 트리거, PBKDF2 (480,000 iter) + Fernet 보안 보관함 데이터 무변경 완벽 연동
 - **초경량 모던 UI**: React 19 + TypeScript Strict + Tailwind CSS 5종 테마(다크, 라이트, 오션, 퍼플, 미드나잇) 및 플로팅 미니 윈도우
-- **기능 동등성 검증**: 총 30건의 Rust 네이티브 테스트와 230건의 Python 크로스 회귀 테스트 100% 통과 ([NATIVE_PARITY_MATRIX.md](docs/NATIVE_PARITY_MATRIX.md))
+- **기능 동등성 검증**: 총 47건의 Rust 네이티브 테스트(회귀 17건 포함)와 230건의 Python 크로스 회귀 테스트 100% 통과 ([NATIVE_PARITY_MATRIX.md](docs/NATIVE_PARITY_MATRIX.md))
 
 ### 네이티브 에디션 빌드 및 실행
 
@@ -29,7 +29,7 @@ SmartClipboard Pro는 기존 Python 구현의 모든 데이터와 기능을 100%
 npm install
 npm run build
 
-# Tauri 네이티브 테스트 실행 (30건)
+# Tauri 네이티브 테스트 실행 (47건)
 cargo test --manifest-path src-tauri/Cargo.toml
 
 # 네이티브 개발 모드 실행
@@ -109,7 +109,7 @@ npm run tauri build
 ### 🚀 자동 업데이트 (GitHub Releases)
 
 - Ed25519 디지털 서명과 SHA-256 해시 검증 기반의 안전한 자동 업데이트
-- 앱 기동 시 백그라운드 확인 및 `도움말 > 🚀 업데이트 확인...`을 통한 원클릭 설치
+- 앱 시작 시 이전 업데이트 결과를 확인하고, 사이드바 `🔄 업데이트 확인` 버튼으로 서명 검증 → 다운로드 → 설치/재시작 진행
 - 업데이트 적용 시 이전 버전 자동 백업 및 문제 발생 시 안전한 자동 롤백 지원
 
 ### 🎨 UI/UX

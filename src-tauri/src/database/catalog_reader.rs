@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use rusqlite::params;
+use std::collections::HashMap;
 
 use super::connection::Database;
 use super::models::{Collection, Snippet, TrashItem};
@@ -8,13 +8,19 @@ use crate::errors::Result;
 impl Database {
     pub fn get_collections(&self) -> Result<Vec<Collection>> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare("SELECT id, name, icon, color, created_at FROM collections ORDER BY id ASC")?;
+            let mut stmt = conn.prepare(
+                "SELECT id, name, icon, color, created_at FROM collections ORDER BY id ASC",
+            )?;
             let rows = stmt.query_map([], |row| {
                 Ok(Collection {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    icon: row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "📁".into()),
-                    color: row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "#6366f1".into()),
+                    icon: row
+                        .get::<_, Option<String>>(2)?
+                        .unwrap_or_else(|| "📁".into()),
+                    color: row
+                        .get::<_, Option<String>>(3)?
+                        .unwrap_or_else(|| "#6366f1".into()),
                     created_at: row.get(4)?,
                 })
             })?;
@@ -53,7 +59,10 @@ impl Database {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
             let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?.unwrap_or_default()))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                ))
             })?;
 
             let mut map = HashMap::new();
@@ -81,7 +90,7 @@ impl Database {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, original_id, content, type, deleted_at, original_timestamp, tags \
-                 FROM deleted_history ORDER BY deleted_at DESC, id DESC"
+                 FROM deleted_history ORDER BY deleted_at DESC, id DESC",
             )?;
 
             let rows = stmt.query_map([], |row| {
@@ -89,7 +98,9 @@ impl Database {
                     id: row.get(0)?,
                     original_id: row.get(1)?,
                     content: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    r#type: row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "TEXT".into()),
+                    r#type: row
+                        .get::<_, Option<String>>(3)?
+                        .unwrap_or_else(|| "TEXT".into()),
                     deleted_at: row.get(4)?,
                     original_timestamp: row.get(5)?,
                     tags: row.get::<_, Option<String>>(6)?.unwrap_or_default(),

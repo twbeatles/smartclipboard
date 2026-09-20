@@ -37,6 +37,15 @@ cbc = { version = "0.1", features = ["block-padding"] }
 base64 = "0.22"
 getrandom = "0.2"
 zeroize = { version = "1.8", features = ["derive"] }
+ureq = "2"
+url = "2"
+ed25519-dalek = "2"
 
 [dev-dependencies]
 tempfile = "3.10"
+
+# Explicit name: the default `updater_tests` binary name trips Windows
+# installer-detection elevation (os error 740) when launched headless.
+[[test]]
+name = "staged_apply_tests"
+path = "tests/updater_tests.rs"

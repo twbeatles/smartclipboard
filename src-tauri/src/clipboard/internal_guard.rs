@@ -65,3 +65,45 @@ impl InternalWriteGuard {
         false
     }
 }
+
+impl InternalWriteGuard {
+    fn hash_bytes(bytes: &[u8]) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Mark raw bytes (e.g. an encoded image) as an internal write.
+    pub fn mark_internal_bytes(&self, sequence: u32, bytes: &[u8]) {
+        if let Ok(mut lock) = self.state.lock() {
+            *lock = Some(GuardEntry {
+                sequence,
+                content_hash: Self::hash_bytes(bytes),
+                expires_at: Instant::now() + Duration::from_secs(3),
+            });
+        }
+    }
+
+    /// Returns true if these bytes were written by the app itself.
+    pub fn is_internal_bytes(&self, sequence: u32, bytes: &[u8]) -> bool {
+        if let Ok(mut lock) = self.state.lock() {
+            if let Some(entry) = lock.as_ref() {
+                if Instant::now() <= entry.expires_at {
+                    if entry.sequence != 0 && entry.sequence == sequence {
+                        *lock = None;
+                        return true;
+                    }
+                    if entry.content_hash == Self::hash_bytes(bytes) {
+                        *lock = None;
+                        return true;
+                    }
+                } else {
+                    *lock = None;
+                }
+            }
+        }
+        false
+    }
+}

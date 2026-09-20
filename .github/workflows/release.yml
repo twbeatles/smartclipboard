@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -54,6 +56,57 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.NATIVE_ARTIFACT }}
+
+      - name: Setup Python (manifest signing only)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Smoke-check and sign native update manifest
+        env:
+          SMARTCLIPBOARD_UPDATE_PRIVATE_KEY_B64: ${{ secrets.SMARTCLIPBOARD_UPDATE_PRIVATE_KEY_B64 }}
+        shell: pwsh
+        run: |
+          if (-not $env:SMARTCLIPBOARD_UPDATE_PRIVATE_KEY_B64) {
+            Write-Host "Skipping native signed manifest (secrets not configured)"
+            exit 0
+          }
+          & ".\${{ env.NATIVE_ARTIFACT }}" --smoke
+          if ($LASTEXITCODE -ne 0) { throw "Native smoke check failed: $LASTEXITCODE" }
+          python -m pip install --quiet cryptography
+          $cargoVersion = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          if ($tag -ne $cargoVersion) {
+            Write-Host "Tag $tag does not match Cargo version $cargoVersion; skipping native manifest"
+            exit 0
+          }
+          $artifactUrl = "https://github.com/twbeatles/smartclipboard/releases/download/${{ github.ref_name }}/${{ env.NATIVE_ARTIFACT }}"
+          python legacy/python/scripts/build_update_manifest.py --version $tag --artifact ".\${{ env.NATIVE_ARTIFACT }}" --artifact-url $artifactUrl --output "$env:RUNNER_TEMP/latest-native.json"
+          "HAS_NATIVE_MANIFEST=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload native manifest to GitHub Release
+        if: env.HAS_NATIVE_MANIFEST == '1'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/latest-native.json
+
+      - name: Publish native manifest on main
+        if: env.HAS_NATIVE_MANIFEST == '1'
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Release tag commit must be contained in main before publishing native manifest" }
+          git checkout -B main origin/main
+          Copy-Item -LiteralPath "$env:RUNNER_TEMP/latest-native.json" -Destination updates/latest-native.json -Force
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add updates/latest-native.json
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          git commit -m "chore: publish native update manifest for ${{ github.ref_name }} [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
 
   release-legacy-python:
     name: Build & Release Legacy Python

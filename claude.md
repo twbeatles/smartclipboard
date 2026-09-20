@@ -58,7 +58,7 @@
 - 2026-05-11 기준 privacy debounce, `deleted_history.url_title`, action writeback merge, restore full/minimal 검증, 핫키 실패 알림, 설정 write/read-back, 텍스트 1MB 제한은 기존 `collect_submodules` 규칙 안에 있으며 `smartclipboard.spec` 추가 자산은 없습니다.
 - 2026-06-10 기준 SOLID 분할은 `smartclipboard_app.features`와 `smartclipboard_core.db_parts` 하위에 머물러 있으므로 `smartclipboard.spec` 추가 hidden import/datas 없이 유지합니다.
 - 2026-08-14 기준 Contextual Action Palette는 `smartclipboard_core.action_palette`와 `smartclipboard_app.features.action_palette`에 있으며 기존 `collect_submodules("smartclipboard_core")` / `collect_submodules("smartclipboard_app.features")` 범위로 포함됩니다. spec 추가 hidden import/datas는 없습니다.
-- 2026-08-16 기준 GitHub Releases 서명 기반 자동 업데이트는 `smartclipboard_core.update_manifest`, `smartclipboard_core.update_installer`, `smartclipboard_app.features.updater` 및 CLI `--smoke`/`--apply-update`(`scripts.apply_update`)에 의해 구동됩니다. 릴리즈 워크플로우는 `.github/workflows/release.yml`이며 Ed25519 디지털 서명과 SHA-256 해시 검증 및 백업/자동 롤백 계약을 준수합니다.
+- 2026-08-16 기준 GitHub Releases 서명 기반 자동 업데이트는 `smartclipboard_core.update_manifest`, `smartclipboard_core.update_installer`, `smartclipboard_app.features.updater` 및 CLI `--smoke`/`--apply-update`(`scripts.apply_update`)에 의해 구동됩니다. 릴리즈 워크플로우는 `.github/workflows/release.yml`이며 Ed25519 디지털 서명과 SHA-256 해시 검증 및 백업/자동 롤백 계약을 준수합니다. 네이티브 빌드는 동일 스크립트로 `updates/latest-native.json`을 서명·발행하고, 네이티브 런타임 계약은 `src-tauri/src/updater/` + Tauri 커맨드(`update_check`/`update_download`/`update_apply`/`update_pending_result`/`quit_for_update`)를 따른다.
 - `.codegraph/`는 로컬 분석 인덱스이므로 `.gitignore`로 제외하고 버전 관리하지 않습니다.
 - 구조 검증 스크립트:
   - `scripts/refactor_symbol_inventory.py`
@@ -158,6 +158,15 @@ pyinstaller --clean smartclipboard.spec
 - `eventFilter` helper에서는 module-level `super()`를 사용하지 않고, 원본 클래스의 fallback 이벤트 필터를 주입받아 호출합니다.
 - `scripts/refactor_signal_snapshot.py` 스냅샷은 `legacy_main_src.py` + `features/shell/window_bootstrap.py` + shim 파일 + feature 구현 파일을 모두 포함해야 합니다.
 - 수동 `py_compile` 검증 시 helper/shim뿐 아니라 `features/**/*.py`, `db_parts/**/*.py`, `automation/**/*.py`까지 함께 포함해야 하며, 기본적으로는 `python scripts/preflight_local.py` 실행을 우선합니다.
+
+## 9.1 Native Edition 현황 (2026-09-20)
+
+- 현행 개발 표면은 Rust + Tauri 2 (`src/`, `src-tauri/`)이며, 본 문서의 Python 경로(`클립모드 매니저.py`, `smartclipboard_app/`, `tests/`, `scripts/` 등)는 `legacy/python/` 하부에 있습니다. 루트에서 Python 절차를 실행하면 실패합니다.
+- 네이티브 규칙 요약은 루트 `AGENTS.md`를 우선 참조합니다.
+- 네이티브 IPC는 읽기 + 쓰기(히스토리/컬렉션/스니펫/설정/팔레트/IO/Vault) 40여 개 command를 노출합니다. 내부 clipboard 쓰기는 반드시 공유 `AppState.write_guard` + 쓰기 후 표시를 사용합니다.
+- 수동 트랜잭션(`BEGIN IMMEDIATE`/`COMMIT`)은 항상 실패 시 `ROLLBACK`과 쌍을 이룹니다.
+- 저장 데이터 기반 `.unwrap()` 금지, Fernet IV는 OS CSPRNG, import는 이중 포맷(`items`/`history`) + remap + 백업 + 단일 트랜잭션을 유지합니다.
+- 감사 후속 내역은 `docs/NATIVE_PARITY_MATRIX.md` §4, 원 감사는 `PROJECT_AUDIT.md`를 참조합니다.
 
 ## 9. Refactor Notes (2026-03-12)
 

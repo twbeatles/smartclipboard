@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use std::collections::HashSet;
 
 use super::connection::Database;
@@ -244,7 +244,11 @@ impl Database {
     pub fn toggle_pin(&self, item_id: i64) -> Result<bool> {
         self.with_conn(|conn| {
             let curr: Option<i64> = conn
-                .query_row("SELECT pinned FROM history WHERE id = ?", params![item_id], |r| r.get(0))
+                .query_row(
+                    "SELECT pinned FROM history WHERE id = ?",
+                    params![item_id],
+                    |r| r.get(0),
+                )
                 .ok();
 
             if let Some(status) = curr {
@@ -313,8 +317,8 @@ impl Database {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, content, image_data, type, timestamp, tags, note, bookmark, \
-                 collection_id, pinned, pin_order, use_count, url_title \
-                 FROM history WHERE id = ?"
+                 collection_id, pinned, pin_order, use_count, url_title, file_path, file_signature \
+                 FROM history WHERE id = ?",
             )?;
             let mut rows = stmt.query(params![item_id])?;
 
@@ -331,6 +335,8 @@ impl Database {
                 let pin_order: i64 = row.get(10)?;
                 let use_count: i64 = row.get(11)?;
                 let url_title: Option<String> = row.get(12)?;
+                let file_path: Option<String> = row.get(13)?;
+                let file_signature: Option<String> = row.get(14)?;
                 let deleted_at = current_timestamp();
 
                 // 7 days expiration
@@ -343,8 +349,8 @@ impl Database {
                 conn.execute(
                     "INSERT INTO deleted_history (original_id, content, image_data, type, \
                      original_timestamp, tags, note, bookmark, collection_id, pinned, pin_order, \
-                     use_count, url_title, deleted_at, expires_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     use_count, url_title, deleted_at, expires_at, file_path, file_signature) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     params![
                         item_id,
                         content,
@@ -360,7 +366,9 @@ impl Database {
                         use_count,
                         url_title,
                         deleted_at,
-                        expires_at
+                        expires_at,
+                        file_path,
+                        file_signature
                     ],
                 )?;
 
@@ -377,7 +385,7 @@ impl Database {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT original_id, content, image_data, type, original_timestamp, tags, note, \
-                 bookmark, collection_id, pinned, pin_order, use_count, url_title \
+                 bookmark, collection_id, pinned, pin_order, use_count, url_title, file_path, file_signature \
                  FROM deleted_history WHERE id = ?"
             )?;
             let mut rows = stmt.query(params![deleted_id])?;
@@ -395,11 +403,27 @@ impl Database {
                 let pin_order: i64 = row.get(10)?;
                 let use_count: i64 = row.get(11)?;
                 let url_title: Option<String> = row.get(12)?;
+                let file_path: Option<String> = row.get(13)?;
+                let file_signature: Option<String> = row.get(14)?;
+
+                // A collection deleted while the item was in trash must not
+                // leave a dangling reference behind.
+                let collection_id = match collection_id {
+                    Some(cid) => {
+                        let exists: bool = conn.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM collections WHERE id = ?)",
+                            params![cid],
+                            |r| r.get(0),
+                        )?;
+                        if exists { Some(cid) } else { None }
+                    }
+                    None => None,
+                };
 
                 conn.execute(
                     "INSERT INTO history (content, image_data, type, timestamp, tags, note, bookmark, \
-                     collection_id, pinned, pin_order, use_count, url_title) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     collection_id, pinned, pin_order, use_count, url_title, file_path, file_signature) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     params![
                         content,
                         image_data,
@@ -412,7 +436,9 @@ impl Database {
                         pinned,
                         pin_order,
                         use_count,
-                        url_title
+                        url_title,
+                        file_path,
+                        file_signature
                     ],
                 )?;
 
@@ -427,8 +453,101 @@ impl Database {
 
     pub fn permanent_delete(&self, deleted_id: i64) -> Result<()> {
         self.with_conn(|conn| {
-            conn.execute("DELETE FROM deleted_history WHERE id = ?", params![deleted_id])?;
+            conn.execute(
+                "DELETE FROM deleted_history WHERE id = ?",
+                params![deleted_id],
+            )?;
             Ok(())
         })
+    }
+}
+
+impl Database {
+    /// Default cap for history rows (Python parity: 500, tunable via settings).
+    pub fn max_history_limit(&self) -> i64 {
+        self.get_setting("max_history")
+            .ok()
+            .flatten()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(500)
+    }
+
+    /// Deletes oldest non-pinned rows beyond the history cap.
+    /// Pinned rows are always kept; deletions are permanent (Python parity).
+    pub fn enforce_history_limit(&self) -> Result<usize> {
+        let max = self.max_history_limit();
+        self.with_conn(|conn| {
+            let count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM history WHERE pinned != 1", [], |r| {
+                    r.get(0)
+                })?;
+            if count <= max {
+                return Ok(0);
+            }
+            let deleted = conn.execute(
+                "DELETE FROM history WHERE id IN (SELECT id FROM history \
+                 WHERE pinned != 1 ORDER BY timestamp ASC, id ASC LIMIT ?)",
+                params![count - max],
+            )?;
+            Ok(deleted)
+        })
+    }
+
+    /// Permanently removes trash rows past their 7-day retention.
+    pub fn purge_expired_trash(&self) -> Result<usize> {
+        self.with_conn(|conn| {
+            let deleted = conn.execute(
+                "DELETE FROM deleted_history WHERE expires_at IS NOT NULL \
+                 AND expires_at != '' AND expires_at < datetime('now', 'localtime')",
+                [],
+            )?;
+            Ok(deleted)
+        })
+    }
+
+    /// Set the fetched page title for a history row.
+    /// Returns true when exactly one row was updated.
+    pub fn update_url_title(&self, item_id: i64, title: &str) -> Result<bool> {
+        self.with_conn(|conn| {
+            let changed = conn.execute(
+                "UPDATE history SET url_title = ? WHERE id = ?",
+                params![title, item_id],
+            )?;
+            Ok(changed == 1)
+        })
+    }
+
+    /// Set the fetched page title only when the row still starts with the
+    /// requested URL (stale-result guard, mirroring the Python manager).
+    pub fn update_url_title_if_current(
+        &self,
+        item_id: i64,
+        request_url: &str,
+        title: &str,
+    ) -> Result<bool> {
+        if item_id <= 0 || title.is_empty() {
+            return Ok(false);
+        }
+        let current: Option<String> = self.with_conn(|conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT content FROM history WHERE id = ?",
+                    params![item_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map(|opt| opt.flatten())?)
+        })?;
+        let current = match current {
+            Some(content) => content,
+            None => return Ok(false),
+        };
+        if crate::clipboard::fetch_title::extract_first_url(&current).as_deref()
+            != Some(request_url)
+        {
+            return Ok(false);
+        }
+        self.update_url_title(item_id, title)
     }
 }

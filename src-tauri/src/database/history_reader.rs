@@ -1,5 +1,5 @@
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use rusqlite::params;
 
 use super::connection::Database;
@@ -15,14 +15,16 @@ impl Database {
                  tags, note, url_title, collection_id, (image_data IS NOT NULL) AS has_image \
                  FROM history \
                  ORDER BY pinned DESC, pin_order ASC, timestamp DESC, id DESC \
-                 LIMIT ?"
+                 LIMIT ?",
             )?;
 
             let rows = stmt.query_map(params![limit as i64], |row| {
                 Ok(HistoryItem {
                     id: row.get(0)?,
                     content: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    r#type: row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "TEXT".into()),
+                    r#type: row
+                        .get::<_, Option<String>>(2)?
+                        .unwrap_or_else(|| "TEXT".into()),
                     timestamp: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
                     pinned: row.get::<_, i64>(4)? == 1,
                     pin_order: row.get(5)?,
@@ -50,7 +52,7 @@ impl Database {
             let mut stmt = conn.prepare(
                 "SELECT id, content, type, timestamp, pinned, pin_order, use_count, bookmark, \
                  tags, note, url_title, collection_id, image_data, file_path, file_signature \
-                 FROM history WHERE id = ?"
+                 FROM history WHERE id = ?",
             )?;
 
             let mut rows = stmt.query(params![item_id])?;
@@ -61,7 +63,9 @@ impl Database {
                 Ok(HistoryDetail {
                     id: row.get(0)?,
                     content: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    r#type: row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "TEXT".into()),
+                    r#type: row
+                        .get::<_, Option<String>>(2)?
+                        .unwrap_or_else(|| "TEXT".into()),
                     timestamp: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
                     pinned: row.get::<_, i64>(4)? == 1,
                     pin_order: row.get(5)?,
@@ -76,7 +80,47 @@ impl Database {
                     file_signature: row.get::<_, Option<String>>(14)?.unwrap_or_default(),
                 })
             } else {
-                Err(AppError::NotFound(format!("Item not found with id: {}", item_id)))
+                Err(AppError::NotFound(format!(
+                    "Item not found with id: {}",
+                    item_id
+                )))
+            }
+        })
+    }
+}
+
+impl Database {
+    /// Newest pasteable item: strictly newest-copy-first, pinned-first
+    /// ordering does NOT apply. IMAGE rows are skipped (no image restore).
+    pub fn latest_paste_candidate(&self) -> Result<Option<HistoryItem>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, content, type, timestamp, pinned, pin_order, use_count, bookmark, \
+                 tags, note, url_title, collection_id, (image_data IS NOT NULL) AS has_image \
+                 FROM history WHERE type != 'IMAGE' \
+                 ORDER BY timestamp DESC, id DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query([])?;
+            if let Some(row) = rows.next()? {
+                Ok(Some(HistoryItem {
+                    id: row.get(0)?,
+                    content: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    r#type: row
+                        .get::<_, Option<String>>(2)?
+                        .unwrap_or_else(|| "TEXT".into()),
+                    timestamp: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    pinned: row.get::<_, i64>(4)? == 1,
+                    pin_order: row.get(5)?,
+                    use_count: row.get(6)?,
+                    bookmark: row.get::<_, i64>(7)? == 1,
+                    tags: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                    note: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                    url_title: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                    collection_id: row.get(11)?,
+                    has_image: row.get::<_, i64>(12)? == 1,
+                }))
+            } else {
+                Ok(None)
             }
         })
     }
