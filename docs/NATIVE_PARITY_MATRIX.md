@@ -113,3 +113,18 @@
 - 매 push 실행되는 `release-guard` 잡이 `check_release_prereqs.py`로 릴리즈 전제조건(아이콘·버전 정합·스모크 패턴)을 검사.
 - 버전 정합 규칙: `Config.VERSION`은 `Cargo`/`package.json`과 short-form(`10.8` == `10.8.0`) 일치, `tauri.conf.json`은 Cargo와 완전 일치.
 
+---
+
+## 6. 품질·보안 감사 후속 (2026-09-25, `PROJECT_AUDIT.md` §11 참조)
+
+| 항목 | 상태 | 내용 |
+|---|---|---|
+| fmt 미준수 8파일 | ✅ 수정 | `cargo fmt --all`, CI `fmt --check` 게이트 추가 |
+| CF_HDROP 고정 버퍼 | ✅ 수정 | 2-pass 조회 + 32k 상한 + TOCTOU 클램프 (`file_reader.rs`) |
+| NUL 무제한 스캔 | ✅ 수정 | `GlobalSize` 바운드 + `utf16_nul_len` 단위 테스트 4건 (`win32.rs`) |
+| CI audit 게이트 | ✅ 수정 | `cargo-audit` 설치 + `cargo audit` 잡 추가 |
+| audit 경고 7건 | ⏳ 업스트림 대기 | Tauri 경유 transitive, 제거 경로 없음 |
+| 테스트 79건 | ✅ 통과 | 신규 4건 포함 전 스위트 그린 |
+
+여전히 남은 것: CSP 정책 확정(G-10), 평문 zeroize(G-9), `claude.md` 전면 갱신, audit 경고 7건 업스트림 추적, 줄바꿈 규정(LF 현실 vs CRLF 문서) 정리.
+

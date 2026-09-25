@@ -89,6 +89,7 @@ extern "system" {
 extern "system" {
     fn GlobalLock(hmem: isize) -> *mut std::ffi::c_void;
     fn GlobalUnlock(hmem: isize) -> i32;
+    fn GlobalSize(hmem: isize) -> usize;
     fn GlobalAlloc(flags: u32, bytes: usize) -> isize;
     fn GlobalFree(hmem: isize) -> isize;
     fn GetModuleHandleW(lp_module_name: *const u16) -> isize;
@@ -102,6 +103,15 @@ fn to_wide(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().chain(Some(0)).collect()
 }
 
+/// Length of a NUL-terminated UTF-16 string bounded by `units.len()`.
+///
+/// Returns the index of the first NUL, or `units.len()` when no NUL occurs
+/// within the bound. Callers size the bound from `GlobalSize`, so an
+/// unterminated payload truncates instead of over-reading.
+fn utf16_nul_len(units: &[u16]) -> usize {
+    units.iter().position(|&u| u == 0).unwrap_or(units.len())
+}
+
 /// Reads CF_UNICODETEXT from Windows clipboard with bounded retry
 pub fn read_clipboard_text() -> Option<String> {
     for _ in 0..5 {
@@ -109,14 +119,14 @@ pub fn read_clipboard_text() -> Option<String> {
             if OpenClipboard(0) != 0 {
                 let handle = GetClipboardData(CF_UNICODETEXT);
                 if handle != 0 {
+                    // Bound the NUL scan by the real allocation size: the
+                    // clipboard is external input and may lack a terminator.
+                    let units = GlobalSize(handle) / 2;
                     let ptr = GlobalLock(handle) as *const u16;
-                    if !ptr.is_null() {
-                        let mut len = 0;
-                        while *ptr.add(len) != 0 {
-                            len += 1;
-                        }
-                        let slice = std::slice::from_raw_parts(ptr, len);
-                        let text = String::from_utf16_lossy(slice);
+                    if !ptr.is_null() && units > 0 {
+                        let slice = std::slice::from_raw_parts(ptr, units);
+                        let len = utf16_nul_len(slice);
+                        let text = String::from_utf16_lossy(&slice[..len]);
                         GlobalUnlock(handle);
                         CloseClipboard();
                         return Some(text);
@@ -265,4 +275,33 @@ where
 
     let hwnd = rx.recv().unwrap_or(0);
     ClipboardListenerHandle { running, hwnd }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utf16_nul_len;
+
+    #[test]
+    fn nul_len_empty_is_zero() {
+        assert_eq!(utf16_nul_len(&[]), 0);
+    }
+
+    #[test]
+    fn nul_len_stops_at_first_nul() {
+        let units = [0x48u16, 0x69, 0, 0x21, 0];
+        assert_eq!(utf16_nul_len(&units), 2);
+    }
+
+    #[test]
+    fn nul_len_leading_nul_is_zero() {
+        assert_eq!(utf16_nul_len(&[0, 0x41]), 0);
+    }
+
+    #[test]
+    fn nul_len_unterminated_returns_full_len() {
+        // No NUL inside the bound: truncate at the bound instead of
+        // reading past it (defense against malformed clipboard data).
+        let units = [0x41u16, 0x42, 0x43];
+        assert_eq!(utf16_nul_len(&units), 3);
+    }
 }

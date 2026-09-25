@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use smartclipboard_native_lib::clipboard::fetch_title::{
     extract_first_url, extract_html_title, fetch_http_title_validated, fetch_title_for_url,
-    is_blocked_title_fetch_reason, normalize_extracted_url, resolve_redirect, validate_title_fetch_url,
-    TitleCache, TitleEvent, TitleFetcher, TITLE_FETCH_MAX_BYTES,
+    is_blocked_title_fetch_reason, normalize_extracted_url, resolve_redirect,
+    validate_title_fetch_url, TitleCache, TitleEvent, TitleFetcher, TITLE_FETCH_MAX_BYTES,
 };
 
 /// Permissive validator for loopback test servers only. Production paths
@@ -111,7 +111,9 @@ fn test_validate_accepts_global_literal_without_dns() {
 
 #[test]
 fn test_blocked_reason_prefix() {
-    assert!(is_blocked_title_fetch_reason("blocked metadata hostname: x"));
+    assert!(is_blocked_title_fetch_reason(
+        "blocked metadata hostname: x"
+    ));
     assert!(!is_blocked_title_fetch_reason("dns resolution failed: x"));
     assert!(!is_blocked_title_fetch_reason("http status 404"));
 }
@@ -302,10 +304,8 @@ fn start_canned_server() -> CannedServer {
 fn test_fetch_http_title_against_canned_server() {
     let server = start_canned_server();
 
-    let page = fetch_http_title_validated(
-        &format!("{}/page", server.base),
-        allow_loopback_for_tests,
-    );
+    let page =
+        fetch_http_title_validated(&format!("{}/page", server.base), allow_loopback_for_tests);
     assert_eq!(page.error, None);
     assert_eq!(page.title, Some("Canned Page & More".to_string()));
 
@@ -317,10 +317,8 @@ fn test_fetch_http_title_against_canned_server() {
     assert_eq!(redir.title, Some("Canned Page & More".to_string()));
     assert!(redir.final_url.ends_with("/page"));
 
-    let binary = fetch_http_title_validated(
-        &format!("{}/binary", server.base),
-        allow_loopback_for_tests,
-    );
+    let binary =
+        fetch_http_title_validated(&format!("{}/binary", server.base), allow_loopback_for_tests);
     assert_eq!(binary.title, None);
     assert!(binary
         .error
@@ -328,10 +326,7 @@ fn test_fetch_http_title_against_canned_server() {
         .contains("unsupported content type"));
 
     // Oversized body streams without failure; title still parses.
-    let big = fetch_http_title_validated(
-        &format!("{}/big", server.base),
-        allow_loopback_for_tests,
-    );
+    let big = fetch_http_title_validated(&format!("{}/big", server.base), allow_loopback_for_tests);
     assert_eq!(big.error, None);
     assert_eq!(big.title, Some("Big Page".to_string()));
 }

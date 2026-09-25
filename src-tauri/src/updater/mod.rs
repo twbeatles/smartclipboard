@@ -14,8 +14,7 @@ pub use installer::{
     download_artifact_to_stage, launch_update_helper, parse_apply_update_args,
     resolve_update_staging_root, run_apply_update_cli, stage_artifact, write_update_result,
     write_update_result_to_path, ApplyRequest, ApplyUpdateArgs, SmokeCheck, StagedArtifact,
-    UpdateApplyOutcome,
-    APPLY_WAIT_TIMEOUT, ARTIFACT_CHUNK_BYTES, BACKUP_KEEP_COUNT, SMOKE_TIMEOUT,
+    UpdateApplyOutcome, APPLY_WAIT_TIMEOUT, ARTIFACT_CHUNK_BYTES, BACKUP_KEEP_COUNT, SMOKE_TIMEOUT,
     UPDATE_RESULT_FILENAME, UPDATE_STAGING_DIRNAME,
 };
 pub use manifest::{

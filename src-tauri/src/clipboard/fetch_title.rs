@@ -149,11 +149,9 @@ pub fn validate_title_fetch_url(url: &str) -> Result<(), String> {
     if BLOCKED_TITLE_HOSTS.contains(&bare) || BLOCKED_TITLE_HOSTS.contains(&hostname.as_str()) {
         return Err(format!("blocked metadata hostname: {}", bare));
     }
-    let port = parsed.port_or_known_default().unwrap_or(if scheme == "https" {
-        443
-    } else {
-        80
-    });
+    let port = parsed
+        .port_or_known_default()
+        .unwrap_or(if scheme == "https" { 443 } else { 80 });
     // Literal IPs resolve without DNS; names go through the system resolver.
     // Python documents DNS rebinding between check and use as residual risk;
     // the same caveat applies here.
@@ -259,11 +257,12 @@ fn decode_entity(entity: &str) -> Option<char> {
         "nbsp" => Some('\u{a0}'),
         _ => {
             if let Some(num) = entity.strip_prefix('#') {
-                let code = if let Some(hex) = num.strip_prefix('x').or_else(|| num.strip_prefix('X')) {
-                    u32::from_str_radix(hex, 16).ok()
-                } else {
-                    num.parse::<u32>().ok()
-                }?;
+                let code =
+                    if let Some(hex) = num.strip_prefix('x').or_else(|| num.strip_prefix('X')) {
+                        u32::from_str_radix(hex, 16).ok()
+                    } else {
+                        num.parse::<u32>().ok()
+                    }?;
                 char::from_u32(code)
             } else {
                 None
@@ -376,11 +375,7 @@ pub fn fetch_http_title_validated(
                 if (300..400).contains(&code) {
                     resp
                 } else {
-                    return outcome_err(
-                        start_url,
-                        &current_url,
-                        format!("http status {}", code),
-                    );
+                    return outcome_err(start_url, &current_url, format!("http status {}", code));
                 }
             }
             Err(e) => {
@@ -474,8 +469,7 @@ impl TitleCache {
     pub fn set(&mut self, url: &str, title: &str) {
         let now = Instant::now();
         self.evict_expired_locked(now);
-        self.map
-            .insert(url.to_string(), (title.to_string(), now));
+        self.map.insert(url.to_string(), (title.to_string(), now));
         self.order.retain(|k| k != url);
         self.order.push_back(url.to_string());
         while self.map.len() > self.max_entries.max(1) {

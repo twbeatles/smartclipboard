@@ -38,8 +38,13 @@ fn test_file_add_and_signature_deduplication() {
 
     // Same files with different whitespace/slashes
     let files_permuted = "c:/windows/system32/calc.exe\nc:/windows/system32/cmd.exe";
-    let (id2, updated2) = db.add_item(files_permuted, None, "FILE").expect("add file 2");
-    assert!(updated2, "Identical normalized files should merge by signature");
+    let (id2, updated2) = db
+        .add_item(files_permuted, None, "FILE")
+        .expect("add file 2");
+    assert!(
+        updated2,
+        "Identical normalized files should merge by signature"
+    );
     assert_eq!(id1, id2);
 }
 
@@ -48,10 +53,14 @@ fn test_image_add_always_creates_new_row() {
     let (_temp, db) = create_temp_db_copy();
 
     let dummy_img = vec![1, 2, 3, 4, 5];
-    let (id1, updated1) = db.add_item("이미지 A", Some(&dummy_img), "IMAGE").expect("img 1");
+    let (id1, updated1) = db
+        .add_item("이미지 A", Some(&dummy_img), "IMAGE")
+        .expect("img 1");
     assert!(!updated1);
 
-    let (id2, updated2) = db.add_item("이미지 B", Some(&dummy_img), "IMAGE").expect("img 2");
+    let (id2, updated2) = db
+        .add_item("이미지 B", Some(&dummy_img), "IMAGE")
+        .expect("img 2");
     assert!(!updated2, "Image items must never overwrite existing rows");
     assert_ne!(id1, id2);
 }
@@ -66,12 +75,19 @@ fn test_replace_text_or_merge() {
     db.set_note(id_apple, "맛있는 사과").expect("note apple");
 
     // 2. Add "과일_바나나"
-    let (id_banana, _) = db.add_item("과일_바나나", None, "TEXT").expect("add banana");
+    let (id_banana, _) = db
+        .add_item("과일_바나나", None, "TEXT")
+        .expect("add banana");
     db.increment_use_count(id_banana).expect("use count banana");
 
     // 3. Rename "과일_바나나" into "과일_사과" -> Must merge into id_apple and delete id_banana!
-    let merged_id = db.replace_text_item_or_merge(id_banana, "과일_사과", "TEXT").expect("merge");
-    assert_eq!(merged_id, id_apple, "Target id must be the existing apple id");
+    let merged_id = db
+        .replace_text_item_or_merge(id_banana, "과일_사과", "TEXT")
+        .expect("merge");
+    assert_eq!(
+        merged_id, id_apple,
+        "Target id must be the existing apple id"
+    );
 
     // Verify id_banana is deleted
     let detail_banana = db.get_history_detail(id_banana);
@@ -97,7 +113,10 @@ fn test_fts_trigger_automatic_update_on_write() {
         ..Default::default()
     };
     let results = db.search_items(&filter).expect("search fts");
-    assert!(!results.is_empty(), "FTS trigger must automatically index newly added item");
+    assert!(
+        !results.is_empty(),
+        "FTS trigger must automatically index newly added item"
+    );
     assert_eq!(results[0].id, item_id);
     assert!(results[0].content.contains(unique_keyword));
 }
@@ -106,17 +125,27 @@ fn test_fts_trigger_automatic_update_on_write() {
 fn test_soft_delete_and_restore() {
     let (_temp, db) = create_temp_db_copy();
 
-    let (item_id, _) = db.add_item("휴지통삭제복원테스트", None, "TEXT").expect("add");
+    let (item_id, _) = db
+        .add_item("휴지통삭제복원테스트", None, "TEXT")
+        .expect("add");
 
     // Soft delete
     db.soft_delete(item_id).expect("soft delete");
-    assert!(db.get_history_detail(item_id).is_err(), "Item should be removed from history");
+    assert!(
+        db.get_history_detail(item_id).is_err(),
+        "Item should be removed from history"
+    );
 
     let trash = db.get_trash().expect("get trash");
-    let trash_item = trash.iter().find(|t| t.content.contains("휴지통삭제복원테스트")).expect("found in trash");
+    let trash_item = trash
+        .iter()
+        .find(|t| t.content.contains("휴지통삭제복원테스트"))
+        .expect("found in trash");
 
     // Restore
     let restored_id = db.restore_item(trash_item.id).expect("restore item");
-    let restored_detail = db.get_history_detail(restored_id).expect("restored item exists in history");
+    let restored_detail = db
+        .get_history_detail(restored_id)
+        .expect("restored item exists in history");
     assert!(restored_detail.content.contains("휴지통삭제복원테스트"));
 }

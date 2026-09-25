@@ -4,7 +4,11 @@ use smartclipboard_native_lib::database::{Database, SearchFilter};
 
 fn get_test_db() -> Database {
     let db_path = PathBuf::from("fixtures/synthetic_test_v6.db");
-    assert!(db_path.exists(), "Synthetic DB fixture missing: {:?}", db_path);
+    assert!(
+        db_path.exists(),
+        "Synthetic DB fixture missing: {:?}",
+        db_path
+    );
     Database::open_read_only(&db_path).expect("Failed to open synthetic DB in read-only mode")
 }
 
@@ -115,5 +119,7 @@ fn test_catalog_and_settings() {
     // Trash
     let trash = db.get_trash().expect("get_trash failed");
     assert_eq!(trash.len(), 1);
-    assert!(trash[0].content.contains("삭제되어 휴지통에 보관된 임시 메모"));
+    assert!(trash[0]
+        .content
+        .contains("삭제되어 휴지통에 보관된 임시 메모"));
 }

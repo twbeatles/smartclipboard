@@ -333,3 +333,29 @@ v10.8 `Release` 워크플로 실패 2건의 사후 조치 기록 (감사 지적�
 - Legacy 잡: `smartclipboard.spec`의 `ICON_FILE`이 트리 이동(`legacy/python`) 후 존재하지 않는 경로를 가리켜 PyInstaller 실패 → spec 옆·리포 루트 순 탐색 + 명확한 즉시 실패로 수정, `APP_VERSION`은 `Config.VERSION`에서 읽도록 변경.
 - Native 잡: GUI 서브시스템 바이너리에 `&` + `$LASTEXITCODE` 스모크 검사가 대기하지 않아 오실패 → `Start-Process -Wait -PassThru` + `.ExitCode` 방식으로 교체. Legacy windowed exe는 종료코드가 읽히지 않아 `--smoke-file` 성공 마커 + 타임아웃 방식으로 검사하고, spec `EXCLUDES`에서 전이 임포트되는 `email`을 제거했다.
 - 재발방지: `legacy/python/scripts/check_release_prereqs.py` + `ci.yml`의 `release-guard` 잡(매 push 실행) + `tests/test_release_prereqs.py` 회귀 테스트 13건.
+
+---
+
+## 11. Rust 품질·보안 감사 조치 (2026-09-25)
+
+네이티브 백엔드(`src-tauri`) 대상 품질·보안·의존성 감사와 후속 수정 기록:
+
+| 단계 | 결과 |
+|---|---|
+| `cargo check --all-targets --all-features` | 통과 (경고 0) |
+| `cargo fmt --all -- --check` | 실패 → `cargo fmt --all`로 8개 파일 정리 후 통과 |
+| `cargo clippy --all-targets --all-features -- -D warnings` | 통과 |
+| `cargo audit` (0.22.2) | 취약점 0건, 허용 경고 7건(아래) |
+| `cargo machete` (0.9.2) | 미사용 의존성 0건 |
+| `unsafe` 전수 검토 | 10곳 전부 Win32 FFI, 2곳 하드닝 |
+
+수정 내용:
+- `clipboard/file_reader.rs` — CF_HDROP 경로 읽기를 2-pass 조회로 변경(고정 1024 버퍼 제거, 32k 상한, TOCTOU 클램프). 외부 입력인 클립보드에 의한 잘림·패닉 제거.
+- `clipboard/win32.rs` — `read_clipboard_text`의 NUL 스캔을 `GlobalSize` 바운드로 제한 + 순수 헬퍼 `utf16_nul_len` 추출, 단위 테스트 4건 추가.
+- `.github/workflows/ci.yml` — `Check Rust Formatting`, `Install cargo-audit`, `Audit Rust Dependencies` 잡 추가로 fmt·audit를 CI 게이트에 편입.
+- 검증: `cargo test` 79건 전부 통과(신규 4건 포함). §9의 "30건 통과 재현 불가"는 해소 — 온라인 환경에서 전 스위트 재현됨.
+
+남은 항목:
+- `cargo audit` 경고 7건(`proc-macro-error` 1 + `unic-*` 5 + `glib` 1)은 전부 Tauri 경유 transitive이며, `cargo update --dry-run`(tauri 2.11.5→2.11.6)에도 제거 경로가 없어 업스트림 대기. CI audit 게이트가 악화를 감지.
+- `windows-rs` 전환은 미실시(대규모 리라이트, 지적 대응 아님).
+- 작업트리 줄바꿈이 전체 LF인데 `AGENTS.md`는 CRLF를 규정 — 문서·현실 불일치, 후속 정리 필요.

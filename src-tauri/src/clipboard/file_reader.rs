@@ -28,12 +28,26 @@ pub fn read_clipboard_files() -> Option<Vec<String>> {
                 let file_count = DragQueryFileW(hdrop, 0xFFFFFFFF, null_mut(), 0);
                 if file_count > 0 {
                     let mut raw_paths = Vec::with_capacity(file_count as usize);
-                    let mut buf = vec![0u16; 1024];
 
                     for i in 0..file_count {
+                        // Two-pass query: ask for the required length first so
+                        // an over-long path can never overflow or panic a
+                        // fixed-size buffer. The clipboard is external input.
+                        let needed = DragQueryFileW(hdrop, i, null_mut(), 0);
+                        if needed == 0 {
+                            continue;
+                        }
+                        // Windows path APIs cap out around 32k UTF-16 units;
+                        // treat anything beyond as corrupt input.
+                        const MAX_SINGLE_PATH_UNITS: u32 = 32 * 1024;
+                        let capped = needed.min(MAX_SINGLE_PATH_UNITS);
+                        let mut buf = vec![0u16; capped as usize + 1];
                         let len = DragQueryFileW(hdrop, i, buf.as_mut_ptr(), buf.len() as u32);
+                        // Clamp defensively: the clipboard may change between
+                        // the two calls (TOCTOU), so never trust `len`.
+                        let len = (len as usize).min(buf.len() - 1);
                         if len > 0 {
-                            let path_str = String::from_utf16_lossy(&buf[..len as usize]);
+                            let path_str = String::from_utf16_lossy(&buf[..len]);
                             raw_paths.push(path_str);
                         }
                     }

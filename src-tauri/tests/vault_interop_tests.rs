@@ -1,5 +1,5 @@
-use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
+use base64::Engine;
 use serde::Deserialize;
 use std::fs::File;
 use std::io::BufReader;
@@ -41,7 +41,8 @@ struct GoldenVectors {
 
 fn load_vectors() -> GoldenVectors {
     let path = PathBuf::from("fixtures/vault_golden_vectors.json");
-    let file = File::open(&path).unwrap_or_else(|_| panic!("Failed to open golden vectors file: {:?}", path));
+    let file = File::open(&path)
+        .unwrap_or_else(|_| panic!("Failed to open golden vectors file: {:?}", path));
     let reader = BufReader::new(file);
     serde_json::from_reader(reader).expect("Failed to parse golden vectors JSON")
 }
@@ -66,7 +67,9 @@ fn test_python_encrypted_verification_token_decrypt_in_rust() {
     let vectors = load_vectors();
     let fernet = Fernet::from_b64_key(&vectors.derived_key_b64).expect("Valid Fernet key");
 
-    let decrypted = fernet.decrypt(&vectors.verification_token).expect("Decryption failed");
+    let decrypted = fernet
+        .decrypt(&vectors.verification_token)
+        .expect("Decryption failed");
     let decrypted_str = String::from_utf8(decrypted).expect("Valid UTF-8");
     assert_eq!(decrypted_str, vectors.verification_plaintext);
 }
@@ -95,7 +98,9 @@ fn test_rust_encrypt_decrypt_roundtrip() {
     let fernet = Fernet::from_b64_key(&vectors.derived_key_b64).expect("Valid Fernet key");
 
     let message = "Roundtrip encryption test from Rust Native 2026!";
-    let token = fernet.encrypt(message.as_bytes(), None, None).expect("Encryption failed");
+    let token = fernet
+        .encrypt(message.as_bytes(), None, None)
+        .expect("Encryption failed");
 
     let decrypted = fernet.decrypt(&token).expect("Decryption failed");
     assert_eq!(String::from_utf8(decrypted).unwrap(), message);
