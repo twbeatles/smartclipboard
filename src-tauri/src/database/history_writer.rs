@@ -312,6 +312,17 @@ impl Database {
         })
     }
 
+    /// Assign an item to a collection, or detach it with `None`.
+    pub fn set_collection(&self, item_id: i64, collection_id: Option<i64>) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE history SET collection_id = ? WHERE id = ?",
+                params![collection_id, item_id],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Soft delete an item by moving to deleted_history (7-day retention)
     pub fn soft_delete(&self, item_id: i64) -> Result<()> {
         self.with_conn(|conn| {

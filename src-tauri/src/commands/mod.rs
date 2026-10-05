@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::action_palette::{execute_action, PaletteAction, BUILTIN_ACTIONS};
+use crate::action_palette::{action_effect, execute_action, PaletteAction, BUILTIN_ACTIONS};
 use crate::app_state::AppState;
 use crate::database::{Collection, HistoryDetail, HistoryItem, SearchFilter, Snippet, TrashItem};
 use crate::errors::{AppError, Result};
@@ -74,6 +74,27 @@ pub async fn paste_last_command(state: State<'_, AppState>) -> Result<()> {
     crate::paste::paste_last(&state, &guard)
 }
 
+/// Copies a history row back to the clipboard (internal write, not
+/// re-captured by the pipeline).
+#[tauri::command]
+pub async fn history_copy(state: State<'_, AppState>, id: i64) -> Result<()> {
+    let guard = state.write_guard.clone();
+    crate::paste::copy_item(&state, &guard, id)
+}
+
+/// Mini-window pick: hides the mini window so focus returns to the previous
+/// application, then pastes the chosen row there.
+#[tauri::command]
+pub async fn history_paste(state: State<'_, AppState>, app: AppHandle, id: i64) -> Result<()> {
+    if let Some(mini_window) = app.get_webview_window("mini") {
+        let _ = mini_window.hide();
+    }
+    // Let the previously focused window regain focus before Ctrl+V.
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    let guard = state.write_guard.clone();
+    crate::paste::paste_item(&state, &guard, id)
+}
+
 // ---------- History writes ----------
 
 #[tauri::command]
@@ -89,6 +110,15 @@ pub async fn history_toggle_bookmark(state: State<'_, AppState>, id: i64) -> Res
 #[tauri::command]
 pub async fn history_set_note(state: State<'_, AppState>, id: i64, note: String) -> Result<()> {
     state.db.set_note(id, &note)
+}
+
+#[tauri::command]
+pub async fn history_set_collection(
+    state: State<'_, AppState>,
+    id: i64,
+    collection_id: Option<i64>,
+) -> Result<()> {
+    state.db.set_collection(id, collection_id)
 }
 
 #[tauri::command]
@@ -220,9 +250,11 @@ pub async fn palette_actions() -> Result<Vec<PaletteAction>> {
     Ok(BUILTIN_ACTIONS.to_vec())
 }
 
-/// Runs a palette action on a history item, writes the result back to the
-/// same row (merge on duplicate) and to the clipboard. Never re-triggers the
-/// automatic copy-rule pipeline.
+/// Runs a palette action on a history item. `replace` actions write the
+/// result back to the same row (merge on duplicate) and to the clipboard;
+/// `copy` actions (e.g. hashes) only write the clipboard so the source text
+/// survives; `view` actions (statistics) only return the result. Never
+/// re-triggers the automatic copy-rule pipeline.
 #[tauri::command]
 pub async fn palette_execute(
     state: State<'_, AppState>,
@@ -231,9 +263,15 @@ pub async fn palette_execute(
 ) -> Result<String> {
     let detail = state.db.get_history_detail(item_id)?;
     let output = execute_action(&action_id, &detail.content)?;
-    state
-        .db
-        .replace_text_item_or_merge(item_id, &output, &detail.r#type)?;
+    let effect = action_effect(&action_id);
+    if effect == "view" {
+        return Ok(output);
+    }
+    if effect == "replace" {
+        state
+            .db
+            .replace_text_item_or_merge(item_id, &output, &detail.r#type)?;
+    }
     if crate::clipboard::win32::write_clipboard_text(&output) {
         let seq = crate::clipboard::win32::get_sequence_number();
         state.write_guard.mark_internal(seq, &output);

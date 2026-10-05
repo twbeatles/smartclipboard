@@ -1,85 +1,135 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Pin, Search } from "lucide-react";
 import type { HistoryItem } from "./types";
+import { listenAll, tauriInvoke } from "./lib/tauri";
+import { TypeIcon, relativeTime, summarize } from "./lib/format";
 
-async function tauriInvoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
-  if (typeof window !== "undefined" && (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<T>(cmd, args);
-  }
-  return [] as unknown as T;
-}
+const MINI_LIMIT = 30;
 
 export default function MiniApp() {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const selectedRow = useRef<HTMLLIElement>(null);
+  const loadSeq = useRef(0);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        let res: HistoryItem[] = [];
-        if (query.trim()) {
-          res = await tauriInvoke<HistoryItem[]>("history_search", {
-            filter: { query: query.trim(), limit: 20 },
-          });
-        } else {
-          res = await tauriInvoke<HistoryItem[]>("history_list", { limit: 20 });
-        }
-        setItems(res || []);
-        setSelectedIndex(0);
-      } catch (e) {
-        console.error("Mini load error:", e);
-      }
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    try {
+      const q = query.trim();
+      const res = q
+        ? await tauriInvoke<HistoryItem[]>("history_search", { filter: { query: q, limit: MINI_LIMIT } })
+        : await tauriInvoke<HistoryItem[]>("history_list", { limit: MINI_LIMIT });
+      if (seq !== loadSeq.current) return;
+      // Images cannot be pasted from here (no native image restore).
+      setItems((Array.isArray(res) ? res : []).filter((i) => i.type !== "IMAGE"));
+      setSelectedIndex(0);
+    } catch (e) {
+      console.error("Mini load error:", e);
     }
-    load();
   }, [query]);
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSelectedIndex((prev) => Math.min(prev + 1, Math.max(0, items.length - 1)));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSelectedIndex((prev) => Math.max(prev - 1, 0));
-      } else if (e.key === "Escape") {
-        // Hide window
-        tauriInvoke("hide_mini_window").catch(() => {});
-      }
+    void load();
+  }, [load]);
+
+  // The window is reused across Alt+V presses: start fresh each time it is shown.
+  useEffect(() => {
+    const applyTheme = () => {
+      tauriInvoke<Record<string, string>>("settings_get_all")
+        .then((s) => {
+          if (s?.theme) document.documentElement.setAttribute("data-theme", s.theme);
+        })
+        .catch(() => {});
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [items.length]);
+    const onFocus = () => {
+      setError(null);
+      setQuery("");
+      applyTheme();
+      void loadRef.current();
+      input.current?.focus();
+    };
+    applyTheme();
+    window.addEventListener("focus", onFocus);
+    const unlisten = listenAll({ history_changed: () => void loadRef.current() });
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      unlisten();
+    };
+  }, []);
+
+  useEffect(() => {
+    selectedRow.current?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
+
+  const paste = async (item: HistoryItem | undefined) => {
+    if (!item) return;
+    try {
+      await tauriInvoke("history_paste", { id: item.id });
+    } catch {
+      setError("붙여넣기에 실패했습니다.");
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIndex((prev) => Math.min(prev + 1, Math.max(0, items.length - 1)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIndex((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      void paste(items[selectedIndex]);
+    } else if (e.key === "Escape") {
+      tauriInvoke("hide_mini_window").catch(() => {});
+    }
+  };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-theme-bg text-theme-text font-sans select-none border border-theme-border rounded-xl shadow-2xl overflow-hidden">
-      <div className="p-2 border-b border-theme-border bg-theme-card flex items-center gap-2">
-        <span className="text-sm">🔍</span>
+    <div onKeyDown={onKeyDown} className="flex flex-col h-screen w-screen bg-theme-bg text-theme-text select-none border border-theme-border overflow-hidden">
+      <div className="flex items-center gap-2 px-3 h-10 border-b border-theme-border bg-theme-card shrink-0">
+        <Search size={14} className="text-theme-muted shrink-0" />
         <input
+          ref={input}
           autoFocus
           type="text"
-          placeholder="미니 검색 (Esc 닫기)..."
+          placeholder="검색해서 붙여넣기"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="flex-1 bg-transparent text-sm text-theme-text placeholder:text-theme-muted outline-none"
+          className="flex-1 min-w-0 bg-transparent text-[13px] placeholder:text-theme-muted/70 outline-none"
         />
       </div>
-      <div className="flex-1 overflow-y-auto divide-y divide-theme-border/40">
-        {items.map((item, idx) => (
-          <div
-            key={item.id}
-            onClick={() => setSelectedIndex(idx)}
-            className={`p-2.5 cursor-pointer text-xs flex flex-col gap-1 transition ${
-              selectedIndex === idx ? "bg-theme-accent/20 border-l-4 border-l-theme-accent font-medium" : "hover:bg-theme-hover"
-            }`}
-          >
-            <div className="flex justify-between text-[11px] text-theme-muted">
-              <span>{item.type}</span>
-              <span>{item.timestamp}</span>
-            </div>
-            <div className="truncate font-mono text-theme-text">{item.content}</div>
-          </div>
-        ))}
+      <ul className="flex-1 overflow-y-auto">
+        {items.length === 0 && <li className="p-6 text-center text-xs text-theme-muted">{query ? "검색 결과가 없습니다." : "히스토리가 비어 있습니다."}</li>}
+        {items.map((item, idx) => {
+          const selected = idx === selectedIndex;
+          return (
+            <li
+              key={item.id}
+              ref={selected ? selectedRow : undefined}
+              onMouseMove={() => setSelectedIndex(idx)}
+              onClick={() => void paste(item)}
+              className={`flex items-center gap-2 h-9 pl-2.5 pr-3 cursor-default border-l-2 ${
+                selected ? "bg-theme-accent/15 border-l-theme-accent" : "border-l-transparent"
+              }`}
+            >
+              <span className={selected ? "text-theme-accent" : "text-theme-muted"}>
+                <TypeIcon item={item} />
+              </span>
+              <span className="flex-1 min-w-0 truncate text-[13px]">{summarize(item)}</span>
+              {item.pinned && <Pin size={11} className="text-theme-accent shrink-0" />}
+              <span className="text-[11px] text-theme-muted shrink-0">{relativeTime(item.timestamp)}</span>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="px-3 h-6 flex items-center border-t border-theme-border bg-theme-card text-[11px] text-theme-muted shrink-0">
+        {error ? <span className="text-red-400">{error}</span> : "↑↓ 이동 · Enter 붙여넣기 · Esc 닫기"}
       </div>
     </div>
   );

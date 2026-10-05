@@ -61,3 +61,74 @@
   --theme-accent: #38bdf8;
   --theme-hover: #1e293b;
 }
+
+html {
+  font-size: 14px;
+}
+
+body {
+  font-family: "Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+}
+
+/* Thin, theme-aware scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--theme-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  .icon-btn {
+    @apply inline-flex items-center justify-center w-7 h-7 rounded-md text-theme-muted shrink-0 transition-colors;
+  }
+  .icon-btn:hover {
+    @apply bg-theme-hover text-theme-text;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1 h-7 px-2.5 rounded-md text-xs bg-theme-bg border border-theme-border shrink-0 transition-colors;
+  }
+  .btn:hover {
+    @apply bg-theme-hover;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-xs font-medium bg-theme-accent text-white shrink-0 transition-opacity;
+  }
+  .btn-primary:hover {
+    @apply opacity-90;
+  }
+  .btn-primary:disabled {
+    @apply opacity-50;
+  }
+
+  .field {
+    @apply h-7 px-2 rounded-md text-xs bg-theme-bg border border-theme-border text-theme-text outline-none;
+  }
+  .field:focus {
+    @apply border-theme-accent;
+  }
+  .field::placeholder {
+    color: var(--theme-muted);
+    opacity: 0.7;
+  }
+
+  .chip {
+    @apply inline-flex items-center h-6 px-2.5 rounded-full text-theme-muted whitespace-nowrap transition-colors;
+  }
+  .chip:hover {
+    @apply bg-theme-hover text-theme-text;
+  }
+  .chip-on,
+  .chip-on:hover {
+    @apply bg-theme-accent text-white;
+  }
+}

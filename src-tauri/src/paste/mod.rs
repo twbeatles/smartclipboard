@@ -65,6 +65,39 @@ pub fn simulate_ctrl_v() -> bool {
     }
 }
 
+/// Writes a history row back to the clipboard with the shared internal guard
+/// (marked AFTER the write with the real sequence number) and bumps its use
+/// count. IMAGE rows are rejected: there is no native image restore.
+pub fn copy_item(state: &AppState, guard: &InternalWriteGuard, item_id: i64) -> Result<()> {
+    let detail = state.db.get_history_detail(item_id)?;
+    if detail.r#type == "IMAGE" {
+        return Err(AppError::Internal(
+            "Image items cannot be restored as text".into(),
+        ));
+    }
+    if !write_clipboard_text(&detail.content) {
+        return Err(AppError::Internal(
+            "Item could not be written to clipboard".into(),
+        ));
+    }
+    let seq = get_sequence_number();
+    guard.mark_internal(seq, &detail.content);
+    state.db.increment_use_count(item_id)
+}
+
+/// Copies a history row to the clipboard and pastes it into the focused
+/// window via simulated Ctrl+V.
+pub fn paste_item(state: &AppState, guard: &InternalWriteGuard, item_id: i64) -> Result<()> {
+    copy_item(state, guard, item_id)?;
+    // Short wait to allow the target focused window to read clipboard
+    thread::sleep(Duration::from_millis(100));
+    if simulate_ctrl_v() {
+        Ok(())
+    } else {
+        Err(AppError::Internal("Paste failed".into()))
+    }
+}
+
 /// Retrieves the most recent pasteable item, writes it to the clipboard
 /// with the shared internal guard, and simulates Ctrl+V.
 ///

@@ -3,7 +3,7 @@
 이 문서는 기존 Python/PyQt6 구현(`smartclipboard_app`, `smartclipboard_core`)과 Rust + Tauri 2 네이티브 구현(`native/`) 간의 기능 동등성(Parity) 및 마일스톤별 검증 상태를 추적합니다.
 
 최종 갱신일: 2026-09-03  
-대상 버전: SmartClipboard Pro v10.7.0  
+대상 버전: SmartClipboard Pro v10.9.0  
 작업 브랜치: `feature/rust-tauri-migration`
 
 ---
@@ -128,3 +128,18 @@
 
 여전히 남은 것: CSP 정책 확정(G-10), 평문 zeroize(G-9), `claude.md` 전면 갱신, audit 경고 7건 업스트림 추적, 줄바꿈 규정(LF 현실 vs CRLF 문서) 정리.
 
+---
+
+## 7. v10.9 네이티브 UI/UX 리팩토링 (2026-10-05)
+
+| 항목 | 내용 |
+|---|---|
+| 화면 구조 | 사이드바·9버튼 툴바 제거 → 검색 + 유형 칩 + 목록/미리보기. 보조 기능은 `⋯` 메뉴. `App.tsx`를 `src/components/`·`src/lib/`로 분리 |
+| 흐름 수정 | `history_changed` 구독(목록 자동 갱신), invoke 인자 camelCase 정합(휴지통 복원/영구삭제·팔레트·보관함 비밀번호 변경), 검색 디바운스 + 응답 순번 검사 |
+| 신규 IPC | `history_copy`(write_guard 경유 복사), `history_paste`(미니 창 → 이전 창 붙여넣기), `history_set_collection` |
+| 창/트레이 | 메인 창 닫기 = 트레이 숨김, 트레이 좌클릭 복원, 미니 창 blur 시 숨김, 설정 메뉴는 `open_settings` 이벤트 |
+| 팔레트 | 액션별 `effect`(`replace`/`copy`/`view`): SHA-256은 클립보드만, 통계는 표시만 |
+| 보안 보관함 | 다이얼로그를 닫으면 백엔드도 잠금 |
+| 검증 | `cargo clippy`·`cargo test` 전 스위트 통과(신규 `test_set_collection_assign_and_detach` 포함), `npm run build` 통과 |
+
+미검증: 실제 Tauri 앱에서의 미니 창 붙여넣기·트레이·창 닫기 동작은 수동 확인 필요.

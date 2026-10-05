@@ -26,6 +26,23 @@ development surface.
   FILE signature rebuild, pre-import backup attempt, single transaction.
 - Files use CRLF line endings; run `rustfmt --edition 2021` on touched files.
 
+## Native frontend conventions
+
+- `App.tsx` owns state and orchestration; views live in `src/components/`
+  (`HistoryList`, `Preview`, `AppMenu`, `PaletteDialog`, `TrashDialog`,
+  `VaultDialog`), shared helpers in `src/lib/` (`tauri.ts`, `format.tsx`).
+- Secondary features (trash, vault, theme, collections, import/export,
+  update) stay behind the `⋯` menu; the main surface is search + list + preview.
+- `invoke` argument keys are camelCase (`deletedId`, `itemId`) — Tauri maps
+  them to the snake_case Rust parameters. Struct payloads (`filter`) keep
+  their serde field names.
+- Copy non-image rows through `history_copy` (shared write guard), never
+  `navigator.clipboard.writeText`. The mini window pastes via `history_paste`.
+- The list reloads on the `history_changed` event; closing the main window
+  hides it to the tray, and the mini window hides on blur.
+- Palette actions declare an `effect` (`replace` / `copy` / `view`); only
+  `replace` writes back to the history row.
+
 ## Verification (needs network for first fetch)
 
 ```powershell

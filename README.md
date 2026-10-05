@@ -3,7 +3,7 @@
 > Windows용 고급 클립보드 매니저 — 복사한 모든 것을 저장하고, 검색하고, 활용하세요.  
 > **Python/PyQt6 클래식 에디션**과 초경량 **Rust + Tauri 2 네이티브 에디션**을 모두 지원합니다.
 
-![Version](https://img.shields.io/badge/version-10.7-blue)
+![Version](https://img.shields.io/badge/version-10.9-blue)
 ![Rust](https://img.shields.io/badge/rust-1.85+-orange)
 ![Tauri](https://img.shields.io/badge/tauri-2.0+-blueviolet)
 ![React](https://img.shields.io/badge/react-19-61dafb)
@@ -19,7 +19,7 @@ SmartClipboard Pro는 기존 Python 구현의 모든 데이터와 기능을 100%
 
 - **OS 네이티브 이벤트 리스너**: `WM_CLIPBOARDUPDATE` 기반으로 폴링 없이 즉각 반응하며 유휴 시 CPU 0% 유지
 - **100% DB 바이너리 호환**: 기존 SQLite WAL DB(`clipboard_history_v6.db`)와 FTS5 전문 검색 트리거, PBKDF2 (480,000 iter) + Fernet 보안 보관함 데이터 무변경 완벽 연동
-- **초경량 모던 UI**: React 19 + TypeScript Strict + Tailwind CSS 5종 테마(다크, 라이트, 오션, 퍼플, 미드나잇) 및 플로팅 미니 윈도우
+- **간결한 단일 화면 UI**: 검색창 + 유형 필터 + 목록/미리보기 한 화면, 보조 기능(휴지통·보관함·테마·컬렉션·내보내기/가져오기·업데이트)은 `⋯` 메뉴로 정리. React 19 + TypeScript Strict + Tailwind CSS 5종 테마(다크, 라이트, 오션, 퍼플, 미드나잇) 및 플로팅 미니 윈도우
 - **기능 동등성 검증**: 총 47건의 Rust 네이티브 테스트(회귀 17건 포함)와 230건의 Python 크로스 회귀 테스트 100% 통과 ([NATIVE_PARITY_MATRIX.md](docs/NATIVE_PARITY_MATRIX.md))
 
 ### 네이티브 에디션 빌드 및 실행
@@ -85,7 +85,8 @@ npm run tauri build
 
 - 자동 액션 규칙과 분리된 **수동** 경로
 - 변환 결과는 같은 항목과 클립보드에 반영되며, 자동 규칙을 다시 타지 않음
-- Base64 인코딩/디코딩, SHA-256 해시, JSON 포맷팅, 글자 수 통계 등 즉시 실행
+- SHA-256 해시는 클립보드에만 복사하고 원본 항목을 유지하며, 글자 수 통계는 결과만 표시
+- Base64 인코딩/디코딩, JSON 포맷팅 등 즉시 실행
 
 ### 📄 텍스트 스니펫
 
@@ -109,15 +110,15 @@ npm run tauri build
 ### 🚀 자동 업데이트 (GitHub Releases)
 
 - Ed25519 디지털 서명과 SHA-256 해시 검증 기반의 안전한 자동 업데이트
-- 앱 시작 시 이전 업데이트 결과를 확인하고, 사이드바 `🔄 업데이트 확인` 버튼으로 서명 검증 → 다운로드 → 설치/재시작 진행
+- 앱 시작 시 이전 업데이트 결과를 확인하고, `⋯` 메뉴의 **업데이트 확인**으로 서명 검증 → 다운로드 → 설치/재시작 진행
 - 업데이트 적용 시 이전 버전 자동 백업 및 문제 발생 시 안전한 자동 롤백 지원
 
 ### 🎨 UI/UX
 
-- 글래스모피즘 디자인
+- 한 줄 목록 + 미리보기(이미지 미리보기·메모·컬렉션 지정), 더블클릭/호버 버튼으로 즉시 복사
 - 5가지 테마: 🌙 다크 · ☀️ 라이트 · 🌊 오션 · 💜 퍼플 · 🌌 미드나잇
-- 플로팅 미니 창(`Alt+V`)으로 언제든 빠르게 접근
-- 시스템 트레이 상주, 슬라이드 토스트 알림
+- 플로팅 미니 창(`Alt+V`): 검색 후 `Enter`로 이전 창에 바로 붙여넣기, 포커스를 잃으면 자동으로 닫힘
+- 시스템 트레이 상주: 창 닫기는 트레이로 숨김, 트레이 좌클릭으로 다시 열기, 토스트 알림
 - 통계 대시보드
 
 ---

@@ -149,3 +149,27 @@ fn test_soft_delete_and_restore() {
         .expect("restored item exists in history");
     assert!(restored_detail.content.contains("휴지통삭제복원테스트"));
 }
+
+#[test]
+fn test_set_collection_assign_and_detach() {
+    let (_temp, db) = create_temp_db_copy();
+
+    let (id, _) = db
+        .add_item("컬렉션 지정 테스트 항목", None, "TEXT")
+        .expect("add");
+    let cid = db
+        .add_collection("지정 테스트", "📁", "#6366f1")
+        .expect("add collection");
+
+    db.set_collection(id, Some(cid)).expect("assign");
+    assert_eq!(
+        db.get_history_detail(id).expect("detail").collection_id,
+        Some(cid)
+    );
+
+    db.set_collection(id, None).expect("detach");
+    assert_eq!(
+        db.get_history_detail(id).expect("detail").collection_id,
+        None
+    );
+}

@@ -13,8 +13,8 @@ pub mod vault;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 use app_state::AppState;
 use database::Database;
@@ -67,6 +67,14 @@ fn global_shortcuts_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R>
         .build()
 }
 
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show_i = MenuItem::with_id(app, "show", "보기", true, None::<&str>)?;
     let privacy_i = MenuItem::with_id(app, "privacy", "프라이버시 모드", true, None::<&str>)?;
@@ -76,16 +84,27 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let menu = Menu::with_items(app, &[&show_i, &privacy_i, &pause_i, &settings_i, &quit_i])?;
 
-    let _tray = TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::new()
+        .tooltip("SmartClipboard Pro")
         .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(move |app, event| match event.id.as_ref() {
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+        .show_menu_on_left_click(false);
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+
+    let _tray = builder
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
             }
+        })
+        .on_menu_event(move |app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
             "privacy" => {
                 if let Some(state) = app.try_state::<AppState>() {
                     let curr = state.privacy_mode.fetch_xor(true, Ordering::SeqCst);
@@ -101,10 +120,8 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "settings" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_main_window(app);
+                let _ = app.emit("open_settings", ());
             }
             "quit" => {
                 app.exit(0);
@@ -194,12 +211,21 @@ pub fn run() {
         .plugin(global_shortcuts_plugin())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tracing::info!("Second instance launched - focusing main window");
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_main_window(app);
         }))
         .manage(app_state.clone())
+        // Tray app: closing the main window hides it (quit lives in the tray
+        // menu); the mini window dismisses itself when it loses focus.
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            WindowEvent::Focused(false) if window.label() == "mini" => {
+                let _ = window.hide();
+            }
+            _ => {}
+        })
         .setup(move |app| {
             setup_tray(app.handle())?;
 
@@ -247,6 +273,9 @@ pub fn run() {
             commands::vault_status,
             commands::hide_mini_window,
             commands::paste_last_command,
+            commands::history_copy,
+            commands::history_paste,
+            commands::history_set_collection,
             commands::history_toggle_pin,
             commands::history_toggle_bookmark,
             commands::history_set_note,

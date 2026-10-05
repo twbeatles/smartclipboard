@@ -41,11 +41,11 @@ export interface Snippet {
 
 export interface TrashItem {
   id: number;
-  original_id: number;
+  original_id: number | null;
   content: string;
   type: ItemType;
-  deleted_at: string;
-  original_timestamp: string;
+  deleted_at: string | null;
+  original_timestamp: string | null;
   tags: string;
 }
 
