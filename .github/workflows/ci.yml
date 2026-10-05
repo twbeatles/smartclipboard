@@ -2,106 +2,63 @@ name: ci
 
 on:
   push:
-    branches:
-      - "**"
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "updates/**"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**", "updates/**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  native-tests:
-    name: Native Tests & Build (Rust + Tauri 2)
+  native:
+    name: Native (test, clippy, fmt)
     runs-on: windows-latest
+    timeout-minutes: 25
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      - name: Setup Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
-      - name: Install Frontend Dependencies
-        run: npm ci
-
-      - name: Build Frontend
-        run: npm run build
-
-      - name: Run Rust Native Tests (30 tests)
-        run: cargo test --manifest-path src-tauri/Cargo.toml --verbose
-
-      - name: Run Rust Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-
-      - name: Check Rust Formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Audit Rust Dependencies
-        run: cargo audit
-        working-directory: src-tauri
-
-      - name: Build Tauri Release Binary (Smoke)
-        run: npx tauri build
-
-  release-guard:
-    name: Release Prerequisites Guard
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: Swatinem/rust-cache@v2
         with:
-          python-version: "3.13"
+          workspaces: src-tauri
 
-      - name: Check release prerequisites
-        run: python legacy/python/scripts/check_release_prereqs.py
+      - run: npm ci
+      - run: npm run build
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
 
-  legacy-python-tests:
-    name: Legacy Python Tests (${{ matrix.python-version }})
+  legacy:
+    name: Legacy Python + release guard
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-
+    timeout-minutes: 20
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUTF8: "1"
-
     defaults:
       run:
         working-directory: legacy/python
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.13"
           cache: pip
           cache-dependency-path: legacy/python/requirements.txt
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install pyright
-
-      - name: Build legacy payload and smoke import
-        run: |
+      - run: |
+          python -m pip install -r requirements.txt pyright
+          python scripts/check_release_prereqs.py
           python scripts/build_legacy_payload.py --src smartclipboard_app/legacy_main_src.py --out smartclipboard_app/legacy_main_payload.marshal --smoke-import
-
-      - name: Run preflight checks
-        run: |
           python scripts/preflight_local.py --skip-payload-build --strict-optional-deps --with-pyright

@@ -143,3 +143,5 @@
 | 검증 | `cargo clippy`·`cargo test` 전 스위트 통과(신규 `test_set_collection_assign_and_detach` 포함), `npm run build` 통과 |
 
 미검증: 실제 Tauri 앱에서의 미니 창 붙여넣기·트레이·창 닫기 동작은 수동 확인 필요.
+
+**CI 경량화 (2026-10-05)**: `ci.yml`을 main push/PR 한정 + 문서 변경 제외 + 동시 실행 취소로 줄이고, native 1잡 + legacy 1잡(Python 3.13, release-guard 포함)으로 통합. 매 push의 `cargo install cargo-audit`와 `tauri build`는 제거(릴리즈 워크플로가 빌드 담당). 의존성 감사는 필요 시 수동 `cargo audit`.
