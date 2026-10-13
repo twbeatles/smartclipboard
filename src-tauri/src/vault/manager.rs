@@ -75,7 +75,7 @@ impl VaultManager {
         }
 
         let mut salt = [0u8; SALT_LEN];
-        getrandom::getrandom(&mut salt)
+        getrandom::fill(&mut salt)
             .map_err(|e| AppError::Crypto(format!("Failed to generate random salt: {}", e)))?;
 
         let key_b64 = derive_key(password, &salt)?;
@@ -218,7 +218,7 @@ impl VaultManager {
 
         // 2. Generate new salt and key
         let mut new_salt = [0u8; SALT_LEN];
-        getrandom::getrandom(&mut new_salt)
+        getrandom::fill(&mut new_salt)
             .map_err(|e| AppError::Crypto(format!("Failed to generate random salt: {}", e)))?;
 
         let new_key_b64 = derive_key(new_pwd, &new_salt)?;

@@ -188,11 +188,14 @@ pub fn resolve_redirect(current_url: &str, location: &str) -> Result<String, Str
 }
 
 fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(CONNECT_TIMEOUT)
-        .timeout_read(READ_TIMEOUT)
-        .redirects(0)
-        .build()
+    let config = ureq::Agent::config_builder()
+        .timeout_connect(Some(CONNECT_TIMEOUT))
+        .timeout_recv_body(Some(READ_TIMEOUT))
+        .max_redirects(0)
+        .max_redirects_will_error(false)
+        .http_status_as_error(false)
+        .build();
+    ureq::Agent::new_with_config(config)
 }
 
 fn decode_body(bytes: &[u8], content_type: &str) -> String {
@@ -365,27 +368,26 @@ pub fn fetch_http_title_validated(
         }
         let response = match agent
             .get(&current_url)
-            .set("User-Agent", FETCH_USER_AGENT)
+            .header("User-Agent", FETCH_USER_AGENT)
             .call()
         {
             Ok(resp) => resp,
-            Err(ureq::Error::Status(code, resp)) => {
-                // 3xx with redirects(0) arrives here on some ureq paths;
-                // handle it as a redirect below, otherwise report the status.
-                if (300..400).contains(&code) {
-                    resp
-                } else {
-                    return outcome_err(start_url, &current_url, format!("http status {}", code));
-                }
+            Err(ureq::Error::StatusCode(code)) => {
+                return outcome_err(start_url, &current_url, format!("http status {}", code));
             }
             Err(e) => {
                 return outcome_err(start_url, &current_url, e.to_string());
             }
         };
 
-        let status = response.status();
+        let status = response.status().as_u16();
         if (300..400).contains(&status) {
-            let location = response.header("location").unwrap_or("").to_string();
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
             match resolve_redirect(&current_url, &location) {
                 Ok(next) => {
                     current_url = next;
@@ -398,7 +400,12 @@ pub fn fetch_http_title_validated(
             return outcome_err(start_url, &current_url, format!("http status {}", status));
         }
 
-        let content_type = response.header("content-type").unwrap_or("").to_lowercase();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
         if !content_type.is_empty() && !content_type.contains("html") {
             return outcome_err(
                 start_url,
@@ -406,7 +413,10 @@ pub fn fetch_http_title_validated(
                 format!("unsupported content type: {}", content_type),
             );
         }
-        let mut limited = response.into_reader().take(TITLE_FETCH_MAX_BYTES as u64);
+        let mut limited = response
+            .into_body()
+            .into_reader()
+            .take(TITLE_FETCH_MAX_BYTES as u64);
         let mut buf = Vec::with_capacity(65536);
         if let Err(e) = limited.read_to_end(&mut buf) {
             return outcome_err(start_url, &current_url, e.to_string());

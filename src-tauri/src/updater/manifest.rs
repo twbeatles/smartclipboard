@@ -280,16 +280,24 @@ fn is_https_url(url: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn fetch_https(url: &str, accept: &str, what: &str) -> Result<ureq::Response> {
+pub fn fetch_https(
+    url: &str,
+    accept: &str,
+    what: &str,
+) -> Result<ureq::http::Response<ureq::Body>> {
     let https_err = || AppError::Internal(format!("{} URL must be an https URL", what));
     if !is_https_url(url) {
         return Err(https_err());
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(10))
-        .timeout_read(Duration::from_secs(MANIFEST_TIMEOUT_SECS))
-        .redirects(0)
+    // ureq 3: manual redirect loop preserved (see fetch_title.rs agent()).
+    let config = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_recv_body(Some(Duration::from_secs(MANIFEST_TIMEOUT_SECS)))
+        .max_redirects(0)
+        .max_redirects_will_error(false)
+        .http_status_as_error(false)
         .build();
+    let agent = ureq::Agent::new_with_config(config);
     let mut current = url.to_string();
     for _ in 0..=5 {
         if !is_https_url(&current) {
@@ -297,17 +305,11 @@ pub fn fetch_https(url: &str, accept: &str, what: &str) -> Result<ureq::Response
         }
         let response = match agent
             .get(&current)
-            .set("User-Agent", UPDATE_USER_AGENT)
-            .set("Accept", accept)
+            .header("User-Agent", UPDATE_USER_AGENT)
+            .header("Accept", accept)
             .call()
         {
             Ok(resp) => resp,
-            Err(ureq::Error::Status(code, _)) => {
-                return Err(AppError::Internal(format!(
-                    "{} download failed with http status {}",
-                    what, code
-                )));
-            }
             Err(e) => {
                 return Err(AppError::Internal(format!(
                     "{} download failed: {}",
@@ -315,9 +317,15 @@ pub fn fetch_https(url: &str, accept: &str, what: &str) -> Result<ureq::Response
                 )));
             }
         };
-        let status = response.status();
+        let status = response.status().as_u16();
         if (300..400).contains(&status) {
-            let location = response.header("location").unwrap_or("").trim().to_string();
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .trim()
+                .to_string();
             if location.is_empty() {
                 return Err(AppError::Internal(format!(
                     "{} redirect missing location",
@@ -349,7 +357,10 @@ pub fn fetch_https(url: &str, accept: &str, what: &str) -> Result<ureq::Response
 /// https-only (re)directs.
 pub fn download_manifest(manifest_url: &str) -> Result<serde_json::Value> {
     let response = fetch_https(manifest_url, "application/json", "Manifest")?;
-    let mut limited = response.into_reader().take(MANIFEST_MAX_BYTES as u64 + 1);
+    let mut limited = response
+        .into_body()
+        .into_reader()
+        .take(MANIFEST_MAX_BYTES as u64 + 1);
     let mut buf = Vec::new();
     limited
         .read_to_end(&mut buf)

@@ -335,7 +335,7 @@ pub fn download_artifact_to_stage(
         "application/octet-stream",
         "Artifact",
     )?;
-    stage_artifact(manifest, response.into_reader(), staging_root)
+    stage_artifact(manifest, response.into_body().into_reader(), staging_root)
 }
 
 /// Atomically record the apply outcome at an explicit result-file path.

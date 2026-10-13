@@ -127,7 +127,7 @@ impl Fernet {
             // IV comes from the OS CSPRNG (parity with Python cryptography).
             // Deterministic IV removed: identical plaintexts must not share a token.
 
-            getrandom::getrandom(&mut rand_iv).expect("CSPRNG failure during Fernet encryption");
+            getrandom::fill(&mut rand_iv).expect("CSPRNG failure during Fernet encryption");
             rand_iv
         });
 

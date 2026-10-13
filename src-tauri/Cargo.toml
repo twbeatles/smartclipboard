@@ -26,7 +26,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # SQLite with FTS5 bundled
-rusqlite = { version = "0.32", features = ["bundled", "bundled-full"] }
+rusqlite = { version = "0.33", features = ["bundled", "bundled-full"] }
 
 # Vault Crypto primitives
 sha2 = "0.10"
@@ -35,9 +35,9 @@ pbkdf2 = { version = "0.12", features = ["hmac"] }
 aes = "0.8"
 cbc = { version = "0.1", features = ["block-padding"] }
 base64 = "0.22"
-getrandom = "0.2"
+getrandom = "0.4"
 zeroize = { version = "1.8", features = ["derive"] }
-ureq = "2"
+ureq = "3"
 url = "2"
 ed25519-dalek = "2"
 
