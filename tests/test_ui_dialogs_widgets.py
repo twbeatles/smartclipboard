@@ -7,8 +7,8 @@ from contextlib import contextmanager
 from typing import Any, cast
 from unittest import mock
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QTableWidget, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QTableWidget, QWidget
 
 import smartclipboard_app.legacy_main_src as legacy_main_src
 import smartclipboard_app.ui.mainwindow_parts.menu_ops as menu_ops
@@ -988,7 +988,7 @@ class _AcceptedImportDialog:
         pass
 
     def exec(self):
-        from PyQt6.QtWidgets import QDialog
+        from PySide6.QtWidgets import QDialog
 
         return QDialog.DialogCode.Accepted
 
@@ -1412,7 +1412,7 @@ class UiDialogsWidgetsTests(unittest.TestCase):
             dialog.format_csv.setChecked(True)
             dialog.format_md.setChecked(False)
             with mock.patch(
-                "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+                "PySide6.QtWidgets.QFileDialog.getSaveFileName",
                 side_effect=[("out.json", "JSON"), ("out.csv", "CSV")],
             ), mock.patch.object(QMessageBox, "information") as info_mock:
                 dialog.do_export()
@@ -1442,7 +1442,7 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         manager = _FakeActionManager()
         dialog = ClipboardActionsDialog(None, db, manager)
         try:
-            with mock.patch("PyQt6.QtWidgets.QMessageBox.information"):
+            with mock.patch("PySide6.QtWidgets.QMessageBox.information"):
                 dialog.add_default_actions()
             phone_action = [entry for entry in db.added if entry[2] == "format_phone"]
             self.assertEqual(len(phone_action), 1)
@@ -1505,7 +1505,7 @@ class UiDialogsWidgetsTests(unittest.TestCase):
         manager = _FakeActionManager()
         dialog = ClipboardActionsDialog(None, db, manager)
         try:
-            with mock.patch("PyQt6.QtWidgets.QMessageBox.information") as info_mock:
+            with mock.patch("PySide6.QtWidgets.QMessageBox.information") as info_mock:
                 dialog.add_default_actions()
             self.assertEqual(db.added, [])
             self.assertTrue(info_mock.called)
@@ -1930,9 +1930,9 @@ class UiDialogsWidgetsTests(unittest.TestCase):
                 old_copy_button = copy_buttons[0]
 
                 with mock.patch(
-                    "PyQt6.QtWidgets.QInputDialog.getText",
+                    "PySide6.QtWidgets.QInputDialog.getText",
                     side_effect=[("old-pass", True), ("new-pass!1", True), ("new-pass!1", True)],
-                ), mock.patch("PyQt6.QtWidgets.QMessageBox.information"), mock.patch(
+                ), mock.patch("PySide6.QtWidgets.QMessageBox.information"), mock.patch(
                     "smartclipboard_app.ui.dialogs.secure_vault.QTimer.singleShot"
                 ):
                     dialog.change_master_password()

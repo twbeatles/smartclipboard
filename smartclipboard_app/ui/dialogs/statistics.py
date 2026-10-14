@@ -1,7 +1,7 @@
 """Statistics dialog module."""
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QDialog, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 
 class StatisticsDialog(QDialog):

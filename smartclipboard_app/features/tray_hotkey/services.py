@@ -130,7 +130,7 @@ def toggle_mini_window_slot_impl(self, logger):
         if self.mini_window.isVisible():
             self.mini_window.hide()
         else:
-            from PyQt6.QtGui import QCursor
+            from PySide6.QtGui import QCursor
 
             cursor_pos = QCursor.pos()
             self.mini_window.move(cursor_pos.x() - 150, cursor_pos.y() - 200)

@@ -6,9 +6,9 @@ import datetime
 import json
 from typing import Callable, Protocol, TypeVar, cast
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeySequence
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,

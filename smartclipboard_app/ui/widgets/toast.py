@@ -1,8 +1,8 @@
 """Toast widget module."""
 
-from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QTimer, Qt
-from PyQt6.QtGui import QColor, QShowEvent
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QTimer, Qt
+from PySide6.QtGui import QColor, QShowEvent
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 
 def _normalize_duration(duration) -> int:
@@ -116,7 +116,7 @@ class ToastNotification(QFrame):
 
         self.adjustSize()
 
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(28)
@@ -140,7 +140,7 @@ class ToastNotification(QFrame):
         self.slide_in_animation.setEndValue(QPoint(self.target_x, self.target_y))
         self.slide_in_animation.setEasingCurve(QEasingCurve.Type.OutBack)
 
-        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
 
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.opacity_effect.setOpacity(1.0)

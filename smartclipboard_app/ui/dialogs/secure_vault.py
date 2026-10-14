@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 from typing import Protocol, TypeVar, cast
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QHBoxLayout,

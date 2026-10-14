@@ -81,18 +81,18 @@ EXCLUDES = [
     "pkg_resources", "_pytest", "nose", "mock",
     "numpy", "pandas", "scipy", "matplotlib", "tensorflow", "torch",
     "sklearn", "cv2", "IPython", "jupyter", "notebook",
-    "PyQt6.QtBluetooth", "PyQt6.QtDBus", "PyQt6.QtDesigner", "PyQt6.QtHelp",
-    "PyQt6.QtMultimedia", "PyQt6.QtMultimediaWidgets", "PyQt6.QtNetwork",
-    "PyQt6.QtNetworkAuth", "PyQt6.QtNfc", "PyQt6.QtOpenGL", "PyQt6.QtOpenGLWidgets",
-    "PyQt6.QtPdf", "PyQt6.QtPdfWidgets", "PyQt6.QtPositioning", "PyQt6.QtPrintSupport",
-    "PyQt6.QtQml", "PyQt6.QtQuick", "PyQt6.QtQuick3D", "PyQt6.QtQuickWidgets",
-    "PyQt6.QtRemoteObjects", "PyQt6.QtSensors", "PyQt6.QtSerialPort",
-    "PyQt6.QtSpatialAudio", "PyQt6.QtSql", "PyQt6.QtSvg", "PyQt6.QtSvgWidgets",
-    "PyQt6.QtTest", "PyQt6.QtTextToSpeech", "PyQt6.QtWebChannel",
-    "PyQt6.QtWebEngine", "PyQt6.QtWebEngineCore", "PyQt6.QtWebEngineWidgets",
-    "PyQt6.QtWebSockets", "PyQt6.QtXml",
-    "PyQt6.Qt3DAnimation", "PyQt6.Qt3DCore", "PyQt6.Qt3DExtras",
-    "PyQt6.Qt3DInput", "PyQt6.Qt3DLogic", "PyQt6.Qt3DRender",
+    "PySide6.QtBluetooth", "PySide6.QtDBus", "PySide6.QtDesigner", "PySide6.QtHelp",
+    "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets", "PySide6.QtNetwork",
+    "PySide6.QtNetworkAuth", "PySide6.QtNfc", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
+    "PySide6.QtPdf", "PySide6.QtPdfWidgets", "PySide6.QtPositioning", "PySide6.QtPrintSupport",
+    "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuick3D", "PySide6.QtQuickWidgets",
+    "PySide6.QtRemoteObjects", "PySide6.QtSensors", "PySide6.QtSerialPort",
+    "PySide6.QtSpatialAudio", "PySide6.QtSql", "PySide6.QtSvg", "PySide6.QtSvgWidgets",
+    "PySide6.QtTest", "PySide6.QtTextToSpeech", "PySide6.QtWebChannel",
+    "PySide6.QtWebEngine", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
+    "PySide6.QtWebSockets", "PySide6.QtXml",
+    "PySide6.Qt3DAnimation", "PySide6.Qt3DCore", "PySide6.Qt3DExtras",
+    "PySide6.Qt3DInput", "PySide6.Qt3DLogic", "PySide6.Qt3DRender",
     "tkinter", "tcl", "tk", "_tkinter", "xmlrpc", "pydoc", "doctest",
     "distutils", "lib2to3", "multiprocessing", "asyncio", "concurrent",
     "curses", "ensurepip", "email", "http.server", "socketserver",
@@ -101,7 +101,7 @@ EXCLUDES = [
 ]
 
 HIDDEN_IMPORTS = [
-    "PyQt6.QtCore", "PyQt6.QtGui", "PyQt6.QtWidgets",
+    "PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets",
     "logging.handlers", "hashlib",
     # stdlib modules used inside the legacy payload
     "uuid",
@@ -200,7 +200,7 @@ EXCLUDE_BINARIES = [
 a.binaries = [
     b for b in a.binaries if not any(ex.lower() in b[0].lower() for ex in EXCLUDE_BINARIES)
 ]
-a.datas = [d for d in a.datas if not d[0].startswith("PyQt6/Qt6/translations")]
+a.datas = [d for d in a.datas if not d[0].startswith("PySide6/Qt/translations")]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 

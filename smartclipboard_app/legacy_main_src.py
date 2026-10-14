@@ -58,6 +58,26 @@ try:
 except ImportError:
     HAS_WEB = False
 
+# NOTE(PySide6 migration): Qt binding imports must come before PIL.ImageQt,
+# which auto-selects the Qt binding already present in sys.modules.
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLineEdit, QTableWidget, QTableWidgetItem, QPushButton, QTextEdit,
+    QLabel, QHeaderView, QAbstractItemView, QMessageBox, QSplitter,
+    QSystemTrayIcon, QMenu, QSizePolicy, QStyle, QStackedWidget,
+    QFileDialog, QComboBox, QDialog, QFormLayout, QSpinBox, QDateEdit,
+    QCheckBox, QTabWidget, QGroupBox, QFrame, QInputDialog
+)
+from PySide6.QtCore import (
+    Qt, QThread, Signal, QTimer, QSize, QByteArray, QBuffer,
+    QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent, QDate,
+    QObject, QRunnable, QThreadPool, Slot
+)
+from PySide6.QtGui import (
+    QColor, QFont, QIcon, QAction, QPixmap, QImage,
+    QPainter, QKeySequence, QShortcut, QLinearGradient, QBrush, QPen
+)
+
 # QR코드 라이브러리 체크
 try:
     import qrcode
@@ -66,23 +86,6 @@ try:
 except ImportError:
     HAS_QRCODE = False
 
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLineEdit, QTableWidget, QTableWidgetItem, QPushButton, QTextEdit,
-    QLabel, QHeaderView, QAbstractItemView, QMessageBox, QSplitter,
-    QSystemTrayIcon, QMenu, QSizePolicy, QStyle, QStackedWidget,
-    QFileDialog, QComboBox, QDialog, QFormLayout, QSpinBox, QDateEdit,
-    QCheckBox, QTabWidget, QGroupBox, QFrame, QInputDialog
-)
-from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer,
-    QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent, QDate,
-    QObject, QRunnable, QThreadPool, pyqtSlot
-)
-from PyQt6.QtGui import (
-    QColor, QFont, QIcon, QAction, QPixmap, QImage,
-    QPainter, QKeySequence, QShortcut, QLinearGradient, QBrush, QPen
-)
 
 from smartclipboard_core import (
     ClipboardActionManager as CoreClipboardActionManager,
@@ -551,9 +554,9 @@ class CopyRulesDialog(AppCopyRulesDialog):
 # --- 메인 윈도우 ---
 class MainWindow(QMainWindow):
     # 스레드 안전한 UI 조작을 위한 시그널
-    toggle_mini_signal = pyqtSignal()
-    paste_last_signal = pyqtSignal()
-    show_main_signal = pyqtSignal()
+    toggle_mini_signal = Signal()
+    paste_last_signal = Signal()
+    show_main_signal = Signal()
     
     def __init__(self, start_minimized=False):
         super().__init__()
@@ -1766,7 +1769,7 @@ if __name__ == "__main__":
             f.write(f"\nError: {e}")
         # MessageBox로도 표시 시도 (Qt가 로드되었다면)
         try:
-            from PyQt6.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox
             if not QApplication.instance():
                 app = QApplication(sys.argv)
             QMessageBox.critical(None, "Startup Error", f"An error occurred:\n{e}\n\nSee {error_log_path} for details.")
@@ -1776,5 +1779,4 @@ if __name__ == "__main__":
         # 콘솔 창이 바로 꺼지지 않도록 대기
         input("Press Enter to close...")
         sys.exit(1)
-
 

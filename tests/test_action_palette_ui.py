@@ -4,9 +4,9 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from PyQt6.QtCore import QEvent, Qt
-from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import QApplication, QDialog
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
+from PySide6.QtWidgets import QApplication, QDialog
 
 from smartclipboard_app.features.action_palette.dialog import ActionPaletteDialog
 from smartclipboard_app.features.action_palette.preview import ActionPreviewDialog
@@ -244,7 +244,7 @@ class ActionPaletteUiTests(unittest.TestCase):
         toast.assert_not_called()
 
     def test_preview_qr_copy_button_uses_source_label(self):
-        from PyQt6.QtWidgets import QPushButton
+        from PySide6.QtWidgets import QPushButton
 
         context = build_context(raw_text="https://example.com")
         result = ActionResult(kind="qr", value="https://example.com", title="QR 코드", preview=True)

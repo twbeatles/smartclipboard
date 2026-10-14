@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import QMenu
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMenu
 
 from smartclipboard_app.ui.clipboard_guard import mark_internal_copy
 from smartclipboard_core.action_palette.builtins.search import build_google_search_url

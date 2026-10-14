@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Protocol, cast
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,

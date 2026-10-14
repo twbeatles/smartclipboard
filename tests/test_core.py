@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 
 from smartclipboard_app.features.import_export.backup import (
     inspect_restore_database,

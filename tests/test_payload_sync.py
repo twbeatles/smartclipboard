@@ -7,7 +7,7 @@ import os
 import pathlib
 import unittest
 
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 
 from smartclipboard_app.legacy_payload import compute_file_sha256, compute_source_sha256
 from scripts.refactor_symbol_inventory import build_inventory

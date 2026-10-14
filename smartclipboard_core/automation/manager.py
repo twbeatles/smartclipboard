@@ -8,7 +8,7 @@ import re
 import time
 from collections import OrderedDict
 
-from PyQt6.QtCore import QObject, QThreadPool, pyqtSignal
+from PySide6.QtCore import QObject, QThreadPool, Signal
 
 from .cache import TITLE_CACHE_MAX_ENTRIES, TITLE_CACHE_TTL_SECONDS, TITLE_FETCH_MAX_THREADS
 from .fetch_title import (
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class ClipboardActionManager(QObject):
     """복사된 내용에 따라 자동 액션을 수행하는 관리자."""
 
-    action_completed = pyqtSignal(str, object)
+    action_completed = Signal(str, object)
 
     def __init__(self, db):
         super().__init__()

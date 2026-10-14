@@ -98,7 +98,7 @@ def show_shortcuts_dialog_impl(self, message_box_cls):
 def show_about_dialog_impl(self, message_box_cls, version: str):
     about_text = f"""
 <h2>📋 스마트 클립보드 프로 v{version}</h2>
-<p>고급 클립보드 매니저 - PyQt6 기반</p>
+<p>고급 클립보드 매니저 - PySide6 기반</p>
 <br>
 <p><b>주요 기능:</b></p>
 <ul>

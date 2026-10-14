@@ -116,7 +116,7 @@ def apply_result(window, result: ActionResult, context: ActionContext) -> None:
             ToastNotification.show_toast(window, "민감한 항목의 외부 열기는 건너뜁니다.", duration=2500, toast_type="warning")
             return
         if (result.metadata or {}).get("confirm_open"):
-            from PyQt6.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox
 
             parent = window if hasattr(window, "windowTitle") else None
             reply = QMessageBox.question(
@@ -191,7 +191,7 @@ def start_fetch_title(window, context: ActionContext, url: str) -> None:
     worker.signals.result.connect(lambda res: _handle_title_result(window, context, url, res))
     pool = getattr(manager, "threadpool", None)
     if pool is None:
-        from PyQt6.QtCore import QThreadPool
+        from PySide6.QtCore import QThreadPool
 
         pool = QThreadPool.globalInstance()
     if pool is None:

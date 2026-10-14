@@ -53,7 +53,7 @@ try:
 except ImportError:
     HAS_QRCODE = False
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QTableWidget, QTableWidgetItem, QPushButton, QTextEdit,
     QLabel, QHeaderView, QAbstractItemView, QMessageBox, QSplitter,
@@ -61,12 +61,12 @@ from PyQt6.QtWidgets import (
     QFileDialog, QComboBox, QDialog, QFormLayout, QSpinBox,
     QCheckBox, QTabWidget, QGroupBox, QFrame, QInputDialog
 )
-from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QTimer, QSize, QByteArray, QBuffer,
+from PySide6.QtCore import (
+    Qt, QThread, Signal, QTimer, QSize, QByteArray, QBuffer,
     QSettings, QPropertyAnimation, QEasingCurve, QPoint, QEvent,
-    QObject, QRunnable, QThreadPool, pyqtSlot
+    QObject, QRunnable, QThreadPool, Slot
 )
-from PyQt6.QtGui import (
+from PySide6.QtGui import (
     QColor, QFont, QIcon, QAction, QPixmap, QImage,
     QPainter, QKeySequence, QShortcut, QLinearGradient, QBrush, QPen
 )
@@ -279,9 +279,9 @@ ANIM_SLOW = 400
 # --- 데이터베이스 클래스 ---
 # v10.5: Worker Signals 클래스
 class WorkerSignals(QObject):
-    finished = pyqtSignal()
-    error = pyqtSignal(tuple)
-    result = pyqtSignal(object)
+    finished = Signal()
+    error = Signal(tuple)
+    result = Signal(object)
 
 class Worker(QRunnable):
     """비동기 작업 실행을 위한 Worker 클래스"""
@@ -292,7 +292,7 @@ class Worker(QRunnable):
         self.kwargs = kwargs
         self.signals = WorkerSignals()
 
-    @pyqtSlot()
+    @Slot()
     def run(self):
         try:
             result = self.fn(*self.args, **self.kwargs)
@@ -1355,7 +1355,7 @@ class SecureVaultManager:
 # --- v8.0: 클립보드 액션 자동화 관리자 ---
 class ClipboardActionManager(QObject):  # v10.5: QObject 상속 (시그널 사용)
     """복사된 내용에 따라 자동 액션을 수행하는 관리자"""
-    action_completed = pyqtSignal(str, object)  # v10.5: 액션 완료 시그널
+    action_completed = Signal(str, object)  # v10.5: 액션 완료 시그널
     
     def __init__(self, db):
         super().__init__()
@@ -1693,7 +1693,7 @@ class ToastNotification(QFrame):
         self.adjustSize()
         
         # 그림자 효과 추가
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(20)
         shadow.setXOffset(0)
@@ -1721,7 +1721,7 @@ class ToastNotification(QFrame):
         self.slide_in_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         
         # 투명도 효과 설정
-        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.opacity_effect.setOpacity(1.0)
         # Note: GraphicsEffect는 하나만 적용 가능하므로 그림자를 우선 적용
@@ -2617,7 +2617,7 @@ class TrashDialog(QDialog):
 class FloatingMiniWindow(QWidget):
     """빠른 접근을 위한 플로팅 미니 창"""
     
-    item_selected = pyqtSignal(int)  # 항목 선택 시그널
+    item_selected = Signal(int)  # 항목 선택 시그널
     
     def __init__(self, db, parent=None):
         super().__init__(parent)
@@ -2655,7 +2655,7 @@ class FloatingMiniWindow(QWidget):
         layout.addLayout(header)
         
         # 리스트
-        from PyQt6.QtWidgets import QListWidget, QListWidgetItem
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem
         self.list_widget = QListWidget()
         self.list_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
         layout.addWidget(self.list_widget)
@@ -2734,7 +2734,7 @@ class FloatingMiniWindow(QWidget):
     
     def load_items(self):
         """최근 10개 항목 로드"""
-        from PyQt6.QtWidgets import QListWidgetItem
+        from PySide6.QtWidgets import QListWidgetItem
         self.list_widget.clear()
         
         try:
@@ -3332,9 +3332,9 @@ class CopyRulesDialog(QDialog):
 # --- 메인 윈도우 ---
 class MainWindow(QMainWindow):
     # 스레드 안전한 UI 조작을 위한 시그널
-    toggle_mini_signal = pyqtSignal()
-    paste_last_signal = pyqtSignal()
-    show_main_signal = pyqtSignal()
+    toggle_mini_signal = Signal()
+    paste_last_signal = Signal()
+    show_main_signal = Signal()
     
     def __init__(self, start_minimized=False):
         super().__init__()
@@ -3482,7 +3482,7 @@ class MainWindow(QMainWindow):
                 self.mini_window.hide()
             else:
                 # 커서 위치 근처에 표시
-                from PyQt6.QtGui import QCursor
+                from PySide6.QtGui import QCursor
                 cursor_pos = QCursor.pos()
                 self.mini_window.move(cursor_pos.x() - 150, cursor_pos.y() - 200)
                 self.mini_window.show()
@@ -4524,7 +4524,7 @@ class MainWindow(QMainWindow):
         """프로그램 정보 다이얼로그"""
         about_text = f"""
 <h2>📋 스마트 클립보드 프로 v{VERSION}</h2>
-<p>고급 클립보드 매니저 - PyQt6 기반</p>
+<p>고급 클립보드 매니저 - PySide6 기반</p>
 <br>
 <p><b>주요 기능:</b></p>
 <ul>
@@ -6021,7 +6021,7 @@ if __name__ == "__main__":
             f.write(f"\nError: {e}")
         # MessageBox로도 표시 시도 (Qt가 로드되었다면)
         try:
-            from PyQt6.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox
             if not QApplication.instance():
                 app = QApplication(sys.argv)
             QMessageBox.critical(None, "Startup Error", f"An error occurred:\n{e}\n\nSee {error_log_path} for details.")

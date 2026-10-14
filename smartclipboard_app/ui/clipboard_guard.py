@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtCore import QMimeData, QUrl
+from PySide6.QtCore import QMimeData, QUrl
 
 from smartclipboard_core.file_paths import (
     file_paths_from_content,

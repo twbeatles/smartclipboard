@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import datetime
 
-from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtGui import QColor, QPixmap
-from PyQt6.QtWidgets import QTableWidgetItem
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtWidgets import QTableWidgetItem
 
 from smartclipboard_core.file_paths import (
     build_file_paths_detail_text,

@@ -29,14 +29,14 @@
 
 ## 1. 프로젝트 개요
 
-SmartClipboard Pro는 **PyQt6** 기반 Windows 전용 클립보드 관리 데스크톱 앱이다.
+SmartClipboard Pro는 **PySide6** 기반 Windows 전용 클립보드 관리 데스크톱 앱이다.
 텍스트·이미지·링크·코드·색상·파일/폴더를 자동 분류하여 SQLite DB에 영구 저장하고,
 태그·컬렉션·북마크·암호화 보관함·자동화 액션 등 고급 기능을 제공한다.
 
 | 항목 | 값 |
 |------|-----|
 | 진입점 | `클립모드 매니저.py` |
-| UI 프레임워크 | PyQt6 ≥ 6.4.0 |
+| UI 프레임워크 | PySide6 ≥ 6.4.0 |
 | 데이터 저장 | SQLite 3 (WAL 모드) |
 | 빌드 산출물 | `dist/SmartClipboard.exe` (`smartclipboard.spec`는 `upx=True`를 요청하지만 실제 빌드 출력은 로컬 UPX 도구 가용성에 따라 달라질 수 있음) |
 | 대상 OS | Windows 10/11 |
@@ -294,9 +294,9 @@ class ClipboardDB(
 
 ```python
 class WorkerSignals(QObject):
-    finished = pyqtSignal()
-    error = pyqtSignal(tuple)
-    result = pyqtSignal(object)
+    finished = Signal()
+    error = Signal(tuple)
+    result = Signal(object)
 
 class Worker(QRunnable):
     # QThreadPool에 제출되는 비동기 태스크
@@ -313,7 +313,7 @@ class Worker(QRunnable):
 
 #### `smartclipboard_app/legacy_main_src.py` — `LegacyMainWindow` (1,570줄)
 
-핵심 PyQt6 창 호환 소스. public method signature는 유지하고, 초기화/dialog/history/clipboard/table/lifecycle 로직은 feature/helper 모듈로 위임.
+핵심 PySide6 창 호환 소스. public method signature는 유지하고, 초기화/dialog/history/clipboard/table/lifecycle 로직은 feature/helper 모듈로 위임.
 
 **주요 시그널:**
 - `clipboard_changed`

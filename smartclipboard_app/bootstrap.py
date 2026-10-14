@@ -6,8 +6,8 @@ import os
 import sys
 import traceback
 
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
 from .legacy_main import APP_DIR, logger
 from .ui.main_window import MainWindow

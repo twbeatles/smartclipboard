@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol, cast
 
-from PyQt6.QtCore import QPoint, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QMouseEvent, QPixmap, QShowEvent
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QPoint, QTimer, Qt, Signal
+from PySide6.QtGui import QMouseEvent, QPixmap, QShowEvent
+from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
@@ -64,7 +64,7 @@ def _mini_parent(value: object | None) -> _MiniParent | None:
 class FloatingMiniWindow(QWidget):
     """Floating quick-access clipboard widget."""
 
-    item_selected = pyqtSignal(int)
+    item_selected = Signal(int)
 
     def __init__(
         self,

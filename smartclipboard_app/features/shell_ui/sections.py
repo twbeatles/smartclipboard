@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QFrame,

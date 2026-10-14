@@ -1,6 +1,6 @@
 # SmartClipboard Pro v10.6
 
-Windows용 PyQt6 기반 클립보드 매니저입니다.
+Windows용 PySide6 기반 클립보드 매니저입니다.
 
 > ⚠️ 이 문서는 모듈화 전환 당시의 보관 문서입니다. 최신 기준은 루트 `README.md`와 `pyrightconfig.json`입니다.
 

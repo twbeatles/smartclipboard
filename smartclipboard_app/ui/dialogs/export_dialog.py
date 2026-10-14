@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import datetime
 
-from PyQt6.QtCore import QDate
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QDate
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDateEdit,
