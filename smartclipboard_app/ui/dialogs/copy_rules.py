@@ -246,7 +246,7 @@ class CopyRulesDialog(QDialog):
             name_item.setData(Qt.ItemDataRole.UserRole, rid)
             self.table.setItem(row_idx, 1, name_item)
             self.table.setItem(row_idx, 2, QTableWidgetItem(pattern))
-            self.table.setItem(row_idx, 3, QTableWidgetItem(action_labels.get(action, action)))
+            self.table.setItem(row_idx, 3, QTableWidgetItem(str(action_labels.get(action, action) or "-")))
             self.table.setItem(row_idx, 4, QTableWidgetItem(replacement or "-"))
             order_item = QTableWidgetItem(str(row_idx + 1))
             order_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)

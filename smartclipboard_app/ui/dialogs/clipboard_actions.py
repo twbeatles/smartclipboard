@@ -284,7 +284,7 @@ class ClipboardActionsDialog(QDialog):
             name_item.setData(Qt.ItemDataRole.UserRole, aid)
             self.table.setItem(row_idx, 1, name_item)
             self.table.setItem(row_idx, 2, QTableWidgetItem(pattern))
-            self.table.setItem(row_idx, 3, QTableWidgetItem(ACTION_TYPE_NAMES.get(action_type, action_type)))
+            self.table.setItem(row_idx, 3, QTableWidgetItem(str(ACTION_TYPE_NAMES.get(action_type, action_type) or "-")))
             self.table.setItem(row_idx, 4, QTableWidgetItem(self._param_summary(action_type, params_json)))
             order_item = QTableWidgetItem(str(row_idx + 1))
             order_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)

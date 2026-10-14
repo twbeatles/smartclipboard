@@ -148,7 +148,8 @@ class ToastNotification(QFrame):
         QTimer.singleShot(self.duration, self.fade_out)
 
     def showEvent(self, a0: QShowEvent | None) -> None:
-        super().showEvent(a0)
+        if a0 is not None:
+            super().showEvent(a0)
         self.slide_in_animation.start()
 
     def fade_out(self):

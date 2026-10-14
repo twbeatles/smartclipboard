@@ -115,7 +115,7 @@ class ExportDialog(QDialog):
             "파일만": "FILE",
         }
         filter_type = type_map.get(self.type_combo.currentText(), "all")
-        date_from = self.date_from_input.date().toPyDate() if self.date_filter_enabled.isChecked() else None
+        date_from = self.date_from_input.date().toPython() if self.date_filter_enabled.isChecked() else None
 
         if not any([self.format_json.isChecked(), self.format_csv.isChecked(), self.format_md.isChecked()]):
             QMessageBox.warning(self, "경고", "하나 이상의 내보내기 형식을 선택하세요.")

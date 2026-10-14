@@ -290,7 +290,8 @@ class FloatingMiniWindow(QWidget):
             a0.accept()
 
     def showEvent(self, a0: QShowEvent | None) -> None:
-        super().showEvent(a0)
+        if a0 is not None:
+            super().showEvent(a0)
         self.load_items()
 
 
