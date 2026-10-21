@@ -8,6 +8,11 @@
 > G-3 서명 업데이트(`updater/` 검증·스테이징·적용 + `--smoke`/`--apply-update` CLI + Tauri 커맨드 5개 + 사이드바 UI, 16건 테스트).
 > 로컬에서 `cargo test` 전체 그린, `cargo clippy --all-targets -- -D warnings` 클린, `tsc --noEmit` 클린을 확인했다.
 > 단, 서명된 새 버전의 실제 cutting(릴리즈 태그·서명)은 CI 시크릿이 필요하므로 로컬이 아닌 릴리즈 워크플로에서 수행한다.
+>
+> **Follow-up 3 (2026-10-21):** G-3 업데이터의 Windows 실행 중 exe 교체 실패(WinError 5) 경로를 보완했다.
+> 복사 후 덮어쓰기 대신 설치본 rename → 스테이지드 rename 2단계 교체, 낡은 백업 덮어쓰기, 두 이동 사이 중단 시 백업 복구,
+> 헬퍼·`--smoke`·재기동 자식의 PyInstaller 부트로더 환경변수 제거. 레거시(`smartclipboard_core/update_installer.py`)·네이티브(`updater/installer.rs`) 동일 적용,
+> 회귀 테스트 추가(Python 6건·Rust 2건, G-3 18건). 상세는 `docs/NATIVE_PARITY_MATRIX.md` §4·§7을 참조한다.
 
 - 감사 일시: 2026-09-20 (UTC)
 - 감사 범위: 기능 구현·런타임 안정성 (스타일 제외)

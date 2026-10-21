@@ -127,9 +127,30 @@ fn looks_like_exe(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Bootloader env vars that must not leak into update child processes.
+/// (Parity with the Python `sanitized_update_env`: a helper or `--smoke`
+/// child that inherits a stale `_MEIPASS` probes a deleted temp dir.)
+pub fn is_bootloader_env_key(key: &str) -> bool {
+    key.starts_with("_MEI") || key.starts_with("_PYI")
+}
+
+/// Strip bootloader variables from a child [`Command`].
+pub fn strip_bootloader_env(cmd: &mut Command) {
+    let stale: Vec<String> = std::env::vars()
+        .map(|(k, _)| k)
+        .filter(|k| is_bootloader_env_key(k))
+        .collect();
+    for key in stale {
+        cmd.env_remove(key);
+    }
+}
+
 /// Default smoke check: run `target --smoke` with a timeout.
 pub fn default_smoke_check(target: &Path) -> bool {
-    let mut child = match Command::new(target).arg("--smoke").spawn() {
+    let mut cmd = Command::new(target);
+    cmd.arg("--smoke");
+    strip_bootloader_env(&mut cmd);
+    let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(_) => return false,
     };
@@ -164,8 +185,21 @@ pub struct ApplyRequest {
     pub smoke_check: Option<SmokeCheck>,
 }
 
+/// Recover a replacement interrupted between the two renames: the previous
+/// run moved `target` to `backup` but never moved the staged file into
+/// place, so `target` is missing. Rename the backup back before validating.
+pub fn recover_interrupted_replace(target: &Path, backup: &Path) {
+    if !target.exists() && backup.is_file() {
+        let _ = fs::rename(backup, target);
+    }
+}
+
 /// Atomically replace `target` with the staged file: validate paths and
-/// hashes, back up, replace, smoke-check, roll back on any failure.
+/// hashes, move the install aside with a rename (Windows cannot overwrite
+/// or delete a running exe, but it can rename it), move the staged file
+/// into place, smoke-check, roll back on any failure. A stale backup from
+/// a previous attempt is overwritten instead of refusing with
+/// "already exists", which used to wedge every later retry.
 pub fn apply_staged_update(req: &ApplyRequest) -> Result<UpdateApplyOutcome> {
     let fail = |message: String, rolled_back: bool| UpdateApplyOutcome {
         status: "failed".to_string(),
@@ -175,6 +209,8 @@ pub fn apply_staged_update(req: &ApplyRequest) -> Result<UpdateApplyOutcome> {
         message,
         rolled_back,
     };
+
+    recover_interrupted_replace(&req.target, &req.backup);
 
     if !looks_like_exe(&req.target) || !looks_like_exe(&req.staged) {
         return Ok(fail(
@@ -192,12 +228,6 @@ pub fn apply_staged_update(req: &ApplyRequest) -> Result<UpdateApplyOutcome> {
     if target_parent != req.staged.parent() || target_parent != req.backup.parent() {
         return Ok(fail(
             "Target, staged and backup must live in the same directory".to_string(),
-            false,
-        ));
-    }
-    if req.backup.exists() {
-        return Ok(fail(
-            "Backup path already exists; refusing to overwrite".to_string(),
             false,
         ));
     }
@@ -221,17 +251,32 @@ pub fn apply_staged_update(req: &ApplyRequest) -> Result<UpdateApplyOutcome> {
         ));
     }
 
-    if fs::copy(&req.target, &req.backup).is_err() {
+    // Discard a stale backup left by a previous attempt instead of refusing.
+    if req.backup.exists() {
+        let _ = fs::remove_file(&req.backup);
+    }
+    if req.backup.exists() {
+        return Ok(fail("Could not clear stale backup".to_string(), false));
+    }
+
+    // First move: the install aside. When this fails the install is still
+    // intact at `target`.
+    if fs::rename(&req.target, &req.backup).is_err() {
         return Ok(fail(
-            "Could not back up current executable".to_string(),
+            "Could not move current executable to backup".to_string(),
             false,
         ));
     }
     if fs::rename(&req.staged, &req.target).is_err() {
-        let _ = fs::remove_file(&req.backup);
+        let restored = fs::rename(&req.backup, &req.target).is_ok();
         return Ok(fail(
-            "Could not replace target executable".to_string(),
-            false,
+            if restored {
+                "Could not replace target executable; previous version restored".to_string()
+            } else {
+                "Could not replace target executable AND rollback failed; backup may remain"
+                    .to_string()
+            },
+            restored,
         ));
     }
 
@@ -240,8 +285,8 @@ pub fn apply_staged_update(req: &ApplyRequest) -> Result<UpdateApplyOutcome> {
         None => default_smoke_check(&req.target),
     };
     if !smoke_ok {
-        // Roll back: restore the backup, remove the bad target.
-        let _ = fs::remove_file(&req.target);
+        // Roll back: `rename` overwrites `target` on Windows, so no prior
+        // delete (which would hit WinError 5 on a held file).
         let restored = fs::rename(&req.backup, &req.target).is_ok();
         return Ok(UpdateApplyOutcome {
             status: "failed".to_string(),
@@ -455,17 +500,19 @@ pub fn launch_update_helper(
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        Command::new(helper_path)
-            .args(update_args)
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
+        let mut cmd = Command::new(helper_path);
+        cmd.args(update_args);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        strip_bootloader_env(&mut cmd);
+        cmd.spawn()
             .map_err(|e| AppError::Internal(format!("Cannot launch update helper: {}", e)))?;
     }
     #[cfg(not(windows))]
     {
-        Command::new(helper_path)
-            .args(update_args)
-            .spawn()
+        let mut cmd = Command::new(helper_path);
+        cmd.args(update_args);
+        strip_bootloader_env(&mut cmd);
+        cmd.spawn()
             .map_err(|e| AppError::Internal(format!("Cannot launch update helper: {}", e)))?;
     }
     Ok(())
@@ -553,16 +600,13 @@ pub fn run_apply_update_cli(argv: &[String]) -> i32 {
         eprintln!("update helper: parent pid must be positive");
         return 2;
     }
-    if args.backup.exists() {
-        let outcome = failed_outcome(
-            &args,
-            "Backup path already exists; refusing to overwrite".to_string(),
-            false,
-        );
-        let _ = write_update_result_to_path(&args.result_file, &outcome);
-        eprintln!("update helper: {}", outcome.message);
-        return 1;
-    }
+    // Stale backups are overwritten by `apply_staged_update`, and an
+    // interrupted two-rename replacement is recovered there, so a leftover
+    // backup must not fail the retry outright.
+    // Recover a half-finished replacement before the first apply attempt:
+    // without this the missing `target` would fail validation instead of
+    // being restored from `backup`.
+    recover_interrupted_replace(&args.target, &args.backup);
     let req = ApplyRequest {
         target: args.target.clone(),
         staged: args.staged.clone(),
@@ -580,12 +624,18 @@ pub fn run_apply_update_cli(argv: &[String]) -> i32 {
                 return 0;
             }
             Ok(outcome)
-                if outcome.message == "Could not replace target executable"
+                if (outcome
+                    .message
+                    .contains("Could not move current executable")
+                    || outcome
+                        .message
+                        .contains("Could not replace target executable")
+                    || outcome.message.contains("Could not clear stale backup"))
                     && Instant::now() < deadline =>
             {
-                // Parent still alive (target locked): drop our partial
-                // backup and retry until it exits or we time out.
-                let _ = fs::remove_file(&args.backup);
+                // Target still held (parent/al scanner): the failed first
+                // move leaves the install intact, so retry until it becomes
+                // movable or we time out.
                 std::thread::sleep(Duration::from_millis(300));
                 continue;
             }

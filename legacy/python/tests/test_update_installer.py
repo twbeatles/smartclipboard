@@ -6,6 +6,8 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
+from unittest import mock
+
 from smartclipboard_core.update_installer import (
     UpdateApplyError,
     apply_staged_update,
@@ -13,6 +15,7 @@ from smartclipboard_core.update_installer import (
     consume_update_result,
     prepare_staged_update,
     resolve_update_staging_root,
+    sanitized_update_env,
     update_result_path,
     write_update_result,
 )
@@ -123,6 +126,177 @@ class UpdateInstallerTests(unittest.TestCase):
         cleanup_update_backups(target, keep_count=1)
         remaining = list(self.tmp_path.glob("SmartClipboard.exe.v*.bak"))
         self.assertEqual(len(remaining), 1)
+
+    def test_stale_backup_is_overwritten_not_refused(self) -> None:
+        # Regression: a backup left by a previous failed attempt must not
+        # wedge later retries with "Update backup already exists".
+        target = self.tmp_path / "SmartClipboard.exe"
+        staged = self.tmp_path / "staged.exe"
+        backup = self.tmp_path / "SmartClipboard.exe.bak"
+        target.write_bytes(b"version 10.6")
+        staged.write_bytes(b"version 10.7")
+        backup.write_bytes(b"stale leftover")
+
+        apply_staged_update(
+            target=target,
+            staged=staged,
+            backup=backup,
+            smoke_runner=lambda path: path.read_bytes() == b"version 10.7",
+        )
+
+        self.assertEqual(target.read_bytes(), b"version 10.7")
+        self.assertEqual(backup.read_bytes(), b"version 10.6")
+        self.assertFalse(staged.exists())
+
+    def test_first_move_failure_leaves_install_intact(self) -> None:
+        # Windows can rename a running exe but not overwrite it; the first
+        # rename (install aside) must fail without touching the install.
+        import smartclipboard_core.update_installer as installer
+
+        target = self.tmp_path / "SmartClipboard.exe"
+        staged = self.tmp_path / "staged.exe"
+        backup = self.tmp_path / "SmartClipboard.exe.bak"
+        target.write_bytes(b"version 10.6")
+        staged.write_bytes(b"version 10.7")
+
+        real_replace = installer.os.replace
+
+        def fail_first_move(src: object, dst: object, *args: object, **kwargs: object) -> None:
+            if Path(str(src)) == target.resolve():
+                raise PermissionError("[WinError 5] Access is denied")
+            return real_replace(src, dst, *args, **kwargs)  # type: ignore[arg-type]
+
+        with mock.patch.object(installer.os, "replace", side_effect=fail_first_move):
+            with self.assertRaises(UpdateApplyError):
+                apply_staged_update(
+                    target=target,
+                    staged=staged,
+                    backup=backup,
+                    smoke_runner=lambda _path: True,
+                )
+
+        self.assertEqual(target.read_bytes(), b"version 10.6")
+        self.assertTrue(staged.is_file())
+
+    def test_second_move_failure_restores_backup(self) -> None:
+        import smartclipboard_core.update_installer as installer
+
+        target = self.tmp_path / "SmartClipboard.exe"
+        staged = self.tmp_path / "staged.exe"
+        backup = self.tmp_path / "SmartClipboard.exe.bak"
+        target.write_bytes(b"version 10.6")
+        staged.write_bytes(b"version 10.7")
+
+        real_replace = installer.os.replace
+        calls = {"count": 0}
+
+        def fail_second_move(src: object, dst: object, *args: object, **kwargs: object) -> None:
+            calls["count"] += 1
+            if calls["count"] == 2:
+                raise PermissionError("[WinError 5] Access is denied")
+            return real_replace(src, dst, *args, **kwargs)  # type: ignore[arg-type]
+
+        with mock.patch.object(installer.os, "replace", side_effect=fail_second_move):
+            with self.assertRaises(UpdateApplyError):
+                apply_staged_update(
+                    target=target,
+                    staged=staged,
+                    backup=backup,
+                    smoke_runner=lambda _path: True,
+                )
+
+        self.assertEqual(target.read_bytes(), b"version 10.6")
+
+    def test_interrupted_replacement_recovers_from_backup(self) -> None:
+        # Simulate a crash between the two renames: the old install sits at
+        # the backup path, the target path is missing, staged is intact.
+        target = self.tmp_path / "SmartClipboard.exe"
+        staged = self.tmp_path / "staged.exe"
+        backup = self.tmp_path / "SmartClipboard.exe.bak"
+        backup.write_bytes(b"version 10.6")
+        staged.write_bytes(b"version 10.7")
+        self.assertFalse(target.exists())
+
+        apply_staged_update(
+            target=target,
+            staged=staged,
+            backup=backup,
+            smoke_runner=lambda path: path.read_bytes() == b"version 10.7",
+        )
+
+        self.assertEqual(target.read_bytes(), b"version 10.7")
+        self.assertEqual(backup.read_bytes(), b"version 10.6")
+
+    def test_child_env_strips_bootloader_vars(self) -> None:
+        env = sanitized_update_env(
+            {
+                "_MEIPASS": "C:\\temp\\onefile",
+                "_MEI12345": "x",
+                "_PYI_ARCHIVE_FILE": "y",
+                "_PYI_PARENT_PROCESS_LEVEL": "1",
+                "PATH": "keep",
+                "SMARTCLIPBOARD_UPDATE_PUBLIC_KEY_B64": "keep2",
+            }
+        )
+        self.assertNotIn("_MEIPASS", env)
+        self.assertNotIn("_MEI12345", env)
+        self.assertNotIn("_PYI_ARCHIVE_FILE", env)
+        self.assertNotIn("_PYI_PARENT_PROCESS_LEVEL", env)
+        self.assertEqual(env["PATH"], "keep")
+
+    def test_helper_and_smoke_run_with_clean_env(self) -> None:
+        import smartclipboard_core.update_installer as installer
+
+        with mock.patch.object(
+            installer.os, "environ", {"_MEIPASS": "stale", "PATH": "keep"}
+        ):
+            # Helper spawn inherits a sanitized env.
+            staged = self.tmp_path / "staged.exe"
+            staged.write_bytes(b"x")
+            with (
+                mock.patch.object(
+                    installer.shutil, "copy2", return_value=None
+                ),
+                mock.patch.object(installer.subprocess, "Popen") as popen,
+            ):
+                installer.launch_update_helper(
+                    target=self.tmp_path / "SmartClipboard.exe",
+                    staged=staged,
+                    backup=self.tmp_path / "SmartClipboard.exe.bak",
+                    parent_pid=1234,
+                    expected_sha256="0" * 64,
+                    expected_size=1,
+                    result_file=self.tmp_path / "result.json",
+                )
+            _, kwargs = popen.call_args
+            helper_env = kwargs.get("env", {})
+            self.assertNotIn("_MEIPASS", helper_env)
+            self.assertEqual(helper_env.get("PATH"), "keep")
+
+            # Post-update relaunch uses the same sanitized env.
+            with mock.patch.object(installer.subprocess, "Popen") as relaunch_popen:
+                installer.relaunch_sanitized(["SmartClipboard.exe"])
+            _, relaunch_kwargs = relaunch_popen.call_args
+            relaunch_env = relaunch_kwargs.get("env", {})
+            self.assertNotIn("_MEIPASS", relaunch_env)
+            self.assertEqual(relaunch_env.get("PATH"), "keep")
+
+            # --smoke spawn inherits a sanitized env.
+            target = self.tmp_path / "SmartClipboard.exe"
+            target.write_bytes(b"v")
+            staged2 = self.tmp_path / "staged2.exe"
+            staged2.write_bytes(b"v")
+            backup2 = self.tmp_path / "SmartClipboard.exe.bak"
+            with mock.patch.object(
+                installer.subprocess, "run"
+            ) as run_mock:
+                run_mock.return_value.returncode = 0
+                installer.apply_staged_update(
+                    target=target, staged=staged2, backup=backup2
+                )
+            _, run_kwargs = run_mock.call_args
+            smoke_env = run_kwargs.get("env", {})
+            self.assertNotIn("_MEIPASS", smoke_env)
 
 
 if __name__ == "__main__":

@@ -132,6 +132,43 @@ def stream_update_artifact(manifest: ReleaseManifest) -> Iterable[bytes]:
             yield chunk
 
 
+#: PyInstaller onefile bootloader variables that must not leak into update
+#: child processes (helper, relaunch, ``--smoke``). A frozen child that
+#: inherits the parent's ``_MEIPASS`` looks into a temp dir that vanishes
+#: with the parent and fails to start.
+BOOTLOADER_ENV_PREFIXES = ("_MEI", "_PYI")
+
+
+def sanitized_update_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Return an env mapping without PyInstaller bootloader variables."""
+    env = dict(os.environ if base is None else base)
+    for key in [key for key in env if key.startswith(BOOTLOADER_ENV_PREFIXES)]:
+        del env[key]
+    return env
+
+
+def relaunch_sanitized(argv: list[str]) -> subprocess.Popen[bytes]:
+    """Restart ``argv`` without bootloader variables (post-update relaunch)."""
+    return subprocess.Popen(
+        argv,
+        close_fds=True,
+        env=sanitized_update_env(),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def _recover_interrupted_replacement(target: Path, backup: Path) -> None:
+    """Restore a replacement interrupted between the two renames.
+
+    If the previous run moved ``target`` to ``backup`` but crashed before
+    moving the staged file into place, ``target`` is missing and ``backup``
+    holds the previous install. Rename it back so the next attempt starts
+    from an intact install instead of failing with "target is missing".
+    """
+    if not target.exists() and backup.is_file():
+        os.replace(backup, target)
+
+
 def _validate_apply_paths(target: Path, staged: Path, backup: Path) -> None:
     paths = [target.resolve(), staged.resolve(), backup.resolve()]
     if len(set(paths)) != 3:
@@ -142,8 +179,8 @@ def _validate_apply_paths(target: Path, staged: Path, backup: Path) -> None:
         raise ValueError("Update backup must stay in the target install directory")
     if not target.is_file() or not staged.is_file():
         raise FileNotFoundError("Update target or staged artifact is missing")
-    if backup.exists():
-        raise FileExistsError(f"Update backup already exists: {backup}")
+    # A stale backup from a previous attempt is overwritten below; refusing
+    # here would wedge every later retry with "backup already exists".
     backup.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -176,6 +213,7 @@ def apply_staged_update(
     target_path = Path(target).resolve()
     staged_path = Path(staged).resolve()
     backup_path = Path(backup).resolve()
+    _recover_interrupted_replacement(target_path, backup_path)
     _validate_apply_paths(target_path, staged_path, backup_path)
     if expected_size is not None and staged_path.stat().st_size != int(expected_size):
         raise ValueError("Update artifact size mismatch before replacement")
@@ -186,7 +224,21 @@ def apply_staged_update(
                 digest.update(chunk)
         if digest.hexdigest().lower() != str(expected_sha256).strip().lower():
             raise ValueError("Update artifact hash mismatch before replacement")
-    shutil.copy2(target_path, backup_path)
+    # A stale backup from a previous attempt is discarded: the old code
+    # refused here with "backup already exists" and wedged every retry.
+    try:
+        backup_path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise UpdateApplyError(f"Update failed before replacement: {exc}") from exc
+    # Windows cannot overwrite or delete a running exe (WinError 5), but it
+    # can rename it. Move the install aside first: if this rename fails the
+    # install is still intact at ``target``.
+    try:
+        os.replace(target_path, backup_path)
+    except Exception as exc:
+        raise UpdateApplyError(f"Update failed before replacement: {exc}") from exc
     try:
         os.replace(staged_path, target_path)
         if smoke_runner is None:
@@ -195,6 +247,7 @@ def apply_staged_update(
                 timeout=60,
                 check=False,
                 capture_output=True,
+                env=sanitized_update_env(),
             )
             smoke_ok = completed.returncode == 0
         else:
@@ -249,18 +302,22 @@ def launch_update_helper(
             str(Path(result_file).resolve()),
         ],
         close_fds=True,
+        env=sanitized_update_env(),
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
 __all__ = [
+    "BOOTLOADER_ENV_PREFIXES",
     "UpdateApplyError",
     "apply_staged_update",
     "cleanup_update_backups",
     "consume_update_result",
     "launch_update_helper",
     "prepare_staged_update",
+    "relaunch_sanitized",
     "resolve_update_staging_root",
+    "sanitized_update_env",
     "stream_update_artifact",
     "update_result_path",
     "write_update_result",

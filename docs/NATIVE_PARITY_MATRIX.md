@@ -70,7 +70,7 @@
 
 ## 3. 검증 통과 요약
 
-- **Rust 테스트**: 전체 그린 (G-3 업데이터 16건 + G-4 fetch_title 12건 포함; vault/pipeline/parity 스위트 포함)
+- **Rust 테스트**: 전체 그린 (G-3 업데이터 18건 + G-4 fetch_title 12건 포함; vault/pipeline/parity 스위트 포함)
 - **Rust Clippy**: `cargo clippy --all-targets -- -D warnings` 클린 (CI 게이트와 동일 조건)
 - **Frontend 빌드**: 변경 후 재확인 필요 (`npm run build`)
 - **Python 회귀 테스트**: 230개 전체 통과 (`pytest`, 레거시 기준)
@@ -96,7 +96,7 @@
 | ISSUE-010 보존 미집행 | ✅ 수정 | `purge_expired_trash` + `max_history` + 기동 purge + 캡처 후 enforce |
 | G-1 쓰기 IPC 부재 | ✅ 수정 | 32개 신규 command 등록 (히스토리/컬렉션/스니펫/설정/팔레트/IO/Vault) |
 | G-2 단축키·미니윈도우 | ✅ 수정 | Alt+V / Ctrl+Shift+Z 등록 + 실패 시 UI 이벤트 |
-| G-3 네이티브 자동 업데이트 | ✅ 수정 | `updater/` 검증·스테이징·적용 + CLI + 커맨드 5개 + UI, 릴리즈 서명 발행 |
+| G-3 네이티브 자동 업데이트 | ✅ 수정 | `updater/` 검증·스테이징·적용 + CLI + 커맨드 5개 + UI, 릴리즈 서명 발행. 2026-10-21 rename 기반 원자적 교체로 보완(WinError 5 회피): 설치본 rename → 스테이지드 rename, 낡은 백업 덮어쓰기, 두 이동 사이 중단 시 백업 복구, 헬퍼·`--smoke` 자식 부트로더 환경변수 제거 |
 | G-4 URL 제목 자동화 | ✅ 수정 | SSRF 차단·HTML 제한 읽기·256개/24h 캐시 + 파이프라인 연동 |
 | G-5 tray 상태 이원화 | ✅ 수정 | IPC + emit + settings 영속 + 기동 복원 |
 | G-6 CSV import·Markdown | ✅ 수정 | 구현됨 |
@@ -140,6 +140,7 @@
 | 창/트레이 | 메인 창 닫기 = 트레이 숨김, 트레이 좌클릭 복원, 미니 창 blur 시 숨김, 설정 메뉴는 `open_settings` 이벤트 |
 | 팔레트 | 액션별 `effect`(`replace`/`copy`/`view`): SHA-256은 클립보드만, 통계는 표시만 |
 | 보안 보관함 | 다이얼로그를 닫으면 백엔드도 잠금 |
+| 업데이터 보완 | 실행 중 exe 덮어쓰기(WinError 5) 대신 rename 2단계 교체. 낡은 백업 덮어쓰기, 중단 시 백업 복구, 헬퍼·`--smoke`·재기동 자식 부트로더 환경변수 제거. 레거시(`update_installer.py`)·네이티브(`updater/installer.rs`) 동일 적용 + 회귀 테스트 |
 | 검증 | `cargo clippy`·`cargo test` 전 스위트 통과(신규 `test_set_collection_assign_and_detach` 포함), `npm run build` 통과 |
 
 미검증: 실제 Tauri 앱에서의 미니 창 붙여넣기·트레이·창 닫기 동작은 수동 확인 필요.

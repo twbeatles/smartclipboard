@@ -12,10 +12,11 @@ use ed25519_dalek::{Signer, SigningKey};
 use smartclipboard_native_lib::errors::AppError;
 use smartclipboard_native_lib::updater::{
     apply_staged_update, canonical_manifest_payload, cleanup_old_backups, consume_update_result,
-    default_manifest_url, fetch_https, is_newer_version, parse_apply_update_args,
-    resolve_update_staging_root, stage_artifact, verify_release_manifest, write_update_result,
-    write_update_result_to_path, ApplyRequest, ReleaseManifest, UpdateApplyOutcome,
-    ARTIFACT_MAX_BYTES, EMBEDDED_UPDATE_PUBLIC_KEY_B64,
+    default_manifest_url, fetch_https, is_bootloader_env_key, is_newer_version,
+    parse_apply_update_args, recover_interrupted_replace, resolve_update_staging_root,
+    stage_artifact, verify_release_manifest, write_update_result, write_update_result_to_path,
+    ApplyRequest, ReleaseManifest, UpdateApplyOutcome, ARTIFACT_MAX_BYTES,
+    EMBEDDED_UPDATE_PUBLIC_KEY_B64,
 };
 use tempfile::TempDir;
 
@@ -406,7 +407,7 @@ fn test_apply_refuses_unsafe_layouts() {
     let target = write_exe(dir.path(), "App.exe", b"old");
     let staged = write_exe(dir.path(), "App-Staged.exe", b"new");
     let manifest = manifest_for_bytes(b"new");
-    let base = ApplyRequest {
+    let retry = ApplyRequest {
         target: target.clone(),
         staged: staged.clone(),
         backup: dir.path().join("App.exe.v9.bak"),
@@ -441,13 +442,16 @@ fn test_apply_refuses_unsafe_layouts() {
     };
     assert_eq!(apply_staged_update(&bad).expect("refuse").status, "failed");
 
-    // Pre-existing backup is never overwritten.
+    // A stale backup from a previous attempt is overwritten, not refused:
+    // refusing here used to wedge every retry with "already exists".
     fs::write(dir.path().join("App.exe.v9.bak"), b"someone").expect("write");
-    assert_eq!(apply_staged_update(&base).expect("refuse").status, "failed");
+    let outcome = apply_staged_update(&retry).expect("stale backup overwritten");
+    assert_eq!(outcome.status, "applied");
+    assert_eq!(fs::read(&target).expect("read"), b"new");
     assert_eq!(
-        fs::read(target).expect("read"),
+        fs::read(dir.path().join("App.exe.v9.bak")).expect("read"),
         b"old",
-        "target untouched on refusal"
+        "stale bytes replaced by the previous install"
     );
 }
 
@@ -566,6 +570,59 @@ fn test_fetch_https_rejects_plain_http_without_network() {
     )
     .expect_err("http must be rejected");
     assert!(err.to_string().contains("https"), "got: {}", err);
+}
+
+#[test]
+fn test_apply_recovers_interrupted_replacement() {
+    // A crash between the two renames leaves the old install at `backup`
+    // with `target` missing; the next apply must restore it and proceed.
+    let dir = TempDir::new().expect("tempdir");
+    let target = dir.path().join("App.exe");
+    let backup = dir.path().join("App.exe.v10.8.bak");
+    let staged = write_exe(dir.path(), "App-Staged.exe", b"v10.8-binary");
+    fs::write(&backup, b"v10.7-binary").expect("write backup");
+    assert!(!target.exists());
+    let manifest = manifest_for_bytes(b"v10.8-binary");
+
+    // The standalone recovery helper restores the install on its own.
+    recover_interrupted_replace(&target, &backup);
+    assert_eq!(fs::read(&target).expect("read"), b"v10.7-binary");
+    assert!(!backup.exists());
+
+    // And the full apply path recovers implicitly when the crash state is
+    // still present (re-create it: move target back to backup).
+    fs::rename(&target, &backup).expect("re-create crash state");
+    let staged2 = write_exe(dir.path(), "App-Staged2.exe", b"v10.8-binary");
+    let _ = fs::remove_file(&staged);
+    let req = ApplyRequest {
+        target: target.clone(),
+        staged: staged2.clone(),
+        backup: backup.clone(),
+        expected_sha256: manifest.artifact_sha256.clone(),
+        expected_size: manifest.artifact_size,
+        version: "10.8".to_string(),
+        smoke_check: Some(Box::new(|_| true)),
+    };
+    let outcome = apply_staged_update(&req).expect("apply after interrupt");
+    assert_eq!(outcome.status, "applied");
+    assert_eq!(fs::read(&target).expect("read"), b"v10.8-binary");
+    assert_eq!(fs::read(&backup).expect("read"), b"v10.7-binary");
+    assert!(!staged2.exists());
+}
+
+#[test]
+fn test_bootloader_env_keys_are_stripped() {
+    // Onefile children must not inherit a stale `_MEIPASS`: the parent's
+    // temp dir vanishes with it.
+    assert!(is_bootloader_env_key("_MEIPASS"));
+    assert!(is_bootloader_env_key("_MEI12345"));
+    assert!(is_bootloader_env_key("_PYI_ARCHIVE_FILE"));
+    assert!(is_bootloader_env_key("_PYI_PARENT_PROCESS_LEVEL"));
+    assert!(!is_bootloader_env_key("PATH"));
+    assert!(!is_bootloader_env_key(
+        "SMARTCLIPBOARD_UPDATE_PUBLIC_KEY_B64"
+    ));
+    assert!(!is_bootloader_env_key(""));
 }
 
 #[test]
