@@ -1,10 +1,10 @@
 {
   "payload": {
-    "artifact_url": "https://github.com/twbeatles/smartclipboard/releases/download/v10.8/SmartClipboard-v10.8.exe",
-    "expires_at": "2027-09-20T08:54:07Z",
-    "sha256": "1008e2f5b044f2e008445a9f1512e8043472c1613a07d97ef940664b08d811c6",
-    "size": 40007752,
-    "version": "10.8"
+    "artifact_url": "https://github.com/twbeatles/smartclipboard/releases/download/v10.9/SmartClipboard-v10.9.exe",
+    "expires_at": "2027-10-21T06:39:26Z",
+    "sha256": "daf549a65cdd38c6827df1e3340a5148dfc02c373ac03e889f2d78e545a1664f",
+    "size": 40471299,
+    "version": "10.9"
   },
-  "signature": "1adOU0SsoLOmGHVxJUp5Rya2jRNCNh5vn6Elp9mGP0hnq5xPjL5i4OXHSct+V7sUYfKDgLbQpg8XgKoYbcj2CA=="
+  "signature": "nn7BxviI1zfJhPxaADToZZI5gv4MqoZSazy2iWmkicSw5v3sVRqfNcI+RM6cH4haurXbYJerg7vTYHKj+DNRCg=="
 }
