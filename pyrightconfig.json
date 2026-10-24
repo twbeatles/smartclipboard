@@ -1,0 +1,27 @@
+{
+  "typeCheckingMode": "standard",
+  "include": [
+    "legacy/python/클립모드 매니저.py",
+    "legacy/python/smartclipboard_app",
+    "legacy/python/smartclipboard_core",
+    "legacy/python/tests"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "build",
+    "dist",
+    "legacy/python/smartclipboard_app/legacy_main_src.py",
+    "legacy/클립모드 매니저 (legacy).py"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "legacy/python",
+      "extraPaths": [
+        "legacy/python"
+      ]
+    }
+  ],
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none"
+}
